@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { blocks } from "./layout.ts";
 import { homeSkills, projectSkills, type Scope, short } from "./paths.ts";
-import { table } from "./table.ts";
 
 export type Source = { name: string; dir: string };
 
@@ -89,17 +89,14 @@ export function available(cwd: string): Skill[] {
 }
 
 export function render(list: Skill[], verbose = false): string {
-  const rows = verbose
-    ? [["SKILL", "DESCRIPTION", "SCOPE", "SOURCE", "FILE"]]
-    : [["SKILL", "DESCRIPTION"]];
-  for (const skill of list) {
-    rows.push(
-      verbose
-        ? [skill.name, skill.description, skill.scope, skill.source, short(skill.at)]
-        : [skill.name, skill.description],
-    );
-  }
-  return table(rows);
+  return blocks(
+    list.map((skill) => ({
+      name: skill.name,
+      tokens: [],
+      description: skill.description,
+      meta: verbose ? `${skill.scope}  ${skill.source}  ${short(skill.at)}` : "",
+    })),
+  );
 }
 
 export type Resolved = { file: string } | { file: undefined; searched: string[] };

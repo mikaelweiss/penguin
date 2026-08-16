@@ -167,12 +167,11 @@ test("list skills shows name and description", (t) => {
   const listed = box.wa("list", "skills");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^SKILL\s+DESCRIPTION$/m);
-  assert.match(listed.stdout, /^house-style\s*$/m);
-  assert.match(listed.stdout, /^wa-triage\s*$/m);
-  assert.match(listed.stdout, /^review\s+Reviews a working tree\.$/m);
-  assert.match(listed.stdout, /^migrate\s*$/m);
-  assert.doesNotMatch(listed.stdout, /SCOPE/);
+  assert.match(listed.stdout, /^house-style$/m);
+  assert.match(listed.stdout, /^wa-triage$/m);
+  assert.match(listed.stdout, /^review\n {2}Reviews a working tree\.$/m);
+  assert.match(listed.stdout, /^migrate$/m);
+  assert.doesNotMatch(listed.stdout, /DESCRIPTION/);
 });
 
 test("list skills --verbose adds scope, source, and file", (t) => {
@@ -186,11 +185,10 @@ test("list skills --verbose adds scope, source, and file", (t) => {
   const listed = box.wa("list", "skills", "--verbose");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^SKILL\s+DESCRIPTION\s+SCOPE\s+SOURCE\s+FILE$/m);
-  assert.match(listed.stdout, /^house-style\s+local\s+wa\s+/m);
-  assert.match(listed.stdout, /^wa-triage\s+global\s+wa\s+/m);
-  assert.match(listed.stdout, /^review\s+global\s+claude\s+~\/\.claude\/skills\/review$/m);
-  assert.match(listed.stdout, /^migrate\s+global\s+agents\s+~\/\.agents\/skills\/migrate$/m);
+  assert.match(listed.stdout, /^house-style\n {2}local {2}wa {2}\S/m);
+  assert.match(listed.stdout, /^wa-triage\n {2}global {2}wa {2}\S/m);
+  assert.match(listed.stdout, /^ {2}global {2}claude {2}~\/\.claude\/skills\/review$/m);
+  assert.match(listed.stdout, /^ {2}global {2}agents {2}~\/\.agents\/skills\/migrate$/m);
 });
 
 test("list skills shows the winner of a shared name once", (t) => {
@@ -203,7 +201,7 @@ test("list skills shows the winner of a shared name once", (t) => {
 
   const rows = listed.stdout.split("\n").filter((line) => line.startsWith("review"));
   assert.equal(rows.length, 1, listed.stdout);
-  assert.match(rows[0] ?? "", /^review\s*$/);
+  assert.equal(rows[0], "review");
 });
 
 test("list with no target names the two targets and fails", (t) => {

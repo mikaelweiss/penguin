@@ -1,6 +1,15 @@
 import type { z } from "zod";
 import { WaError } from "./errors.ts";
 
+export function usage(schema: z.ZodObject): string[] {
+  const shape = schema.shape as Record<string, unknown>;
+  return Object.entries(shape).map(([name, field]) => {
+    const param = inspect(field);
+    const token = param.kind === "boolean" ? `--${name}` : `--${name} <${placeholder(param)}>`;
+    return param.optional ? `[${token}]` : token;
+  });
+}
+
 export function parseParams(schema: z.ZodObject, argv: string[]): Record<string, unknown> {
   const shape = schema.shape as Record<string, unknown>;
   const values: Record<string, unknown> = {};
@@ -29,7 +38,7 @@ export function parseParams(schema: z.ZodObject, argv: string[]): Record<string,
         .join(" ");
       throw new WaError(`unknown param --${name}. This workflow takes: ${known || "no params"}`);
     }
-    const kind = baseType(field);
+    const kind = inspect(field).kind;
     if (raw === undefined) {
       if (kind === "boolean") {
         raw = negated ? "false" : "true";
@@ -74,16 +83,42 @@ function coerce(kind: string, name: string, raw: string): unknown {
   return raw;
 }
 
-function baseType(field: unknown): string {
-  let current = field as { _zod?: { def?: { type?: string; innerType?: unknown } } };
+type Param = { kind: string; optional: boolean; choices: string[] };
+
+type Def = {
+  type?: string;
+  innerType?: unknown;
+  entries?: Record<string, unknown>;
+  values?: unknown[];
+};
+
+const OPTIONAL = new Set(["optional", "default", "prefault", "catch"]);
+
+function inspect(field: unknown): Param {
+  let current = field as { _zod?: { def?: Def } };
+  let optional = false;
   for (let depth = 0; depth < 16; depth += 1) {
     const def = current?._zod?.def;
-    if (def === undefined) return "unknown";
+    if (def === undefined) break;
+    if (def.type !== undefined && OPTIONAL.has(def.type)) optional = true;
     if (def.innerType !== undefined) {
       current = def.innerType as typeof current;
       continue;
     }
-    return def.type ?? "unknown";
+    return { kind: def.type ?? "unknown", optional, choices: choicesOf(def) };
   }
-  return "unknown";
+  return { kind: "unknown", optional, choices: [] };
+}
+
+function choicesOf(def: Def): string[] {
+  if (def.entries !== undefined) return Object.values(def.entries).map(String);
+  if (Array.isArray(def.values)) return def.values.map(String);
+  return [];
+}
+
+function placeholder(param: Param): string {
+  if (param.choices.length > 0) return param.choices.join("|");
+  if (param.kind === "number") return "number";
+  if (param.kind === "string") return "text";
+  return "value";
 }

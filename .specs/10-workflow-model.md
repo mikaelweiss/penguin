@@ -15,7 +15,7 @@ export default workflow({
 
 `description` is required: a non-empty string. `wa list workflows` reads it from the export. A file with no description fails to load.
 
-`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. A URL or file path is text the workflow hands to a command.
+`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. `wa list workflows` prints the fields as the params the workflow takes. A URL or file path is text the workflow hands to a command.
 
 wa imports the module and reads the exported params schema without calling `run`. Module top level is side-effect-free.
 

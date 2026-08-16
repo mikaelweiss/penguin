@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import * as journal from "./journal.ts";
+import { table } from "./layout.ts";
 import { holder } from "./lock.ts";
 import { runDir, runsRoot, short } from "./paths.ts";
-import { table } from "./table.ts";
 
 export type Row = {
   run: string;

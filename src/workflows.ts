@@ -1,21 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
+import { blocks } from "./layout.ts";
 import { load } from "./loader.ts";
+import { usage } from "./params.ts";
 import { home, projectHome, type Scope, short } from "./paths.ts";
-import { table } from "./table.ts";
 
-export type Found = { name: string; scope: Scope; file: string; description: string };
+export type Details = { description: string; params: string[] };
+export type Found = { name: string; scope: Scope; file: string } & Details;
 
-export function found(cwd: string): Omit<Found, "description">[] {
+export function found(cwd: string): Omit<Found, keyof Details>[] {
   return [...scan(projectHome(cwd), "local"), ...scan(home(), "global")];
 }
 
 export async function listed(cwd: string): Promise<Found[]> {
   return Promise.all(
-    found(cwd).map(async (entry) => ({
-      ...entry,
-      description: await descriptionOf(entry.file),
-    })),
+    found(cwd).map(async (entry) => ({ ...entry, ...(await detailsOf(entry.file)) })),
   );
 }
 
@@ -28,28 +27,26 @@ export function searched(cwd: string): string[] {
 }
 
 export function render(list: Found[], verbose = false): string {
-  const rows = verbose
-    ? [["WORKFLOW", "DESCRIPTION", "SCOPE", "FILE"]]
-    : [["WORKFLOW", "DESCRIPTION"]];
-  for (const entry of list) {
-    rows.push(
-      verbose
-        ? [entry.name, entry.description, entry.scope, short(entry.file)]
-        : [entry.name, entry.description],
-    );
-  }
-  return table(rows);
+  return blocks(
+    list.map((entry) => ({
+      name: entry.name,
+      tokens: entry.params,
+      description: entry.description,
+      meta: verbose ? `${entry.scope}  ${short(entry.file)}` : "",
+    })),
+  );
 }
 
-async function descriptionOf(file: string): Promise<string> {
+async function detailsOf(file: string): Promise<Details> {
   try {
-    return (await load(file)).description.trim();
+    const definition = await load(file);
+    return { description: definition.description.trim(), params: usage(definition.params) };
   } catch {
-    return "";
+    return { description: "", params: [] };
   }
 }
 
-function scan(dir: string, scope: Scope): Omit<Found, "description">[] {
+function scan(dir: string, scope: Scope): Omit<Found, keyof Details>[] {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir, { withFileTypes: true })

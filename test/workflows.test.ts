@@ -4,19 +4,19 @@ import path from "node:path";
 import test from "node:test";
 import { sandbox } from "./helpers.ts";
 
-const writes = (text: string) => `import { workflow } from "wa";
+const writes = (text: string, params = "z.object({})") => `import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
   description: "${text}",
-  params: z.object({}),
+  params: ${params},
   async run({ step }) {
     await step.command("sh -c 'echo ${text} >> out.txt'");
   },
 });
 `;
 
-test("list workflows shows name and description", (t) => {
+test("list workflows shows the description under the name", (t) => {
   const box = sandbox(t);
   box.write(".wa/ticket.ts", writes("local"));
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
@@ -24,11 +24,45 @@ test("list workflows shows name and description", (t) => {
   const listed = box.wa("list", "workflows");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^WORKFLOW\s+DESCRIPTION$/m);
-  assert.match(listed.stdout, /^ticket\s+local$/m);
-  assert.match(listed.stdout, /^release\s+global$/m);
-  assert.doesNotMatch(listed.stdout, /SCOPE/);
+  assert.match(listed.stdout, /^ticket\n {2}local$/m);
+  assert.match(listed.stdout, /^release\n {2}global$/m);
+  assert.doesNotMatch(listed.stdout, /DESCRIPTION/);
   assert.doesNotMatch(listed.stdout, /run one with/);
+});
+
+test("list workflows shows the params next to the name", (t) => {
+  const box = sandbox(t);
+  box.write(
+    ".wa/ticket.ts",
+    writes(
+      "local",
+      "z.object({ ticket: z.string(), rounds: z.number().default(3), draft: z.boolean().optional(), mode: z.enum(['fast', 'slow']) })",
+    ),
+  );
+
+  const listed = box.wa("list", "workflows");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(
+    listed.stdout,
+    /^ticket {2}--ticket <text> \[--rounds <number>\] \[--draft\] --mode <fast\|slow>$/m,
+  );
+});
+
+test("list workflows wraps a long description and a long param line", (t) => {
+  const box = sandbox(t);
+  const long = "wraps ".repeat(40).trim();
+  const many = Array.from({ length: 12 }, (_, index) => `p${index}: z.string()`).join(", ");
+  box.write(".wa/ticket.ts", writes(long, `z.object({ ${many} })`));
+
+  const listed = box.wa("list", "workflows");
+
+  assert.equal(listed.code, 0, listed.output);
+  const lines = listed.stdout.split("\n").filter((line) => line !== "");
+  assert.ok(lines.length > 3, listed.stdout);
+  for (const line of lines) assert.ok(line.length <= 80, `${line.length}: ${line}`);
+  for (const line of lines.slice(1)) assert.match(line, /^ {2}\S/);
+  assert.equal(listed.stdout.replace(/\s+/g, " ").includes(long), true);
 });
 
 test("list workflows --verbose adds scope and file", (t) => {
@@ -39,9 +73,14 @@ test("list workflows --verbose adds scope and file", (t) => {
   const listed = box.wa("list", "workflows", "--verbose");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^WORKFLOW\s+DESCRIPTION\s+SCOPE\s+FILE$/m);
-  assert.match(listed.stdout, new RegExp(`^ticket\\s+local\\s+local\\s+${path.join(box.project, ".wa")}`, "m"));
-  assert.match(listed.stdout, new RegExp(`^release\\s+global\\s+global\\s+${box.home}`, "m"));
+  assert.match(
+    listed.stdout,
+    new RegExp(`^ticket\\n {2}local\\n {2}local {2}${path.join(box.project, ".wa")}`, "m"),
+  );
+  assert.match(
+    listed.stdout,
+    new RegExp(`^release\\n {2}global\\n {2}global {2}${box.home}`, "m"),
+  );
 });
 
 test("wa with no command prints the usage", (t) => {

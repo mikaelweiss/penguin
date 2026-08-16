@@ -67,14 +67,14 @@ export default workflow({
 ## Run it
 
 ```sh
-wa list workflows                 # name and description
+wa list workflows                 # name, params, and description
 wa list skills --verbose          # plus scope, source, and file
 wa run ticket --ticket ABC-123    # by name, or by path: wa run ./ticket.ts
 wa ps                             # every run and its state
 wa resume ticket-1 approve
 ```
 
-`list` is how you see what wa has. `--verbose` adds where each row comes from. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them. It opens with one line, the run name and the agent it uses:
+`list` is how you see what wa has. Each entry is a block: the name and the params it takes, then the description under it. `--verbose` adds a line for where the entry comes from. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them. It opens with one line, the run name and the agent it uses:
 
 ```
 $ wa run task --task "rename the flag"
@@ -84,13 +84,26 @@ run task-1 started, agent claude -p
 Bare `wa` prints the usage. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
 
 ```
-$ wa list skills
-SKILL      DESCRIPTION
-wa-triage  Decides if a ticket is ready to work on...
-review     Reviews a working tree against its acceptance checks...
+$ wa list workflows
+fix  --bug <text>
+  reproduce a bug, fix it against the repo checks, then the pull request
+
+ticket  --ticket <text>
+  ticket to merged PR: triage, plan, implement, review, then the pull request
 ```
 
-One row per name, in the order a step resolves them. A name held by two directories shows the winner.
+A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name <one|two>`. Brackets mark an optional param. A long description wraps to the width of the terminal.
+
+```
+$ wa list skills
+wa-triage
+  Decides if a ticket is ready to work on.
+
+review
+  Reviews a working tree against its acceptance checks.
+```
+
+One block per name, in the order a step resolves them. A name held by two directories shows the winner.
 
 ## The step API
 
