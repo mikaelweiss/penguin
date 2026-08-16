@@ -50,6 +50,7 @@ import { z } from "zod";
 const Triage = z.object({ actionable: z.boolean(), reason: z.string() });
 
 export default workflow({
+  description: "ticket to merged PR",
   params: z.object({ ticket: z.string() }),
 
   async run({ params, step, gate }) {
@@ -66,21 +67,20 @@ export default workflow({
 ## Run it
 
 ```sh
-wa list workflows                 # the workflows you can run
-wa list skills                    # the skills, and where each one comes from
+wa list workflows                 # name and description
+wa list skills --verbose          # plus scope, source, and file
 wa run ticket --ticket ABC-123    # by name, or by path: wa run ./ticket.ts
 wa ps                             # every run and its state
 wa resume ticket-1 approve
 ```
 
-`list` is how you see what wa has. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them, as bare `wa` does. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
+`list` is how you see what wa has. `--verbose` adds where each row comes from. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them. Bare `wa` prints the usage. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
 
 ```
 $ wa list skills
-SKILL      SCOPE   SOURCE  FILE
-wa-triage  global  wa      ~/.wa/skills/wa-triage
-review     global  claude  ~/.claude/skills/review
-migrate    global  agents  ~/.agents/skills/migrate
+SKILL      DESCRIPTION
+wa-triage  Decides if a ticket is ready to work on...
+review     Reviews a working tree against its acceptance checks...
 ```
 
 One row per name, in the order a step resolves them. A name held by two directories shows the winner.

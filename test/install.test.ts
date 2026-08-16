@@ -25,7 +25,7 @@ test("a fresh install leaves ticket in the workflow list", (t) => {
   const listed = box.wa("list", "workflows");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^ticket\s+global\s+/m);
+  assert.match(listed.stdout, /^ticket\s+ticket to merged PR:/m);
 });
 
 test("install on a home that exists copies nothing", (t) => {

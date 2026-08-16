@@ -9,6 +9,7 @@ const Review = z.object({
 });
 
 export default workflow({
+  description: "ticket to merged PR: triage, plan, implement, review, then the pull request",
   params: z.object({ ticket: z.string() }),
 
   async run({ params, step, gate }) {

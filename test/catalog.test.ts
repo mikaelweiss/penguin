@@ -130,6 +130,7 @@ test("a workflow loads inside a repo whose package.json has no type field", (t) 
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({ tag: z.string() }),
   async run({ params, step }) {
     await step.command(\`sh -c 'echo \${params.tag} >> out.txt'\`);

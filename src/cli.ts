@@ -15,7 +15,7 @@ import * as workflows from "./workflows.ts";
 const usage = `wa runs one workflow file as a foreground process.
 
 usage:
-  wa list workflows|skills                  show what you can run and what an agent can follow
+  wa list workflows|skills [--verbose]      show what you can run and what an agent can follow
   wa run <workflow> [--param value ...]     validate params, create the run, execute it
   wa ps                                     show every run
   wa resume <run> [reply]                   replay the journal, then continue
@@ -44,18 +44,27 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (command === "sync-skills") return syncScopes(rest);
-  if (command === undefined) return listWorkflows(true);
-  if (command === "help" || command === "--help" || command === "-h") {
+  if (
+    command === undefined ||
+    command === "help" ||
+    command === "--help" ||
+    command === "-h"
+  ) {
     process.stdout.write(usage);
     return 0;
   }
   throw new WaError(`unknown command ${command}\n\n${usage}`);
 }
 
-function listWhat(argv: string[]): number {
-  const [what] = argv;
-  if (what === "workflows") return listWorkflows();
-  if (what === "skills") return listSkills();
+async function listWhat(argv: string[]): Promise<number> {
+  const flags = argv.filter((arg) => arg.startsWith("-"));
+  const rest = argv.filter((arg) => !arg.startsWith("-"));
+  const unknown = flags.find((flag) => flag !== "--verbose" && flag !== "-v");
+  if (unknown !== undefined) throw new WaError(`unknown option ${unknown}\n\n${usage}`);
+  const verbose = flags.length > 0;
+  const [what] = rest;
+  if (what === "workflows") return listWorkflows(false, verbose);
+  if (what === "skills") return listSkills(verbose);
   if (what === undefined) {
     throw new WaError("wa list needs a target: wa list workflows or wa list skills");
   }
@@ -63,25 +72,25 @@ function listWhat(argv: string[]): number {
   throw new WaError(`wa list takes workflows or skills, not ${what}\n\n${usage}`);
 }
 
-function listWorkflows(hint = false): number {
-  const list = workflows.found(process.cwd());
+async function listWorkflows(hint = false, verbose = false): Promise<number> {
+  const list = await workflows.listed(process.cwd());
   if (list.length === 0) {
     say(`no workflow file in ${workflows.searched(process.cwd()).map(short).join(" or ")}`);
     if (hint) process.stdout.write(`\n${usage}`);
     return 0;
   }
-  say(workflows.render(list));
+  say(workflows.render(list, verbose));
   if (hint) say("\nrun one with: wa run <workflow> [--param value ...]");
   return 0;
 }
 
-function listSkills(): number {
+function listSkills(verbose = false): number {
   const list = skills.available(process.cwd());
   if (list.length === 0) {
     say("no skill yet. wa sync-skills links the ones you have");
     return 0;
   }
-  say(skills.render(list));
+  say(skills.render(list, verbose));
   return 0;
 }
 

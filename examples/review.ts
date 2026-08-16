@@ -7,6 +7,7 @@ const Findings = z.object({
 });
 
 export default workflow({
+  description: "review an open pull request into a findings file, then post it as a comment",
   params: z.object({ pr: z.string() }),
 
   async run({ params, step, gate }) {

@@ -7,10 +7,13 @@ import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
+  description: "one line of what this workflow does",
   params: z.object({ /* initial inputs */ }),
   async run(ctx) { /* body */ },
 });
 ```
+
+`description` is required: a non-empty string. `wa list workflows` reads it from the export. A file with no description fails to load.
 
 `params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. A URL or file path is text the workflow hands to a command.
 
@@ -73,6 +76,7 @@ const Plan = z.object({ spec: z.string(), acceptance: z.string() });
 const Review = z.object({ verdict: z.enum(["approved", "changes_needed"]), findings: z.string() });
 
 export default workflow({
+  description: "ticket to merged PR",
   params: z.object({ ticket: z.string() }),
 
   async run({ params, step, gate }) {

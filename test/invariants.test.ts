@@ -9,6 +9,7 @@ const gateThenCommand = `import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step, gate }) {
     await step.command("sh -c 'echo before >> out.txt'");
@@ -64,6 +65,7 @@ test("invariant 4: a run interrupted mid-step resumes from the step boundary", a
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.command("sh -c 'echo one >> out.txt'");
@@ -99,6 +101,7 @@ test("invariant 5: a gate consumes exactly one answer, and the answer is journal
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step, gate }) {
     const first = await gate("first?");
@@ -172,6 +175,7 @@ test("invariant 7: the engine needs no agent and no definition in an empty home"
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.agent("./skill.md");
@@ -226,6 +230,7 @@ test("invariant 9: a skill name resolves from the project before the home", (t) 
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.agent("wa-review");

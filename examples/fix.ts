@@ -5,6 +5,7 @@ const Reproduce = z.object({ reproduced: z.boolean(), notes: z.string() });
 const Verify = z.object({ passing: z.boolean(), details: z.string() });
 
 export default workflow({
+  description: "reproduce a bug, fix it against the repo checks, then the pull request",
   params: z.object({ bug: z.string() }),
 
   async run({ params, step, gate }) {

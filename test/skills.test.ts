@@ -8,6 +8,7 @@ const agentWorkflow = `import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({ skill: z.string() }),
   async run({ params, step }) {
     await step.agent(params.skill);
@@ -151,9 +152,13 @@ test("sync-skills says when there is no skill directory to link", (t) => {
   assert.match(synced.stdout, /no \.claude\/skills or \.agents\/skills/);
 });
 
-test("list skills shows every skill wa can reach, and where it comes from", (t) => {
+test("list skills shows name and description", (t) => {
   const box = sandbox(t);
-  box.writeSkill(path.join(box.userHome, ".claude", "skills"), "review", "claude review\n");
+  box.writeSkill(
+    path.join(box.userHome, ".claude", "skills"),
+    "review",
+    "---\nname: review\ndescription: Reviews a working tree.\n---\nclaude review\n",
+  );
   box.writeSkill(path.join(box.userHome, ".agents", "skills"), "migrate", "migrate it\n");
   box.wa("sync-skills", "--global");
   box.writeSkill(path.join(box.home, "skills"), "wa-triage", "triage it\n");
@@ -162,7 +167,26 @@ test("list skills shows every skill wa can reach, and where it comes from", (t) 
   const listed = box.wa("list", "skills");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^SKILL\s+SCOPE\s+SOURCE\s+FILE$/m);
+  assert.match(listed.stdout, /^SKILL\s+DESCRIPTION$/m);
+  assert.match(listed.stdout, /^house-style\s*$/m);
+  assert.match(listed.stdout, /^wa-triage\s*$/m);
+  assert.match(listed.stdout, /^review\s+Reviews a working tree\.$/m);
+  assert.match(listed.stdout, /^migrate\s*$/m);
+  assert.doesNotMatch(listed.stdout, /SCOPE/);
+});
+
+test("list skills --verbose adds scope, source, and file", (t) => {
+  const box = sandbox(t);
+  box.writeSkill(path.join(box.userHome, ".claude", "skills"), "review", "claude review\n");
+  box.writeSkill(path.join(box.userHome, ".agents", "skills"), "migrate", "migrate it\n");
+  box.wa("sync-skills", "--global");
+  box.writeSkill(path.join(box.home, "skills"), "wa-triage", "triage it\n");
+  box.writeSkill(path.join(box.project, ".wa", "skills"), "house-style", "our style\n");
+
+  const listed = box.wa("list", "skills", "--verbose");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /^SKILL\s+DESCRIPTION\s+SCOPE\s+SOURCE\s+FILE$/m);
   assert.match(listed.stdout, /^house-style\s+local\s+wa\s+/m);
   assert.match(listed.stdout, /^wa-triage\s+global\s+wa\s+/m);
   assert.match(listed.stdout, /^review\s+global\s+claude\s+~\/\.claude\/skills\/review$/m);
@@ -179,7 +203,7 @@ test("list skills shows the winner of a shared name once", (t) => {
 
   const rows = listed.stdout.split("\n").filter((line) => line.startsWith("review"));
   assert.equal(rows.length, 1, listed.stdout);
-  assert.match(rows[0] ?? "", /^review\s+global\s+claude/);
+  assert.match(rows[0] ?? "", /^review\s*$/);
 });
 
 test("list with no target names the two targets and fails", (t) => {

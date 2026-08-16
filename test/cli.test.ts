@@ -8,6 +8,7 @@ const paramsWorkflow = `import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({ count: z.number(), dry: z.boolean().default(false), tag: z.string().optional() }),
   async run({ params, step }) {
     await step.command(\`sh -c 'echo \${params.count}:\${params.dry}:\${params.tag ?? "none"} >> out.txt'\`);
@@ -19,6 +20,7 @@ const gateWorkflow = `import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ gate }) {
     await gate("keep going?");
@@ -128,6 +130,7 @@ test("a reply with no pending gate is refused", (t) => {
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.command("sh -c 'exit 3'");
@@ -142,6 +145,26 @@ export default workflow({
 
   assert.equal(refused.code, 1);
   assert.match(refused.stderr, /no pending gate/);
+});
+
+test("a workflow with no description fails to load", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  params: z.object({}),
+  async run() {},
+});
+`,
+  );
+
+  const failed = box.wa("run", "./w.ts");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /needs a description/);
 });
 
 test("a file that exports no workflow is refused", (t) => {
@@ -161,7 +184,7 @@ test("wa help prints the usage", (t) => {
   const help = box.wa("help");
 
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /wa list workflows\|skills/);
+  assert.match(help.stdout, /wa list workflows\|skills \[--verbose\]/);
   assert.match(help.stdout, /wa run <workflow>/);
   assert.match(help.stdout, /wa ps/);
   assert.match(help.stdout, /wa resume <run>/);

@@ -8,6 +8,7 @@ const writes = (text: string) => `import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
+  description: "${text}",
   params: z.object({}),
   async run({ step }) {
     await step.command("sh -c 'echo ${text} >> out.txt'");
@@ -15,7 +16,7 @@ export default workflow({
 });
 `;
 
-test("list workflows shows the workflow files of both places", (t) => {
+test("list workflows shows name and description", (t) => {
   const box = sandbox(t);
   box.write(".wa/ticket.ts", writes("local"));
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
@@ -23,21 +24,35 @@ test("list workflows shows the workflow files of both places", (t) => {
   const listed = box.wa("list", "workflows");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^WORKFLOW\s+SCOPE\s+FILE$/m);
-  assert.match(listed.stdout, new RegExp(`^ticket\\s+local\\s+${path.join(box.project, ".wa")}`, "m"));
-  assert.match(listed.stdout, new RegExp(`^release\\s+global\\s+${box.home}`, "m"));
+  assert.match(listed.stdout, /^WORKFLOW\s+DESCRIPTION$/m);
+  assert.match(listed.stdout, /^ticket\s+local$/m);
+  assert.match(listed.stdout, /^release\s+global$/m);
+  assert.doesNotMatch(listed.stdout, /SCOPE/);
   assert.doesNotMatch(listed.stdout, /run one with/);
 });
 
-test("wa with no command lists the workflows and says how to run one", (t) => {
+test("list workflows --verbose adds scope and file", (t) => {
+  const box = sandbox(t);
+  box.write(".wa/ticket.ts", writes("local"));
+  fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
+
+  const listed = box.wa("list", "workflows", "--verbose");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /^WORKFLOW\s+DESCRIPTION\s+SCOPE\s+FILE$/m);
+  assert.match(listed.stdout, new RegExp(`^ticket\\s+local\\s+local\\s+${path.join(box.project, ".wa")}`, "m"));
+  assert.match(listed.stdout, new RegExp(`^release\\s+global\\s+global\\s+${box.home}`, "m"));
+});
+
+test("wa with no command prints the usage", (t) => {
   const box = sandbox(t);
   box.write(".wa/ticket.ts", writes("local"));
 
   const listed = box.wa();
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^ticket\s+local/m);
-  assert.match(listed.stdout, /run one with: wa run <workflow>/);
+  assert.match(listed.stdout, /usage:/);
+  assert.doesNotMatch(listed.stdout, /^ticket/m);
 });
 
 test("wa run with no workflow lists them instead of failing", (t) => {
@@ -47,14 +62,14 @@ test("wa run with no workflow lists them instead of failing", (t) => {
   const listed = box.wa("run");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^ticket\s+local/m);
+  assert.match(listed.stdout, /^ticket\s+local$/m);
   assert.match(listed.stdout, /run one with: wa run <workflow>/);
 });
 
-test("wa with no workflow file says where to put one", (t) => {
+test("wa list workflows with no file says where to put one", (t) => {
   const box = sandbox(t);
 
-  const empty = box.wa();
+  const empty = box.wa("list", "workflows");
 
   assert.equal(empty.code, 0);
   assert.match(empty.stdout, new RegExp(`no workflow file in ${path.join(box.project, ".wa")}`));

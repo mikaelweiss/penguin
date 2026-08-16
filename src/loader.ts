@@ -46,6 +46,9 @@ export async function load(file: string): Promise<Workflow> {
   ) {
     throw new WaError(`${file} does not default-export a workflow`);
   }
+  if (typeof definition.description !== "string" || definition.description.trim() === "") {
+    throw new WaError(`${file} has no description`);
+  }
   return definition;
 }
 

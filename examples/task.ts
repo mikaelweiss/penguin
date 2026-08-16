@@ -11,6 +11,7 @@ function quoted(text: string): string {
 }
 
 export default workflow({
+  description: "one small change in this repository: implement, review, then a commit gate",
   params: z.object({ task: z.string() }),
 
   async run({ params, step, gate }) {

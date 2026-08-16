@@ -17,7 +17,7 @@ export function sources(root: string): Source[] {
 export function link(target: string, chosen: Source[]): void {
   fs.mkdirSync(target, { recursive: true });
   for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
-    if (entry.isSymbolicLink()) fs.rmSync(path.join(target, entry.name));
+    if (entry.isSymbolicLink()) fs.unlinkSync(path.join(target, entry.name));
   }
   for (const source of chosen) {
     const at = path.join(target, source.name);
@@ -61,7 +61,13 @@ export function searchPath(cwd: string): Root[] {
   return [...roots(projectSkills(cwd), "local"), ...roots(homeSkills(), "global")];
 }
 
-export type Skill = { name: string; scope: Scope; source: string; at: string };
+export type Skill = {
+  name: string;
+  description: string;
+  scope: Scope;
+  source: string;
+  at: string;
+};
 
 export function available(cwd: string): Skill[] {
   const taken = new Set<string>();
@@ -70,15 +76,29 @@ export function available(cwd: string): Skill[] {
     for (const skill of inside(root.dir)) {
       if (taken.has(skill.name)) continue;
       taken.add(skill.name);
-      found.push({ name: skill.name, scope: root.scope, source: root.source, at: real(skill.at) });
+      found.push({
+        name: skill.name,
+        description: descriptionOf(skill.at),
+        scope: root.scope,
+        source: root.source,
+        at: real(skill.at),
+      });
     }
   }
   return found;
 }
 
-export function render(list: Skill[]): string {
-  const rows = [["SKILL", "SCOPE", "SOURCE", "FILE"]];
-  for (const skill of list) rows.push([skill.name, skill.scope, skill.source, short(skill.at)]);
+export function render(list: Skill[], verbose = false): string {
+  const rows = verbose
+    ? [["SKILL", "DESCRIPTION", "SCOPE", "SOURCE", "FILE"]]
+    : [["SKILL", "DESCRIPTION"]];
+  for (const skill of list) {
+    rows.push(
+      verbose
+        ? [skill.name, skill.description, skill.scope, skill.source, short(skill.at)]
+        : [skill.name, skill.description],
+    );
+  }
   return table(rows);
 }
 
@@ -121,6 +141,19 @@ function order(dir: string): string[] {
 
 function isCollection(at: string): boolean {
   return directory(at) && !fs.existsSync(path.join(at, "SKILL.md"));
+}
+
+function descriptionOf(at: string): string {
+  const file = skillFile(at);
+  if (file === undefined) return "";
+  const text = fs.readFileSync(file, "utf8");
+  const front = /^---\n([\s\S]*?)\n---/.exec(text);
+  if (front === null) return "";
+  for (const line of (front[1] ?? "").split("\n")) {
+    const match = /^description:\s*(.*)$/.exec(line);
+    if (match !== null) return (match[1] ?? "").trim();
+  }
+  return "";
 }
 
 function skillFile(at: string): string | undefined {

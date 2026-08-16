@@ -32,6 +32,7 @@ export type Ctx<Params> = {
 };
 
 export type Workflow<Schema extends z.ZodObject = z.ZodObject> = {
+  description: string;
   params: Schema;
   run(ctx: Ctx<z.infer<Schema>>): Promise<void>;
 };

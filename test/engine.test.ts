@@ -15,6 +15,7 @@ test("an agent step returns the validated result", (t) => {
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({ ticket: z.string() }),
   async run({ params, step }) {
     const review = await step.agent("./skill.md", {
@@ -48,6 +49,7 @@ test("an agent step with no result schema needs no result file", (t) => {
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.agent("./skill.md");
@@ -75,6 +77,7 @@ test("an invalid result is retried once with the error, then gates to a human", 
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     const triage = await step.agent("./skill.md", { result: z.object({ actionable: z.boolean() }) });
@@ -114,6 +117,7 @@ test("a step agent option overrides the default agent", (t) => {
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({ agent: z.string() }),
   async run({ params, step }) {
     await step.agent("./skill.md", { agent: params.agent });
@@ -138,6 +142,7 @@ test("cwd resolves from the invoking folder", (t) => {
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     const where = await step.command("pwd", { cwd: "sub" });
@@ -161,6 +166,7 @@ test("a skill path resolves against the workflow file, not the run directory", (
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.agent("./skills/craft.md");
@@ -183,6 +189,7 @@ test("Promise.all journals completion order and replays by invocation order", (t
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step, gate }) {
     const [slow, fast] = await Promise.all([
@@ -215,6 +222,7 @@ test("a park stops the steps still in flight and journals nothing after it", (t)
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step, gate }) {
     await Promise.all([
@@ -248,6 +256,7 @@ test("an uncaught error parks the run with the reason", (t) => {
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.command("sh -c 'echo one >> out.txt'");
@@ -276,6 +285,7 @@ test("a transcript holds every agent invocation", (t) => {
 import { z } from "zod";
 
 export default workflow({
+  description: "test",
   params: z.object({}),
   async run({ step }) {
     await step.agent("./skill.md", { result: z.object({ actionable: z.boolean() }) });
