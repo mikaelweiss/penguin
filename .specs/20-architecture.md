@@ -13,6 +13,8 @@ Plain files.
 - `~/.wa/runs/<name>/`: one flat directory per run, the run name as the directory name. `journal.jsonl` (append-only; entry zero records the params, the workflow file path, the invoking folder, and the creation time), `workflow.ts` (the pinned source copy), `transcripts/` (one file per agent invocation), `lock` (held by the executing process).
 - `~/.wa/agent`: one line, the default agent command.
 
+`WA_HOME` moves the whole tree.
+
 Run state derives from the files: a held lock means running, a journal that ends at an unanswered gate or a recorded interruption means parked, a journal that records the run function's return means done.
 
 ## Run lifecycle
@@ -21,13 +23,13 @@ Run state derives from the files: a held lock means running, a journal that ends
 
 A gate prompts in the terminal. When the process has no terminal (cron) or the user gives no answer, the run parks: the process exits, and the question stays recorded in the journal.
 
-Ctrl-C, process death, and an uncaught error from the run function park the run with the reason recorded. The journal keeps every completed step.
+Ctrl-C, process death, and an uncaught error from the run function park the run with the reason recorded. The journal keeps every completed step. A park stops the steps still in flight, and they re-dispatch on resume. A run that parks at a gate exits zero. A run that parks on an error exits one, which is what cron reads.
 
 `wa resume <run> [reply]` replays the journal and continues in the foreground. With no reply, a pending gate prompts again. With a reply, wa journals it as the gate's answer and continues. A run parked mid-step re-dispatches from the step boundary.
 
 To discard a run, delete its directory.
 
-A lock file makes execution exclusive: a second wa process on the same run fails plainly with the holder's pid.
+A lock file makes execution exclusive: a second wa process on the same run fails plainly with the holder's pid. A lock whose process is gone is taken over.
 
 OS cron calling `wa` covers schedules.
 

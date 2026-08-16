@@ -1,0 +1,17 @@
+{
+  // "paths" points at the wa install. Run `npm root -g` to find it.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "paths": {
+      "wa": ["./node_modules/wa/dist/index.d.ts"],
+      "zod": ["./node_modules/wa/node_modules/zod", "./node_modules/zod"]
+    }
+  },
+  "include": ["*.ts"]
+}
