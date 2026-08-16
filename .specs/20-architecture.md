@@ -10,7 +10,7 @@
 
 Plain files.
 
-- `~/.wa/runs/<name>/`: one flat directory per run, the run name as the directory name. `journal.jsonl` (append-only; entry zero records the params, the workflow file path, the invoking folder, and the creation time), `workflow.ts` (the pinned source copy), `transcripts/` (one file per agent invocation), `artifacts/`, `lock` (held by the executing process).
+- `~/.wa/runs/<name>/`: one flat directory per run, the run name as the directory name. `journal.jsonl` (append-only; entry zero records the params, the workflow file path, the invoking folder, and the creation time), `workflow.ts` (the pinned source copy), `transcripts/` (one file per agent invocation), `lock` (held by the executing process).
 - `~/.wa/agent`: one line, the default agent command.
 
 Run state derives from the files: a held lock means running, a journal that ends at an unanswered gate or a recorded interruption means parked, a journal that records the run function's return means done.
@@ -23,7 +23,7 @@ A gate prompts in the terminal. When the process has no terminal (cron) or the u
 
 Ctrl-C, process death, and an uncaught error from the run function park the run with the reason recorded. The journal keeps every completed step.
 
-`wa resume <run> [reply]` replays the journal and continues in the foreground. With no reply, a pending gate prompts again. With a reply, wa journals it as the gate's answer and continues. When the gate has options, a reply outside them is rejected and the gate stays pending. A run parked mid-step re-dispatches from the step boundary.
+`wa resume <run> [reply]` replays the journal and continues in the foreground. With no reply, a pending gate prompts again. With a reply, wa journals it as the gate's answer and continues. A run parked mid-step re-dispatches from the step boundary.
 
 To discard a run, delete its directory.
 
@@ -41,7 +41,7 @@ An agent is one shell command string, for example `claude -p`. wa spawns the str
 
 - `run`: validate params + create + execute (run lifecycle above).
 - `resume`: replay + continue, with an optional reply for the pending gate (run lifecycle above).
-- `list`: a plain table: run, workflow file, state, current step or pending gate question, age, run directory. Transcripts and artifacts are files in that directory: read them with any tool.
+- `list`: a plain table: run, workflow file, state, current step or pending gate question, age, run directory. Transcripts are files in that directory: read them with any tool.
 
 ## Invariants
 
@@ -51,6 +51,6 @@ Each one line, each pinned by a test:
 2. The journal is append-only. Replay of the pinned copy against its journal reaches the same live point with zero re-executed side effects.
 3. At most one process executes a run at a time. A second `wa` process on the same run fails plainly with the holder's pid.
 4. A run interrupted mid-step resumes from the step boundary. Completed steps never re-execute.
-5. A gate consumes exactly one answer, and the answer is journaled. An invalid reply leaves the gate pending.
+5. A gate consumes exactly one answer, and the answer is journaled.
 6. Replay verifies every call against the journal. A call that does not match its journal entry parks the run before any side effect runs.
 7. The engine depends on no agent and no definition. The engine test suite passes with an empty `~/.wa/`.

@@ -30,7 +30,6 @@ One name for one thing, used everywhere (code, UI, specs):
 - **journal**: the append-only record of every primitive call and result. Replay reads it.
 - **skill**: the markdown craft file an agent step follows.
 - **result**: the small JSON envelope an agent step produces. Schema-validated.
-- **artifact**: a document an agent step writes as a file (markdown), referenced from the result.
 - **gate**: a step that asks a question and waits for the human answer.
 - **parked**: a run waiting on disk, at a gate or after an interruption, for resume.
 - **agent**: an external coding CLI, named by one shell command string.

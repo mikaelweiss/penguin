@@ -23,7 +23,7 @@ wa imports the module and reads the exported params schema without calling `run`
 - `ctx.params`: validated params.
 - `ctx.step.agent(skill, {input, result, agent, cwd})`: run a skill on an agent. `skill` is the path to a markdown file, relative to the workflow file. `result` is a plain `z.object` schema. The agent must satisfy it: on mismatch the engine retries once with the validation error, then gates to a human. `agent` is a shell command string that overrides the default agent (`20-architecture.md`, agents). Returns the typed result.
 - `ctx.step.command(cmd, {cwd})`: run a shell command. Returns `{code, stdout, stderr}`. Provider IO (read a ticket, open a PR, add a worktree) is this primitive plus the provider's own CLI (`gh`, `linear`, `git`).
-- `ctx.gate(question, {options})`: ask a question and wait for the answer. The question prints in the terminal when attached, and `options` renders as choices. The answer is one of `options` when given, else free text. A workflow that needs two facts asks two gates. An unanswered gate parks the run: `wa resume` with a reply resumes it (`20-architecture.md`, run lifecycle). Returns the answer string.
+- `ctx.gate(question)`: ask a question and wait for the answer. The question prints in the terminal when attached. The answer is free text. A workflow that wants fixed choices writes them into the question and loops on the answer. A workflow that needs two facts asks two gates. An unanswered gate parks the run: `wa resume` with a reply resumes it (`20-architecture.md`, run lifecycle). Returns the answer string.
 
 `cwd` sets a step's working directory, resolved from the invoking folder, which is the default. A worktree is one `git worktree add` through `step.command`, its path passed as `cwd` to later steps. Cleanup is `git worktree remove` by hand.
 
@@ -43,9 +43,9 @@ Replay verifies the rules: each replayed call must match its journal entry. A mi
 
 Every primitive call is journaled with its result. Resume and crash recovery re-execute `run` from the top while the journal answers each call instantly, until execution reaches the first unanswered call and goes live. A run keeps a pinned copy of its workflow file, and replay executes the copy: editing a definition never changes an existing run.
 
-## Results and artifacts
+## Results and documents
 
-Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, artifact references. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. Params and results use the same zod vocabulary. Documents (a spec, a design note) are markdown files the agent writes to the run's `artifacts/` directory and references by path. Models write documents best as plain markdown, so prose never lives inside JSON strings. `run` returns nothing: a result leaves the run as an artifact or through one `ctx.step.command` line (a GitHub comment, a file).
+Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, file paths. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. Params and results use the same zod vocabulary. Documents (a spec, a design note) are markdown files the agent writes where the workflow directs (a `cwd`, a path passed in `input`) and references by path in the result. Models write documents best as plain markdown, so prose never lives inside JSON strings. `run` returns nothing: a result leaves the run as a file or through one `ctx.step.command` line (a GitHub comment, a PR).
 
 ## Skills
 
@@ -78,9 +78,7 @@ export default workflow({
     let plan;
     do {
       plan = await step.agent("./skills/plan.md", { result: Plan });
-    } while (
-      (await gate("Approve the plan?", { options: ["approve", "revise"] })) === "revise"
-    );
+    } while ((await gate("Approve the plan? (approve / revise)")) !== "approve");
 
     const ws = `../wa-${params.ticket}`;
     await step.command(`git worktree add ${ws}`);
@@ -93,9 +91,7 @@ export default workflow({
     if (!approved) await gate("Three review rounds. Take a look.");
 
     const pr = await step.command("gh pr create --fill", { cwd: ws });
-    while (
-      (await gate(`PR is up: ${pr.stdout.trim()}.`, { options: ["address-feedback", "done"] })) === "address-feedback"
-    ) {
+    while ((await gate(`PR is up: ${pr.stdout.trim()} (address-feedback / done)`)) !== "done") {
       await step.agent("./skills/address-feedback.md", { cwd: ws });
     }
   },
