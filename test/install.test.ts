@@ -14,7 +14,12 @@ test("a fresh install fills the home with the catalog", (t) => {
   assert.equal(fs.existsSync(path.join(box.home, "ticket.ts")), true);
   assert.equal(fs.existsSync(path.join(box.home, "skills", "wa-triage", "SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(box.home, "tsconfig.json")), true);
-  assert.equal(fs.readFileSync(path.join(box.home, "agent"), "utf8").trim(), "claude -p");
+  for (const name of ["claude", "git", "gh", "terminal"]) {
+    assert.equal(fs.existsSync(path.join(box.home, "adapters", `${name}.ts`)), true, name);
+  }
+  const env = fs.readFileSync(path.join(box.home, "wa-env.d.ts"), "utf8");
+  assert.match(env, /github: ReturnType/);
+  assert.match(env, /vcs: ReturnType/);
 });
 
 test("a fresh install leaves ticket in the workflow list", (t) => {

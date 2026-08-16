@@ -2,7 +2,7 @@
 
 wa runs one workflow as a foreground process, against any repository, with any coding agent CLI.
 
-A workflow is one TypeScript file: a params schema and a run function over three primitives. The engine journals every call. A run parks at a gate for days, and one command resumes it.
+A workflow is one TypeScript file: a params schema and a run function over `ctx`. The engine journals every call. A run parks at a gate for days, and one command resumes it.
 
 ## Install
 
@@ -30,16 +30,16 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.wa/` with four workflows, their skills, the default agent line, and a tsconfig for editor types:
+Install fills `~/.wa/` with four workflows, their skills, four adapters, and a tsconfig for editor types:
 
 - `wa run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, plan gate, implement, review loop, PR, feedback loop.
 - `wa run task --task "..."`: one small change in the current repository: implement, review loop, then a commit gate.
 - `wa run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, PR, feedback loop.
 - `wa run review --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
 
-`~/.wa/agent` holds one line: the shell command that runs your agent, `claude -p` by default. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
+`~/.wa/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, and `terminal`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
-Workflow files live in `~/.wa/` for every repository, or in `<repo>/.wa/` for one. Skills live next to them, in `skills/`.
+Workflow files live in `~/.wa/` for every repository, or in `<repo>/.wa/` for one. Skills and adapters live next to them, in `skills/` and `adapters/`.
 
 ## Write a workflow
 
@@ -53,13 +53,13 @@ export default workflow({
   description: "ticket to merged PR",
   params: z.object({ ticket: z.string() }),
 
-  async run({ params, step, gate }) {
-    const t = await step.agent("wa-triage", { input: params.ticket, result: Triage });
+  async run({ params, agent, github, gate }) {
+    const t = await agent().run("wa-triage", { input: params.ticket, result: Triage });
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
     }
-    await step.command("gh pr create --fill");
+    await github.pr.create();
   },
 });
 ```
@@ -69,6 +69,7 @@ export default workflow({
 ```sh
 wa list workflows                 # name, params, and description
 wa list skills --verbose          # plus scope, source, and file
+wa list adapters                  # role, implementation, and description
 wa run ticket --ticket ABC-123    # by name, or by path: wa run ./ticket.ts
 wa ps                             # every run and its state
 wa resume ticket-1 approve
@@ -78,7 +79,7 @@ wa resume ticket-1 approve
 
 ```
 $ wa run task --task "rename the flag"
-run task-1 started, agent claude -p
+run task-1 started, agent claude
 ```
 
 Bare `wa` prints the usage. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
@@ -94,37 +95,33 @@ ticket  --ticket <text>
 
 A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name <one|two>`. Brackets mark an optional param. A long description wraps to the width of the terminal.
 
-```
-$ wa list skills
-wa-triage
-  Decides if a ticket is ready to work on.
-
-review
-  Reviews a working tree against its acceptance checks.
-```
-
-One block per name, in the order a step resolves them. A name held by two directories shows the winner.
-
-## The step API
+## The ctx API
 
 - `ctx.params`: the validated params.
-- `ctx.step.agent(skill, {input, result, agent, cwd})`: run a skill on an agent. `skill` is a name from your skills directories, or a path to a markdown file. The engine validates the result against the schema.
-- `ctx.step.command(cmd, {cwd})`: run a shell command. Provider work is this primitive plus `gh`, `linear`, or `git`.
+- `ctx.agent({use, cwd})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A fresh handle is a fresh conversation.
+- `ctx.vcs`, `ctx.github`, and any role you add: the installed adapters, typed in your editor through the generated `wa-env.d.ts`. Every method call is a journaled step.
+- `ctx.view`: typed output. `activity` wraps a span, `fact` sets what is true now, `event` appends to the scroll, `artifact` names a thing to open, `watch` declares live numbers the view samples.
 - `ctx.gate(question)`: ask a question and wait for the answer.
 
-Every await on this API is a durable checkpoint. Control flow, batching, and parallelism are plain TypeScript.
+Every await on a journaled call is a durable checkpoint. Control flow, batching, and parallelism are plain TypeScript.
+
+## Adapters
+
+An adapter is one TypeScript file: a role (its `ctx` key), a name, and a build function that returns its methods. The shell lives only there: adapter authors get `host.shell` and `host.exec`, workflows do not. Put a file in `<repo>/.wa/adapters/` or `~/.wa/adapters/` to add or replace one. Swapping git for jj means one file that declares the same role.
 
 ## Keep the run replayable
 
-1. Send all IO through the step API. Read no clock, no randomness, no environment, no files.
+1. Send all IO through journaled ctx calls. Read no clock, no randomness, no environment, no files.
 2. Hold no module-level mutable state.
 3. Keep the code between two awaits fast and free of side effects.
 
+View calls are exempt: they are output, and replay never repeats them.
+
 ## Where the state lives
 
-`~/.wa/` holds your workflow files, `skills/`, `agent`, and `runs/`. `~/.wa/runs/<run>/` holds `journal.jsonl`, the pinned copy of the workflow file, the agent transcripts, and the lock. To discard a run, delete the directory. Set `WA_HOME` to move the whole tree.
+`~/.wa/` holds your workflow files, `adapters/`, `skills/`, `defaults`, and `runs/`. `~/.wa/runs/<run>/` holds `journal.jsonl`, `events.jsonl`, the pinned copy of the workflow file, the session transcripts, and the lock. To discard a run, delete the directory. Set `WA_HOME` to move the whole tree.
 
-`<repo>/.wa/` holds the workflow files and skills of one repository, and ships in git.
+`<repo>/.wa/` holds the workflow files, skills, and adapters of one repository, and ships in git.
 
 ## Specs
 

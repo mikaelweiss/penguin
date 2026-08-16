@@ -10,19 +10,22 @@ export default workflow({
   description: "review an open pull request into a findings file, then post it as a comment",
   params: z.object({ pr: z.string() }),
 
-  async run({ params, step, gate }) {
-    const diff = await step.command(`gh pr diff ${params.pr}`);
-    if (diff.code !== 0) {
-      await gate(`gh pr diff ${params.pr} failed: ${diff.stderr.trim()}`);
+  async run({ params, agent, github, view, gate }) {
+    const diff = await github.pr.diff(params.pr);
+    if (!diff.ok) {
+      await gate(`gh pr diff ${params.pr} failed: ${diff.reason}`);
       return;
     }
 
-    const review = await step.agent("wa-review-diff", { input: diff.stdout, result: Findings });
+    const reviewer = agent();
+    const review = await reviewer.run("wa-review-diff", { input: diff.diff, result: Findings });
+    view.artifact({ title: "Review findings", path: review.report });
     const answer = await gate(
       `${review.verdict}, findings in ${review.report}. Post the findings to the PR? (post / skip)`,
     );
     if (answer !== "post") return;
 
-    await step.command(`gh pr comment ${params.pr} --body-file ${review.report}`);
+    const posted = await github.pr.comment(params.pr, { bodyFile: review.report });
+    if (!posted.ok) await gate(`The comment failed: ${posted.reason}`);
   },
 });

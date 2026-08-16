@@ -30,14 +30,18 @@ export function register(): void {
   });
 }
 
-export async function load(file: string): Promise<Workflow> {
+export async function importDefault(file: string): Promise<unknown> {
   register();
   const url = pathToFileURL(file).href;
   if (url.endsWith(".ts") || url.endsWith(".mts")) workflowFiles.add(url);
   const loaded = (await import(url)) as {
     default?: unknown;
   };
-  const definition = loaded.default as Workflow | undefined;
+  return loaded.default;
+}
+
+export async function load(file: string): Promise<Workflow> {
+  const definition = (await importDefault(file)) as Workflow | undefined;
   if (
     definition === undefined ||
     typeof definition !== "object" ||

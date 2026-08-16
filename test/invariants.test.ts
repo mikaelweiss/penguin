@@ -11,16 +11,17 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ step, gate }) {
-    await step.command("sh -c 'echo before >> out.txt'");
+  async run({ shell, gate }) {
+    await shell.run("sh -c 'echo before >> out.txt'");
     await gate("continue?");
-    await step.command("sh -c 'echo pinned >> out.txt'");
+    await shell.run("sh -c 'echo pinned >> out.txt'");
   },
 });
 `;
 
 test("invariant 1: replay executes the pinned copy, not the edited definition", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write("w.ts", gateThenCommand);
   assert.equal(box.wa("run", "./w.ts").code, 0);
 
@@ -33,6 +34,7 @@ test("invariant 1: replay executes the pinned copy, not the edited definition", 
 
 test("invariant 2: the journal is append-only and replay re-executes nothing", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write("w.ts", gateThenCommand);
   box.wa("run", "./w.ts");
 
@@ -47,6 +49,7 @@ test("invariant 2: the journal is append-only and replay re-executes nothing", (
 
 test("invariant 3: a second process on the same run fails with the holder pid", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write("w.ts", gateThenCommand);
   box.wa("run", "./w.ts");
 
@@ -59,6 +62,7 @@ test("invariant 3: a second process on the same run fails with the holder pid", 
 
 test("invariant 4: a run interrupted mid-step resumes from the step boundary", async (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write(
     "w.ts",
     `import { workflow } from "wa";
@@ -67,10 +71,10 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ step }) {
-    await step.command("sh -c 'echo one >> out.txt'");
-    await step.command("sh -c 'sleep 2'");
-    await step.command("sh -c 'echo three >> out.txt'");
+  async run({ shell }) {
+    await shell.run("sh -c 'echo one >> out.txt'");
+    await shell.run("sh -c 'sleep 2'");
+    await shell.run("sh -c 'echo three >> out.txt'");
   },
 });
 `,
@@ -95,6 +99,7 @@ export default workflow({
 
 test("invariant 5: a gate consumes exactly one answer, and the answer is journaled", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write(
     "w.ts",
     `import { workflow } from "wa";
@@ -103,11 +108,11 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ step, gate }) {
+  async run({ shell, gate }) {
     const first = await gate("first?");
-    await step.command(\`sh -c 'echo \${first} >> out.txt'\`);
+    await shell.run(\`sh -c 'echo \${first} >> out.txt'\`);
     const second = await gate("second?");
-    await step.command(\`sh -c 'echo \${second} >> out.txt'\`);
+    await shell.run(\`sh -c 'echo \${second} >> out.txt'\`);
   },
 });
 `,
@@ -141,6 +146,7 @@ export default workflow({
 
 test("invariant 6: a call that does not match the journal parks before any side effect", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write("w.ts", gateThenCommand);
   box.wa("run", "./w.ts");
 
@@ -160,7 +166,7 @@ test("invariant 6: a call that does not match the journal parks before any side 
   assert.match(park.reason, /divergence at step 0/);
 });
 
-test("invariant 7: the engine needs no agent and no definition in an empty home", (t) => {
+test("invariant 7: the engine needs no adapter and no definition in an empty home", (t) => {
   const box = sandbox(t);
   assert.deepEqual(fs.readdirSync(box.home), []);
 
@@ -177,8 +183,8 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ step }) {
-    await step.agent("./skill.md");
+  async run({ agent }) {
+    await agent().run("./skill.md");
   },
 });
 `,
@@ -186,12 +192,30 @@ export default workflow({
   const parked = box.wa("run", "./w.ts");
 
   assert.equal(parked.code, 1);
-  assert.match(parked.stdout, /no agent is configured/);
-  assert.match(parked.stdout, /claude -p/);
+  assert.match(parked.stdout, /no agent adapter is installed/);
+  assert.match(parked.stdout, /wa list adapters/);
   const entries = box.journal("w-1");
   const park = entries[entries.length - 1] as ParkEntry;
   assert.equal(park.type, "park");
-  assert.match(park.reason, new RegExp(`${path.join(box.home, "agent")}`));
+  assert.match(park.reason, /no agent adapter is installed/);
+
+  box.write(
+    "role.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ shell }) {
+    await shell.run("true");
+  },
+});
+`,
+  );
+  const missing = box.wa("run", "./role.ts");
+  assert.equal(missing.code, 1);
+  assert.match(missing.stdout, /nothing provides ctx\.shell/);
 });
 
 test("invariant 8: the first wa command installs, and a sync keeps what you wrote", (t) => {
@@ -205,6 +229,7 @@ test("invariant 8: the first wa command installs, and a sync keeps what you wrot
   assert.equal(first.code, 0, first.output);
   assert.match(first.stdout, new RegExp(`created ${box.home}`));
   assert.equal(fs.existsSync(path.join(box.home, "runs")), true);
+  assert.equal(fs.existsSync(path.join(box.home, "adapters", "claude.ts")), true);
   assert.equal(fs.readlinkSync(path.join(box.home, "skills", "claude")), claude);
 
   const second = box.wa("ps");
@@ -232,14 +257,14 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ step }) {
-    await step.agent("wa-review");
+  async run({ agent }) {
+    await agent().run("wa-review");
   },
 });
 `,
   );
   box.writeSkill(path.join(box.home, "skills"), "wa-review", "the home craft\n");
-  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  box.setAgent("none", "prompts.txt");
   assert.equal(box.wa("run", "./w.ts").code, 0);
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the home craft/);
 
@@ -247,6 +272,77 @@ export default workflow({
   assert.equal(box.wa("run", "./w.ts").code, 0);
 
   assert.match(box.invocations("prompts.txt")[1] ?? "", /the project craft/);
+});
+
+test("invariant 10: a session keeps its identity across park and resume", (t) => {
+  const box = sandbox(t);
+  box.setAgent("none");
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent, gate }) {
+    const one = agent();
+    await one.run("./skill.md");
+    await gate("mid?");
+    await one.run("./skill.md", { input: "again" });
+    const two = agent();
+    await two.run("./skill.md");
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.wa("resume", "w-1", "go").code, 0);
+
+  const turns = box.sessions();
+  assert.equal(turns.length, 3);
+  assert.deepEqual(
+    turns.map((turn) => turn.first),
+    [true, false, true],
+  );
+  assert.equal(turns[0]?.session, turns[1]?.session, "the handle kept one conversation");
+  assert.notEqual(turns[1]?.session, turns[2]?.session, "a new handle opened a new conversation");
+});
+
+test("invariant 11: view calls never enter the journal and replay never re-emits them", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ view, gate }) {
+    view.event({ message: "hello once" });
+    await gate("go?");
+    view.event({ message: "after" });
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.wa("resume", "w-1", "yes").code, 0);
+
+  const kinds = box
+    .journal("w-1")
+    .map((entry) => (entry.type === "call" ? entry.kind : entry.type));
+  assert.deepEqual([...new Set(kinds)].sort(), ["done", "gate", "start"]);
+
+  const messages = box
+    .events("w-1")
+    .filter((event) => event["type"] === "event")
+    .map((event) => event["message"]);
+  assert.deepEqual(messages, ["hello once", "after"]);
 });
 
 function countCalls(box: ReturnType<typeof sandbox>, run: string): number {

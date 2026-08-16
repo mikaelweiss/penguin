@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { WaError } from "./errors.ts";
 
-export type Kind = "agent" | "command" | "gate";
+export type Kind = "agent" | "session" | "adapter" | "gate";
 
 export type StartEntry = {
   type: "start";

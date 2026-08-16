@@ -10,8 +10,8 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({ count: z.number(), dry: z.boolean().default(false), tag: z.string().optional() }),
-  async run({ params, step }) {
-    await step.command(\`sh -c 'echo \${params.count}:\${params.dry}:\${params.tag ?? "none"} >> out.txt'\`);
+  async run({ params, shell }) {
+    await shell.run(\`sh -c 'echo \${params.count}:\${params.dry}:\${params.tag ?? "none"} >> out.txt'\`);
   },
 });
 `;
@@ -30,6 +30,7 @@ export default workflow({
 
 test("params are coerced to the schema types", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write("w.ts", paramsWorkflow);
 
   assert.equal(box.wa("run", "./w.ts", "--count", "3", "--dry", "--tag", "release").code, 0);
@@ -87,17 +88,17 @@ test("run names count up per workflow file", (t) => {
   ]);
 });
 
-test("run starts by naming the run and the agent it uses", (t) => {
+test("run starts by naming the run and the agent adapter", (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
 
   const bare = box.wa("run", "./w.ts");
   assert.equal(bare.code, 0, bare.output);
-  assert.match(bare.stdout, /^run w-1 started, no agent is configured$/m);
+  assert.match(bare.stdout, /^run w-1 started, no agent adapter is installed$/m);
 
-  box.setAgent("claude -p");
+  box.setAgent("none");
   const configured = box.wa("run", "./w.ts");
-  assert.match(configured.stdout, /^run w-2 started, agent claude -p$/m);
+  assert.match(configured.stdout, /^run w-2 started, agent fake$/m);
 });
 
 test("ps shows the state and the pending gate question", (t) => {
@@ -137,6 +138,7 @@ test("resume reports the runs it cannot continue", (t) => {
 
 test("a reply with no pending gate is refused", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write(
     "w.ts",
     `import { workflow } from "wa";
@@ -145,8 +147,8 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ step }) {
-    await step.command("sh -c 'exit 3'");
+  async run({ shell }) {
+    await shell.run("sh -c 'exit 3'");
     throw new Error("stop here");
   },
 });
@@ -197,9 +199,44 @@ test("wa help prints the usage", (t) => {
   const help = box.wa("help");
 
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /wa list workflows\|skills \[--verbose\]/);
+  assert.match(help.stdout, /wa list workflows\|skills\|adapters \[--verbose\]/);
   assert.match(help.stdout, /wa run <workflow>/);
   assert.match(help.stdout, /wa ps/);
   assert.match(help.stdout, /wa resume <run>/);
   assert.match(help.stdout, /wa sync-skills/);
+});
+
+test("list adapters shows role, name, and description", (t) => {
+  const box = sandbox(t);
+  box.withShell();
+  box.setAgent("none");
+
+  const listed = box.wa("list", "adapters");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /^agent {2}fake\n {2}fake test agent$/m);
+  assert.match(listed.stdout, /^shell {2}shell\n {2}test shell$/m);
+
+  const verbose = box.wa("list", "adapters", "--verbose");
+  assert.match(verbose.stdout, /^ {2}global {2}\S+adapters\/fake\.ts$/m);
+});
+
+test("list adapters with none installed says where they go", (t) => {
+  const box = sandbox(t);
+
+  const empty = box.wa("list", "adapters");
+
+  assert.equal(empty.code, 0);
+  assert.match(empty.stdout, /no adapter file in/);
+});
+
+test("run and list adapters write the wa-env declaration", (t) => {
+  const box = sandbox(t);
+  box.withShell();
+  box.wa("list", "adapters");
+
+  const env = fs.readFileSync(path.join(box.home, "wa-env.d.ts"), "utf8");
+  assert.match(env, /declare module "wa"/);
+  assert.match(env, /shell: ReturnType<\(typeof adapter0\)\["build"\]>;/);
+  assert.match(env, /\.\/adapters\/shell\.ts/);
 });

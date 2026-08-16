@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import * as adapters from "./adapters.ts";
 import { createRun } from "./create.ts";
-import { defaultAgent, type Outcome, execute } from "./engine.ts";
+import { type Outcome, execute } from "./engine.ts";
 import { messageOf, WaError } from "./errors.ts";
 import { firstRun, install, syncSkills } from "./install.ts";
+import { blocks } from "./layout.ts";
 import { load } from "./loader.ts";
 import { parseParams, validate } from "./params.ts";
 import { type Scope, short } from "./paths.ts";
@@ -15,12 +17,12 @@ import * as workflows from "./workflows.ts";
 const usage = `wa runs one workflow file as a foreground process.
 
 usage:
-  wa list workflows|skills [--verbose]      show what you can run and what an agent can follow
-  wa run <workflow> [--param value ...]     validate params, create the run, execute it
-  wa ps                                     show every run
-  wa resume <run> [reply]                   replay the journal, then continue
-  wa install                                set up ~/.wa and choose your skill directories
-  wa sync-skills [--global|--local]         choose your skill directories again
+  wa list workflows|skills|adapters [--verbose]   show what wa can use
+  wa run <workflow> [--param value ...]           validate params, create the run, execute it
+  wa ps                                           show every run
+  wa resume <run> [reply]                         replay the journal, then continue
+  wa install                                      set up ~/.wa and choose your skill directories
+  wa sync-skills [--global|--local]               choose your skill directories again
 
 <workflow> is a name from the list, or a path to a workflow file.
 `;
@@ -65,11 +67,32 @@ async function listWhat(argv: string[]): Promise<number> {
   const [what] = rest;
   if (what === "workflows") return listWorkflows(false, verbose);
   if (what === "skills") return listSkills(verbose);
+  if (what === "adapters") return listAdapters(verbose);
   if (what === undefined) {
-    throw new WaError("wa list needs a target: wa list workflows or wa list skills");
+    throw new WaError("wa list needs a target: wa list workflows, wa list skills, or wa list adapters");
   }
   if (what === "runs") throw new WaError("wa ps shows the runs");
-  throw new WaError(`wa list takes workflows or skills, not ${what}\n\n${usage}`);
+  throw new WaError(`wa list takes workflows, skills, or adapters, not ${what}\n\n${usage}`);
+}
+
+async function listAdapters(verbose = false): Promise<number> {
+  const list = await adapters.installed(process.cwd());
+  if (list.length === 0) {
+    say(`no adapter file in ${adapters.searched(process.cwd()).map(short).join(" or ")}`);
+    return 0;
+  }
+  adapters.writeEnv(process.cwd(), list);
+  say(
+    blocks(
+      list.map((entry) => ({
+        name: entry.role,
+        tokens: [entry.name],
+        description: entry.description,
+        meta: verbose ? `${entry.scope}  ${short(entry.file)}` : "",
+      })),
+    ),
+  );
+  return 0;
 }
 
 async function listWorkflows(hint = false, verbose = false): Promise<number> {
@@ -113,14 +136,16 @@ async function runWorkflow(argv: string[]): Promise<number> {
   const source = sourceOf(target);
   const definition = await load(source);
   const params = validate(definition.params, parseParams(definition.params, rest));
+  const installed = await adapters.installed(process.cwd());
+  adapters.writeEnv(process.cwd(), installed);
   const name = createRun(source, params);
-  say(`run ${name} started, ${agentLine()}`);
+  say(`run ${name} started, ${agentLine(installed)}`);
   return code(await execute(name));
 }
 
-function agentLine(): string {
-  const command = defaultAgent();
-  return command === undefined ? "no agent is configured" : `agent ${command}`;
+function agentLine(installed: adapters.Found[]): string {
+  const picked = adapters.pick(installed, "agent");
+  return "found" in picked ? `agent ${picked.found.name}` : "no agent adapter is installed";
 }
 
 function sourceOf(target: string): string {

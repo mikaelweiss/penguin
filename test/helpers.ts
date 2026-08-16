@@ -10,20 +10,61 @@ export const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
 export type Result = { code: number; stdout: string; stderr: string; output: string };
 
-const fakeAgent = `const fs = require("node:fs");
-const [, , result, marker] = process.argv;
-let prompt = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  prompt += chunk;
+export type SessionLine = {
+  session: string;
+  first: boolean;
+  cwd: string;
+  schema: unknown;
+  options: Record<string, unknown>;
+};
+
+function fakeAgentSource(
+  name: string,
+  result: string,
+  marker: string | undefined,
+  log: string,
+): string {
+  return `import fs from "node:fs";
+import { adapter } from "wa";
+
+const result = ${JSON.stringify(result)};
+const marker = ${JSON.stringify(marker ?? null)};
+const log = ${JSON.stringify(log)};
+
+export default adapter({
+  role: "agent",
+  name: ${JSON.stringify(name)},
+  description: "fake test agent",
+  build: (host) => ({
+    async turn(turn) {
+      if (marker !== null) fs.appendFileSync(marker, turn.prompt + "\\n---END---\\n");
+      const line = {
+        session: turn.session,
+        first: turn.first,
+        cwd: turn.cwd,
+        schema: turn.schema ?? null,
+        options: turn.options,
+      };
+      fs.appendFileSync(log, JSON.stringify(line) + "\\n");
+      host.emit({ type: "agent", session: turn.session, kind: "output", text: "agent ran\\n" });
+      if (result === "none") return { ok: true, value: null };
+      if (result === "invalid") return { ok: true, value: { wrong: true } };
+      return { ok: true, value: JSON.parse(result) };
+    },
+  }),
 });
-process.stdin.on("end", () => {
-  if (marker) fs.appendFileSync(marker, prompt + "\\n---END---\\n");
-  process.stdout.write("agent ran\\n");
-  if (result === "none") return;
-  const match = prompt.match(/\\S+result\\.json/);
-  if (!match) return;
-  fs.writeFileSync(match[0], result === "invalid" ? '{"wrong":true}' : result);
+`;
+}
+
+const shellSource = `import { adapter } from "wa";
+
+export default adapter({
+  role: "shell",
+  name: "shell",
+  description: "test shell",
+  build: (host) => ({
+    run: (cmd, options) => host.shell(cmd, options),
+  }),
 });
 `;
 
@@ -31,7 +72,6 @@ export type Sandbox = {
   home: string;
   userHome: string;
   project: string;
-  agentPath: string;
   writeSkill(dir: string, name: string, text: string): void;
   wa(...args: string[]): Result;
   start(...args: string[]): ChildProcess;
@@ -40,10 +80,14 @@ export type Sandbox = {
   exists(relative: string): boolean;
   lines(relative: string): string[];
   invocations(relative: string): string[];
-  setAgent(command: string): void;
-  agentCommand(result: string, marker?: string): string;
+  setAgent(result: string, marker?: string, name?: string): void;
+  withShell(): void;
+  writeAdapter(name: string, source: string, scope?: "home" | "project"): void;
+  setDefaults(text: string): void;
+  sessions(): SessionLine[];
   runDir(run: string): string;
   journal(run: string): Entry[];
+  events(run: string): Record<string, unknown>[];
 };
 
 export function sandbox(t: TestContext): Sandbox {
@@ -54,8 +98,7 @@ export function sandbox(t: TestContext): Sandbox {
   fs.mkdirSync(home);
   fs.mkdirSync(userHome);
   fs.mkdirSync(project);
-  const agentPath = path.join(root, "fake-agent.js");
-  fs.writeFileSync(agentPath, fakeAgent);
+  const sessionLog = path.join(root, "agent-log.jsonl");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   const env = { ...process.env, WA_HOME: home, HOME: userHome };
@@ -63,7 +106,6 @@ export function sandbox(t: TestContext): Sandbox {
     home,
     userHome,
     project,
-    agentPath,
     writeSkill(dir, name, text) {
       const file = path.join(dir, name, "SKILL.md");
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -112,12 +154,28 @@ export function sandbox(t: TestContext): Sandbox {
         .split("\n---END---\n")
         .filter((prompt) => prompt.trim() !== "");
     },
-    setAgent(command) {
-      fs.writeFileSync(path.join(home, "agent"), `${command}\n`);
+    setAgent(result, marker, name = "fake") {
+      const target = marker === undefined ? undefined : path.join(project, marker);
+      box.writeAdapter(name, fakeAgentSource(name, result, target, sessionLog));
     },
-    agentCommand(result, marker) {
-      const target = marker === undefined ? "" : ` ${path.join(project, marker)}`;
-      return `node ${agentPath} '${result}'${target}`;
+    withShell() {
+      box.writeAdapter("shell", shellSource);
+    },
+    writeAdapter(name, source, scope = "home") {
+      const dir = scope === "home" ? path.join(home, "adapters") : path.join(project, ".wa", "adapters");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${name}.ts`), source);
+    },
+    setDefaults(text) {
+      fs.writeFileSync(path.join(home, "defaults"), `${text}\n`);
+    },
+    sessions() {
+      if (!fs.existsSync(sessionLog)) return [];
+      return fs
+        .readFileSync(sessionLog, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line) => JSON.parse(line) as SessionLine);
     },
     runDir(run) {
       return path.join(home, "runs", run);
@@ -128,6 +186,15 @@ export function sandbox(t: TestContext): Sandbox {
         .split("\n")
         .filter((line) => line.trim() !== "")
         .map((line) => JSON.parse(line) as Entry);
+    },
+    events(run) {
+      const file = path.join(box.runDir(run), "events.jsonl");
+      if (!fs.existsSync(file)) return [];
+      return fs
+        .readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
     },
   };
   return box;

@@ -10,8 +10,8 @@ import { z } from "zod";
 export default workflow({
   description: "${text}",
   params: ${params},
-  async run({ step }) {
-    await step.command("sh -c 'echo ${text} >> out.txt'");
+  async run({ shell }) {
+    await shell.run("sh -c 'echo ${text} >> out.txt'");
   },
 });
 `;
@@ -130,6 +130,7 @@ test("the first bare wa stops after the install output", (t) => {
 
 test("wa run takes a workflow name", (t) => {
   const box = sandbox(t);
+  box.withShell();
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
 
   const done = box.wa("run", "release");
@@ -141,6 +142,7 @@ test("wa run takes a workflow name", (t) => {
 
 test("a project workflow shadows the home workflow of the same name", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write(".wa/ticket.ts", writes("local"));
   fs.writeFileSync(path.join(box.home, "ticket.ts"), writes("global"));
 
@@ -161,6 +163,7 @@ test("a name that matches nothing names both places", (t) => {
 
 test("wa run still takes a path", (t) => {
   const box = sandbox(t);
+  box.withShell();
   box.write("w.ts", writes("path"));
 
   assert.equal(box.wa("run", "./w.ts").code, 0);

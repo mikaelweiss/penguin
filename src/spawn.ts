@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import fs from "node:fs";
-import type { CommandResult } from "./types.ts";
+import type { CommandResult, ExecOptions, ShellOptions } from "./types.ts";
 
 const active = new Set<ChildProcess>();
 
@@ -8,18 +7,30 @@ export function killActive(): void {
   for (const child of active) child.kill("SIGTERM");
 }
 
-export function runCommand(cmd: string, cwd: string): Promise<CommandResult> {
+export function runCommand(
+  cmd: string,
+  cwd: string,
+  options?: Pick<ShellOptions, "stdin">,
+): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, { shell: true, cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, {
+      shell: true,
+      cwd,
+      stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
     active.add(child);
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
+    if (options?.stdin !== undefined) {
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(options.stdin);
+    }
     child.on("error", (error) => {
       active.delete(child);
       reject(error);
@@ -31,34 +42,30 @@ export function runCommand(cmd: string, cwd: string): Promise<CommandResult> {
   });
 }
 
-export function runAgent(
-  cmd: string,
-  cwd: string,
-  prompt: string,
-  transcript: string,
-): Promise<number> {
+export function runArgv(argv: string[], cwd: string, options?: ExecOptions): Promise<number> {
+  const [cmd, ...args] = argv;
+  if (cmd === undefined) return Promise.resolve(1);
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, { shell: true, cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
     active.add(child);
-    const file = fs.createWriteStream(transcript);
-    file.write(prompt);
-    file.write("\n\n");
-    const forward = (chunk: Buffer, to: NodeJS.WriteStream): void => {
-      to.write(chunk);
-      file.write(chunk);
+    const forward = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
+      options?.onOutput?.(chunk.toString(), stream);
     };
-    child.stdout.on("data", (chunk: Buffer) => forward(chunk, process.stdout));
-    child.stderr.on("data", (chunk: Buffer) => forward(chunk, process.stderr));
-    child.stdin.on("error", () => {});
-    child.stdin.end(prompt);
+    child.stdout?.on("data", forward("stdout"));
+    child.stderr?.on("data", forward("stderr"));
+    if (options?.stdin !== undefined) {
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(options.stdin);
+    }
     child.on("error", (error) => {
       active.delete(child);
-      file.end();
       reject(error);
     });
     child.on("close", (code) => {
       active.delete(child);
-      file.end();
       resolve(code ?? 1);
     });
   });

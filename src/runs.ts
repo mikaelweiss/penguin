@@ -60,8 +60,20 @@ function detail(entries: journal.Entry[]): string {
 }
 
 function target(key: string): string {
-  const parsed = JSON.parse(key) as { cmd?: string; skill?: string; question?: string };
-  return parsed.skill ?? parsed.cmd ?? parsed.question ?? key;
+  const parsed = JSON.parse(key) as {
+    role?: string;
+    method?: string;
+    skill?: string;
+    question?: string;
+    use?: string;
+  };
+  if (parsed.skill !== undefined) return parsed.skill;
+  if (parsed.role !== undefined && parsed.method !== undefined) {
+    return `${parsed.role}.${parsed.method}`;
+  }
+  if (parsed.question !== undefined) return parsed.question;
+  if (parsed.use !== undefined) return parsed.use;
+  return key;
 }
 
 function cut(text: string): string {

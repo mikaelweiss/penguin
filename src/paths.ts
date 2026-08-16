@@ -39,8 +39,24 @@ export function runDir(name: string): string {
   return path.join(runsRoot(), name);
 }
 
-export function agentFile(): string {
-  return path.join(home(), "agent");
+export function homeAdapters(): string {
+  return path.join(home(), "adapters");
+}
+
+export function projectAdapters(cwd: string): string {
+  return path.join(projectHome(cwd), "adapters");
+}
+
+export function defaultsFile(): string {
+  return path.join(home(), "defaults");
+}
+
+export function envFile(dir: string): string {
+  return path.join(dir, "wa-env.d.ts");
+}
+
+export function eventsPath(dir: string): string {
+  return path.join(dir, "events.jsonl");
 }
 
 export function pinnedWorkflow(dir: string): string {

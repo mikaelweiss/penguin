@@ -8,10 +8,11 @@
     "types": ["node"],
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "paths": {
       "wa": ["./node_modules/wa/dist/index.d.ts"],
       "zod": ["./node_modules/wa/node_modules/zod", "./node_modules/zod"]
     }
   },
-  "include": ["*.ts"]
+  "include": ["*.ts", "adapters/*.ts"]
 }

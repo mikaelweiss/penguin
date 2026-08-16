@@ -10,8 +10,8 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({ skill: z.string() }),
-  async run({ params, step }) {
-    await step.agent(params.skill);
+  async run({ params, agent }) {
+    await agent().run(params.skill);
   },
 });
 `;
@@ -40,7 +40,7 @@ test("a skill added after the sync needs no second sync", (t) => {
   box.writeSkill(path.join(box.userHome, ".claude", "skills"), "review", "review it\n");
   box.wa("sync-skills", "--global");
   box.write("w.ts", agentWorkflow);
-  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  box.setAgent("none", "prompts.txt");
 
   box.writeSkill(path.join(box.userHome, ".claude", "skills"), "wa-triage", "triage it\n");
   const done = box.wa("run", "./w.ts", "--skill", "wa-triage");
@@ -67,7 +67,7 @@ test("with no terminal both directories are linked, claude first", (t) => {
   box.writeSkill(path.join(box.userHome, ".claude", "skills"), "review", "claude review\n");
   box.writeSkill(path.join(box.userHome, ".agents", "skills"), "review", "agents review\n");
   box.write("w.ts", agentWorkflow);
-  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  box.setAgent("none", "prompts.txt");
 
   const synced = box.wa("sync-skills", "--global");
 
@@ -83,7 +83,7 @@ test("the preferred directory wins a shared skill name", (t) => {
   box.writeSkill(path.join(box.userHome, ".agents", "skills"), "review", "agents review\n");
   box.wa("sync-skills", "--global");
   box.write("w.ts", agentWorkflow);
-  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  box.setAgent("none", "prompts.txt");
 
   fs.writeFileSync(path.join(box.home, "skills", ".order"), "agents\nclaude\n");
   assert.equal(box.wa("run", "./w.ts", "--skill", "review").code, 0);
@@ -97,7 +97,7 @@ test("a skill in the wa skills directory itself resolves first", (t) => {
   box.wa("sync-skills", "--global");
   box.writeSkill(path.join(box.home, "skills"), "review", "the wa review\n");
   box.write("w.ts", agentWorkflow);
-  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  box.setAgent("none", "prompts.txt");
 
   assert.equal(box.wa("run", "./w.ts", "--skill", "review").code, 0);
 
@@ -109,7 +109,7 @@ test("a named skill can be one markdown file", (t) => {
   box.write("w.ts", agentWorkflow);
   fs.mkdirSync(path.join(box.home, "skills"), { recursive: true });
   fs.writeFileSync(path.join(box.home, "skills", "wa-plan.md"), "plan the change\n");
-  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  box.setAgent("none", "prompts.txt");
 
   const done = box.wa("run", "./w.ts", "--skill", "wa-plan");
 
@@ -121,7 +121,7 @@ test("a skill path still resolves against the workflow file", (t) => {
   const box = sandbox(t);
   box.write("w.ts", agentWorkflow);
   box.write("skills/local.md", "the local craft\n");
-  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  box.setAgent("none", "prompts.txt");
 
   const done = box.wa("run", "./w.ts", "--skill", "./skills/local.md");
 
@@ -134,7 +134,7 @@ test("a skill nobody holds parks the run with the places wa looked", (t) => {
   box.writeSkill(path.join(box.userHome, ".claude", "skills"), "review", "review it\n");
   box.wa("sync-skills", "--global");
   box.write("w.ts", agentWorkflow);
-  box.setAgent(box.agentCommand("none"));
+  box.setAgent("none");
 
   const parked = box.wa("run", "./w.ts", "--skill", "wa-triage");
 
@@ -204,13 +204,13 @@ test("list skills shows the winner of a shared name once", (t) => {
   assert.equal(rows[0], "review");
 });
 
-test("list with no target names the two targets and fails", (t) => {
+test("list with no target names the three targets and fails", (t) => {
   const box = sandbox(t);
 
   const bare = box.wa("list");
 
   assert.equal(bare.code, 1);
-  assert.match(bare.stderr, /wa list needs a target: wa list workflows or wa list skills/);
+  assert.match(bare.stderr, /wa list needs a target: wa list workflows, wa list skills, or wa list adapters/);
 });
 
 test("list runs points at wa ps", (t) => {

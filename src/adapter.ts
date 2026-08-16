@@ -1,0 +1,14 @@
+import { WaError } from "./errors.ts";
+import type { Adapter } from "./types.ts";
+
+export function adapter<A>(definition: Adapter<A>): Adapter<A> {
+  for (const field of ["role", "name", "description"] as const) {
+    if (typeof definition[field] !== "string" || definition[field].trim() === "") {
+      throw new WaError(`an adapter needs a ${field}`);
+    }
+  }
+  if (typeof definition.build !== "function") {
+    throw new WaError("an adapter needs a build function");
+  }
+  return definition;
+}

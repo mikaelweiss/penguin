@@ -3,15 +3,22 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { installed, renderEnv } from "../src/adapters.ts";
 import type { GateEntry } from "../src/journal.ts";
-import { sandbox } from "./helpers.ts";
+import { type Sandbox, sandbox } from "./helpers.ts";
 
 const examples = fileURLToPath(new URL("../examples", import.meta.url));
 
+function catalogReady(box: Sandbox, result: string): void {
+  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
+  fs.cpSync(path.join(examples, "adapters"), path.join(box.home, "adapters"), { recursive: true });
+  box.setAgent(result);
+  box.setDefaults("agent fake");
+}
+
 test("the catalog ticket workflow runs on a fresh install", (t) => {
   const box = sandbox(t);
-  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
-  box.setAgent(box.agentCommand('{"actionable":false,"reason":"no repro"}'));
+  catalogReady(box, '{"actionable":false,"reason":"no repro"}');
 
   const parked = box.wa("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1");
 
@@ -22,11 +29,13 @@ test("the catalog ticket workflow runs on a fresh install", (t) => {
 
 function skillsNamedBy(file: string): string[] {
   const source = fs.readFileSync(path.join(examples, file), "utf8");
-  return [...source.matchAll(/step\.agent\("([^"]+)"/g)].map((match) => match[1] ?? "").sort();
+  return [...source.matchAll(/\.run\("([^"]+)"/g)].map((match) => match[1] ?? "").sort();
 }
 
 test("every skill the catalog workflows name ships with them", () => {
-  const files = fs.readdirSync(examples).filter((name) => name.endsWith(".ts"));
+  const files = fs
+    .readdirSync(examples)
+    .filter((name) => name.endsWith(".ts") && !name.endsWith(".d.ts"));
   assert.deepEqual(files.sort(), ["fix.ts", "review.ts", "task.ts", "ticket.ts"]);
 
   assert.deepEqual(skillsNamedBy("ticket.ts"), [
@@ -51,8 +60,7 @@ test("every skill the catalog workflows name ships with them", () => {
 
 test("the catalog task workflow reaches its commit gate", (t) => {
   const box = sandbox(t);
-  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
-  box.setAgent(box.agentCommand('{"verdict":"approved","findings":"none"}'));
+  catalogReady(box, '{"verdict":"approved","findings":"none"}');
 
   const parked = box.wa("run", path.join(examples, "task.ts"), "--task", "rename the flag");
 
@@ -63,8 +71,7 @@ test("the catalog task workflow reaches its commit gate", (t) => {
 
 test("the catalog fix workflow parks when the bug does not reproduce", (t) => {
   const box = sandbox(t);
-  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
-  box.setAgent(box.agentCommand('{"reproduced":false,"notes":"the page loads"}'));
+  catalogReady(box, '{"reproduced":false,"notes":"the page loads"}');
 
   const parked = box.wa("run", path.join(examples, "fix.ts"), "--bug", "BUG-2");
 
@@ -75,6 +82,7 @@ test("the catalog fix workflow parks when the bug does not reproduce", (t) => {
 
 test("the catalog review workflow parks when the diff command fails", (t) => {
   const box = sandbox(t);
+  catalogReady(box, "none");
 
   const parked = box.wa("run", path.join(examples, "review.ts"), "--pr", "42");
 
@@ -110,19 +118,39 @@ test("every catalog skill follows the SKILL.md format", () => {
   }
 });
 
-test("the catalog agent line and tsconfig are ready to copy", () => {
-  assert.equal(fs.readFileSync(path.join(examples, "agent"), "utf8").trim(), "claude -p");
+test("the catalog adapters and tsconfig are ready to copy", () => {
+  for (const name of ["claude", "git", "gh", "terminal"]) {
+    assert.ok(fs.existsSync(path.join(examples, "adapters", `${name}.ts`)), name);
+  }
 
   const text = fs.readFileSync(path.join(examples, "tsconfig.json"), "utf8");
   const config = JSON.parse(text.replaceAll(/^\s*\/\/.*$/gm, "")) as {
     compilerOptions: { paths: Record<string, string[]> };
+    include: string[];
   };
   assert.ok(config.compilerOptions.paths["wa"]?.[0]?.includes("wa"));
   assert.ok(config.compilerOptions.paths["zod"]?.[0]?.includes("zod"));
+  assert.ok(config.include.includes("adapters/*.ts"));
+});
+
+test("the checked-in wa-env.d.ts is what wa writes for the catalog", async () => {
+  const prior = process.env["WA_HOME"];
+  process.env["WA_HOME"] = examples;
+  try {
+    const list = await installed(examples);
+    assert.equal(
+      renderEnv(examples, list),
+      fs.readFileSync(path.join(examples, "wa-env.d.ts"), "utf8"),
+    );
+  } finally {
+    if (prior === undefined) delete process.env["WA_HOME"];
+    else process.env["WA_HOME"] = prior;
+  }
 });
 
 test("a workflow loads inside a repo whose package.json has no type field", (t) => {
   const box = sandbox(t);
+  box.withShell();
   fs.writeFileSync(path.join(box.project, "package.json"), '{"name":"repo"}\n');
   box.write(
     "w.ts",
@@ -132,8 +160,8 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({ tag: z.string() }),
-  async run({ params, step }) {
-    await step.command(\`sh -c 'echo \${params.tag} >> out.txt'\`);
+  async run({ params, shell }) {
+    await shell.run(\`sh -c 'echo \${params.tag} >> out.txt'\`);
   },
 });
 `,

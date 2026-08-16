@@ -1,8 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { installed, writeEnv } from "./adapters.ts";
 import { wordmark } from "./animate.ts";
-import { home, homeSkills, projectSkills, runsRoot, type Scope, short, userRoot } from "./paths.ts";
+import {
+  home,
+  homeAdapters,
+  homeSkills,
+  projectSkills,
+  runsRoot,
+  type Scope,
+  short,
+  userRoot,
+} from "./paths.ts";
 import { interactive, pick, pickMany } from "./prompt.ts";
 import { link, shared, type Source, sources } from "./skills.ts";
 
@@ -13,7 +23,10 @@ export async function install(): Promise<void> {
   const fresh = !fs.existsSync(home());
   if (interactive()) await wordmark("wa", { color: color(), delay: 65 });
   fs.mkdirSync(runsRoot(), { recursive: true });
-  if (fresh) copyCatalog();
+  if (fresh) {
+    copyCatalog();
+    writeEnv(process.cwd(), await installed(process.cwd()));
+  }
   await syncSkills("global", true);
   say(fresh ? `\ncreated ${short(home())}` : `\nwa home is ${short(home())}`);
   say(hint);
@@ -25,6 +38,7 @@ function copyCatalog(): void {
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     const at = path.join(from, entry.name);
     if (entry.name === "skills") copySkills(at);
+    else if (entry.name === "adapters") fs.cpSync(at, homeAdapters(), { recursive: true });
     else if (entry.isFile()) fs.copyFileSync(at, path.join(home(), entry.name));
   }
 }
