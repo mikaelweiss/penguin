@@ -18,7 +18,6 @@ Only `name` and `run` are required.
 
 - `name`, `description`: kebab-case name, unique within its resolution scope.
 - `params`: a `z.object` schema for the initial inputs. CLI args map onto its fields and are validated before the run is created. A URL or file path is text the workflow hands to a command.
-- `defaults`: agent and model for this workflow's steps. Absent by default: `~/.wa/config.toml` decides.
 
 Manifest extraction: wa loads the module in the sandbox and reads the exported manifest without calling `run`. Module top level must be side-effect-free.
 
@@ -27,13 +26,13 @@ Manifest extraction: wa loads the module in the sandbox and reads the exported m
 `run(ctx)` receives everything. All IO goes through it. Every `await` on this API is a durable checkpoint: the run can park there for days, survive process death, and resume.
 
 - `ctx.params`: validated params.
-- `ctx.step.agent(skill, {input, result, executor, workspace})`: run a skill on an agent. `result` is a plain `z.object` schema. The agent must satisfy it: on mismatch the engine retries once with the validation error, then gates to a human. Returns the typed result.
-- `ctx.step.command(cmd, {workspace})`: run a shell command. Returns `{code, stdout, stderr}`. Provider IO (read a ticket, open a PR, post a comment) is this primitive plus the provider's own CLI.
-- `ctx.step.workspace()`: create an isolated worktree from the invoking folder's repository, based on the branch the invoking folder is on (a worktree resolves to its own branch). wa never removes it: cleanup is `git worktree remove` by hand. A workflow that never calls workspace or git runs fine in a plain folder with no repository.
-- `ctx.gate(question, {options})`: ask a question and wait for the answer. The question prints in the terminal when attached, and `options` renders as choices. The answer is one of `options` when given, else free text. A workflow that needs two facts asks two gates. An unanswered gate parks the run: `wa answer` resumes it (`20-architecture.md`, run lifecycle). Returns the answer string.
-- `ctx.log(text)`: a line in the run log.
+- `ctx.step.agent(skill, {input, result, executor, cwd})`: run a skill on an agent. `result` is a plain `z.object` schema. The agent must satisfy it: on mismatch the engine retries once with the validation error, then gates to a human. Returns the typed result.
+- `ctx.step.command(cmd, {cwd})`: run a shell command. Returns `{code, stdout, stderr}`. Provider IO (read a ticket, open a PR, add a worktree) is this primitive plus the provider's own CLI (`gh`, `linear`, `git`).
+- `ctx.gate(question, {options})`: ask a question and wait for the answer. The question prints in the terminal when attached, and `options` renders as choices. The answer is one of `options` when given, else free text. A workflow that needs two facts asks two gates. An unanswered gate parks the run: `wa resume` with a reply resumes it (`20-architecture.md`, run lifecycle). Returns the answer string.
 
-Composition is native: `Promise.all` fans out, `Promise.race` takes the first, and both replay correctly because the journal records completion order. Helpers (a retry loop, a parallel map) are plain TypeScript over these primitives, written in the workflow file. A workflow that must wait on the outside world gates: a human or cron resumes it.
+`cwd` sets a step's working directory, resolved from the invoking folder, which is the default. A worktree is one `git worktree add` through `step.command`, its path passed as `cwd` to later steps. wa never removes one: cleanup is `git worktree remove` by hand.
+
+Composition is native: `Promise.all` fans out, `Promise.race` takes the first, and both replay correctly because the journal records completion order. Helpers (a retry loop, a parallel map, a worktree maker) are plain TypeScript over these primitives, written in the workflow file. A workflow that must wait on the outside world gates: a human or cron resumes it.
 
 ## Determinism rules
 
@@ -45,11 +44,11 @@ Three rules, enforced by the sandbox:
 
 ## Replay
 
-Every primitive call is journaled with its result. Resume and crash recovery re-execute `run` from the top while the journal answers each call instantly, until execution reaches the first unanswered call and goes live. A run pins the content hash of its workflow file and keeps a copy: editing a definition never changes an existing run.
+Every primitive call is journaled with its result. Resume and crash recovery re-execute `run` from the top while the journal answers each call instantly, until execution reaches the first unanswered call and goes live. A run keeps a pinned copy of its workflow file, and replay executes the copy: editing a definition never changes an existing run.
 
 ## Results and artifacts
 
-Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, artifact references. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. Params and results use the same zod vocabulary. Documents (a spec, a design note) are markdown files the agent writes to the run's `artifacts/` directory and references by path. Models write documents best as plain markdown, so prose never lives inside JSON strings. Outputs are whatever `run` returns: `wa run --output json` prints it to stdout. Any other destination (a GitHub issue, a file) is one `ctx.step.command` line.
+Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, artifact references. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. Params and results use the same zod vocabulary. Documents (a spec, a design note) are markdown files the agent writes to the run's `artifacts/` directory and references by path. Models write documents best as plain markdown, so prose never lives inside JSON strings. `run` returns nothing: a result leaves the run as an artifact or through one `ctx.step.command` line (a GitHub comment, a file).
 
 ## Skills
 
@@ -92,20 +91,21 @@ export default workflow({
       (await gate("Approve the plan?", { options: ["approve", "revise"] })) === "revise"
     );
 
-    const ws = await step.workspace();
+    const ws = `../wa-${params.ticket}`;
+    await step.command(`git worktree add ${ws}`);
     let approved = false;
     for (let round = 0; round < 3 && !approved; round++) {
-      await step.agent("implement", { input: plan.spec, workspace: ws });
-      const review = await step.agent("review", { input: plan.acceptance, workspace: ws, result: Review });
+      await step.agent("implement", { input: plan.spec, cwd: ws });
+      const review = await step.agent("review", { input: plan.acceptance, cwd: ws, result: Review });
       approved = review.verdict === "approved";
     }
     if (!approved) await gate("Three review rounds. Take a look.");
 
-    const pr = await step.command("gh pr create --fill", { workspace: ws });
+    const pr = await step.command("gh pr create --fill", { cwd: ws });
     while (
       (await gate(`PR is up: ${pr.stdout.trim()}.`, { options: ["address-feedback", "done"] })) === "address-feedback"
     ) {
-      await step.agent("address-feedback", { workspace: ws });
+      await step.agent("address-feedback", { cwd: ws });
     }
   },
 });

@@ -13,10 +13,10 @@ A TypeScript CLI on Node, no daemon. It runs one workflow as a foreground proces
 ## Principles
 
 1. **No background machinery.** A run is a foreground process. A parked run is files on disk. Whatever wakes a run is a human or cron typing a wa command. There is no daemon, no socket, and no event system.
-2. **Provider IO is a command plus a skill.** wa has no provider integrations. A workflow reads a ticket or posts a comment with `step.command` and the user's own CLIs (`gh`, `linear`), under the user's existing credentials. The engine never knows what GitHub is.
+2. **Provider IO is a command plus a skill.** wa has no provider integrations. A workflow reads a ticket, posts a comment, or adds a worktree with `step.command` and the user's own CLIs (`gh`, `linear`, `git`), under the user's existing credentials. The engine never knows what GitHub or git is.
 3. **Definitions can live in the repo or globally. State always lives globally.** Team workflows go in `.wa/workflows/` and ship in git. Personal workflows go in `~/.wa/workflows/`. Run state never touches the repo.
-4. **Manifests are data, workflows are code.** What the engine needs before code runs (params, defaults) is declarative. Everything inside a run's lifetime is TypeScript over a small primitive API, so control flow never grows a schema. `wa run` typechecks the workflow with `tsc` before it creates the run, so authors (human or AI) get the same feedback loop a compiler gives a programmer.
-5. **Agent-agnostic by default.** An agent is a config entry: a command template, not code. A workflow with no executor config runs on the configured default. Agent and model are overridable per workflow and per step.
+4. **Manifests are data, workflows are code.** What the engine needs before code runs (params) is declarative. Everything inside a run's lifetime is TypeScript over a small primitive API, so control flow never grows a schema. `wa run` typechecks the workflow with `tsc` before it creates the run, so authors (human or AI) get the same feedback loop a compiler gives a programmer.
+5. **Agent-agnostic by default.** An agent is a config entry: a command template, not code. A step with no executor config runs on the configured default. Agent and model are overridable per step.
 6. **The engine enforces what agents cannot self-enforce.** Gates, schema-valid results, and loop bounds, which live in workflow code that the engine executes, never in agent hands.
 7. **The core ships empty.** The engine depends on no agent and no definition. The default agent config, default workflows, and skills are catalog entries in `30-defaults.md`, and every entry is removable.
 
@@ -39,7 +39,6 @@ One name for one thing, used everywhere (code, UI, specs):
 - **skill**: the markdown craft file an agent step follows. Contains no control flow.
 - **result**: the small JSON envelope an agent step must produce. Schema-validated.
 - **artifact**: a document an agent step writes as a file (markdown), referenced from the result.
-- **output**: the value a run function returns.
 - **gate**: a step that asks a question and waits for the human answer.
 - **parked**: a run stopped at an unanswered gate or an interruption, waiting on disk for resume.
 - **agent**: an external coding CLI that executes agent steps, defined by a config entry.
