@@ -8,16 +8,16 @@ wa splits the two concerns. Structured control flow belongs to a deterministic e
 
 ## What wa is
 
-A TypeScript CLI on Node, no daemon. It runs one workflow as a foreground process against any repository or folder, with any coding agent. A workflow is one TypeScript file: a declarative manifest plus a run function over a small step API, loaded into the engine process and executed durably through journaled replay. A run can park at a gate for days: parked state is files on disk, and one command resumes it.
+A TypeScript CLI on Node, no daemon. It runs one workflow as a foreground process against any repository or folder, with any coding agent. A workflow is one self-contained TypeScript file: a declarative manifest plus a run function over a small step API, loaded into the engine process and executed durably through journaled replay. A run can park at a gate for days: parked state is files on disk, and one command resumes it.
 
 ## Principles
 
 1. **No background machinery.** A run is a foreground process. A parked run is files on disk. Whatever wakes a run is a human or cron typing a wa command. There is no daemon, no socket, and no event system.
 2. **Provider IO is a command plus a skill.** wa has no provider integrations. A workflow reads a ticket or posts a comment with `step.command` and the user's own CLIs (`gh`, `linear`), under the user's existing credentials. The engine never knows what GitHub is.
 3. **Definitions can live in the repo or globally. State always lives globally.** Team workflows go in `.wa/workflows/` and ship in git. Personal workflows go in `~/.wa/workflows/`. Run state never touches the repo.
-4. **Manifests are data, workflows are code.** What the engine needs before code runs (params, limits, defaults) is declarative. Everything inside a run's lifetime is TypeScript over a small primitive API, so control flow never grows a schema. `tsc`, `wa lint`, and `wa sim` give authors (human or AI) the same feedback loop a compiler gives a programmer.
+4. **Manifests are data, workflows are code.** What the engine needs before code runs (params, defaults) is declarative. Everything inside a run's lifetime is TypeScript over a small primitive API, so control flow never grows a schema. `wa run` typechecks the workflow with `tsc` before it creates the run, so authors (human or AI) get the same feedback loop a compiler gives a programmer.
 5. **Agent-agnostic by default.** An agent is a config entry: a command template, not code. A workflow with no executor config runs on the configured default. Agent and model are overridable per workflow and per step.
-6. **The engine enforces what agents cannot self-enforce.** Loop limits, gates, schema-valid results.
+6. **The engine enforces what agents cannot self-enforce.** Gates, schema-valid results, and loop bounds, which live in workflow code that the engine executes, never in agent hands.
 7. **The core ships empty.** The engine depends on no agent and no definition. The default agent config, default workflows, and skills are catalog entries in `30-defaults.md`, and every entry is removable.
 
 ## Non-goals
@@ -31,8 +31,8 @@ A TypeScript CLI on Node, no daemon. It runs one workflow as a foreground proces
 
 One name for one thing, used everywhere (code, UI, specs):
 
-- **workflow**: one TypeScript file: a manifest plus a run function.
-- **manifest**: the declarative header: params, limits, defaults.
+- **workflow**: one self-contained TypeScript file: a manifest plus a run function.
+- **manifest**: the declarative header: params, defaults.
 - **run**: one execution of a workflow, with its own name and journal.
 - **step**: one awaited primitive call in a run function.
 - **journal**: the append-only record of every primitive call and result. Replay reads it.
