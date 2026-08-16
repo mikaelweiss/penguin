@@ -70,7 +70,7 @@ test("with no terminal both directories are linked, claude first", (t) => {
 
   const synced = box.wa("sync-skills", "--global");
 
-  assert.match(synced.stdout, /1 skill is in both: review/);
+  assert.match(synced.stdout, /claude -> ~\/\.claude\/skills\s+\(preferred\)/);
   assert.equal(fs.readFileSync(path.join(box.home, "skills", ".order"), "utf8"), "claude\nagents\n");
   assert.equal(box.wa("run", "./w.ts", "--skill", "review").code, 0);
   assert.match(box.invocations("prompts.txt")[0] ?? "", /claude review/);
@@ -182,16 +182,13 @@ test("list skills shows the winner of a shared name once", (t) => {
   assert.match(rows[0] ?? "", /^review\s+global\s+claude/);
 });
 
-test("list with no target shows the workflows and the skills", (t) => {
+test("list with no target names the two targets and fails", (t) => {
   const box = sandbox(t);
-  box.write(".wa/ticket.ts", "export default 1;\n");
-  box.writeSkill(path.join(box.home, "skills"), "wa-triage", "triage it\n");
 
-  const listed = box.wa("list");
+  const bare = box.wa("list");
 
-  assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^WORKFLOW\s+SCOPE\s+FILE$/m);
-  assert.match(listed.stdout, /^SKILL\s+SCOPE\s+SOURCE\s+FILE$/m);
+  assert.equal(bare.code, 1);
+  assert.match(bare.stderr, /wa list needs a target: wa list workflows or wa list skills/);
 });
 
 test("list runs points at wa ps", (t) => {

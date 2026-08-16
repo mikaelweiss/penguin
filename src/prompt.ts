@@ -69,7 +69,7 @@ function drive(question: string, choices: Choice[], many: boolean): Promise<numb
         if (chosen.has(cursor)) chosen.delete(cursor);
         else chosen.add(cursor);
       } else if (named("return", "enter") || text === "\r" || text === "\n") {
-        draw();
+        out.write(`\x1b[${tall + 1}A\x1b[J`);
         input.off("keypress", onKey);
         input.setRawMode(false);
         input.pause();

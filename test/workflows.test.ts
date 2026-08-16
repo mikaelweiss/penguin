@@ -61,6 +61,19 @@ test("wa with no workflow file says where to put one", (t) => {
   assert.match(empty.stdout, new RegExp(box.home));
 });
 
+test("the first bare wa stops after the install output", (t) => {
+  const box = sandbox(t);
+  fs.rmSync(box.home, { recursive: true });
+
+  const first = box.wa();
+
+  assert.equal(first.code, 0);
+  assert.match(first.stdout, /created/);
+  assert.match(first.stdout, /wa list workflows/);
+  assert.doesNotMatch(first.stdout, /no workflow file/);
+  assert.doesNotMatch(first.stdout, /usage:/);
+});
+
 test("wa run takes a workflow name", (t) => {
   const box = sandbox(t);
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));

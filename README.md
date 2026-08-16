@@ -12,23 +12,14 @@ npm install -g wa
 
 wa needs Node 24 or newer. Your repository needs no npm install.
 
-## Install
-
-```sh
-wa install
-```
-
-The first wa command runs it for you. It creates `~/.wa/` and asks which skill directories wa should use, `~/.claude/skills` and `~/.agents/skills`. Arrows move, space toggles, enter confirms. When both hold a skill of the same name it asks which directory you prefer.
+The first wa command sets up `~/.wa/` and copies the starter catalog into it:
 
 ```
-skills in ~/.wa/skills
-  claude -> ~/.claude/skills  (preferred)
-  agents -> ~/.agents/skills
-  1 skill is in both: review
-  a skill you add later shows up on its own
+created ~/.wa
+run `wa list workflows` to see what's available and then `wa run <workflow>` from a project directory to get started
 ```
 
-wa links the whole directory, so a skill you write next week is there already. Run `wa sync-skills` only to change which directories wa uses:
+On a terminal it also asks which skill directories wa should link, `~/.claude/skills` and `~/.agents/skills`. Arrows move, space toggles, enter confirms. When both hold a skill of the same name it asks which directory you prefer. wa links the whole directory, so a skill you write next week is there already. Run `wa sync-skills` to choose again:
 
 ```sh
 wa sync-skills --global   # ~/.claude/skills and ~/.agents/skills    -> ~/.wa/skills
@@ -37,19 +28,16 @@ wa sync-skills --local    # <repo>/.claude/skills and .agents/skills -> <repo>/.
 
 Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into `~/.wa/skills/` yourself stays, and it wins the name.
 
-## Start from the catalog
+## The starter catalog
 
-The package ships an example catalog. Copy what you want:
+Install fills `~/.wa/` with four workflows, their skills, the default agent line, and a tsconfig for editor types:
 
-```sh
-wa=$(npm root -g)/wa
-cp "$wa/examples/agent" ~/.wa/agent
-cp "$wa/examples/ticket.ts" ~/.wa/ticket.ts
-cp -r "$wa/examples/skills/." ~/.wa/skills/
-cp "$wa/examples/tsconfig.json" ~/.wa/tsconfig.json
-```
+- `wa run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, plan gate, implement, review loop, PR, feedback loop.
+- `wa run task --task "..."`: one small change in the current repository: implement, review loop, then a commit gate.
+- `wa run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, PR, feedback loop.
+- `wa run review --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
 
-`~/.wa/agent` holds one line: the shell command that runs your agent, for example `claude -p`.
+`~/.wa/agent` holds one line: the shell command that runs your agent, `claude -p` by default. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
 Workflow files live in `~/.wa/` for every repository, or in `<repo>/.wa/` for one. Skills live next to them, in `skills/`.
 
@@ -78,9 +66,8 @@ export default workflow({
 ## Run it
 
 ```sh
-wa list                           # the workflows and the skills wa can use
-wa list workflows                 # just the workflows
-wa list skills                    # just the skills, and where each one comes from
+wa list workflows                 # the workflows you can run
+wa list skills                    # the skills, and where each one comes from
 wa run ticket --ticket ABC-123    # by name, or by path: wa run ./ticket.ts
 wa ps                             # every run and its state
 wa resume ticket-1 approve

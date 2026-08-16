@@ -5,9 +5,9 @@ description: Reviews a working tree against its acceptance checks and reports ea
 
 # Review the change
 
-Review the working tree against the acceptance checks. The input is the checks file path.
+Review the working tree against the acceptance checks. The input is a checks file path, or the task itself.
 
-1. Read the checks.
+1. Read the checks. A task in the input is the checks.
 2. Read the diff: `git diff main...HEAD`.
 3. Run the quality gates yourself. Do not trust the report of the last step.
 4. Test each check against the diff. A check you cannot confirm is a failed check.

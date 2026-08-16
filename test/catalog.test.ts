@@ -20,23 +20,67 @@ test("the catalog ticket workflow runs on a fresh install", (t) => {
   assert.equal(gate?.question, "Not actionable: no repro");
 });
 
-test("every skill the ticket workflow names ships with it", () => {
-  const source = fs.readFileSync(path.join(examples, "ticket.ts"), "utf8");
-  const named = [...source.matchAll(/step\.agent\("([^"]+)"/g)].map((match) => match[1] ?? "");
+function skillsNamedBy(file: string): string[] {
+  const source = fs.readFileSync(path.join(examples, file), "utf8");
+  return [...source.matchAll(/step\.agent\("([^"]+)"/g)].map((match) => match[1] ?? "").sort();
+}
 
-  assert.deepEqual(named.sort(), [
+test("every skill the catalog workflows name ships with them", () => {
+  const files = fs.readdirSync(examples).filter((name) => name.endsWith(".ts"));
+  assert.deepEqual(files.sort(), ["fix.ts", "review.ts", "task.ts", "ticket.ts"]);
+
+  assert.deepEqual(skillsNamedBy("ticket.ts"), [
     "wa-address-feedback",
     "wa-implement",
     "wa-plan",
     "wa-review",
     "wa-triage",
   ]);
-  for (const skill of named) {
-    assert.ok(
-      fs.existsSync(path.join(examples, "skills", skill, "SKILL.md")),
-      `${skill} is missing`,
-    );
+
+  for (const file of files) {
+    const named = skillsNamedBy(file);
+    assert.ok(named.length > 0, `${file} names no skill`);
+    for (const skill of named) {
+      assert.ok(
+        fs.existsSync(path.join(examples, "skills", skill, "SKILL.md")),
+        `${skill} is missing`,
+      );
+    }
   }
+});
+
+test("the catalog task workflow reaches its commit gate", (t) => {
+  const box = sandbox(t);
+  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
+  box.setAgent(box.agentCommand('{"verdict":"approved","findings":"none"}'));
+
+  const parked = box.wa("run", path.join(examples, "task.ts"), "--task", "rename the flag");
+
+  assert.equal(parked.code, 0, parked.output);
+  const gate = box.journal("task-1").find((entry): entry is GateEntry => entry.type === "gate");
+  assert.equal(gate?.question, "Commit? (commit / leave)");
+});
+
+test("the catalog fix workflow parks when the bug does not reproduce", (t) => {
+  const box = sandbox(t);
+  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
+  box.setAgent(box.agentCommand('{"reproduced":false,"notes":"the page loads"}'));
+
+  const parked = box.wa("run", path.join(examples, "fix.ts"), "--bug", "BUG-2");
+
+  assert.equal(parked.code, 0, parked.output);
+  const gate = box.journal("fix-1").find((entry): entry is GateEntry => entry.type === "gate");
+  assert.equal(gate?.question, "Not reproduced: the page loads");
+});
+
+test("the catalog review workflow parks when the diff command fails", (t) => {
+  const box = sandbox(t);
+
+  const parked = box.wa("run", path.join(examples, "review.ts"), "--pr", "42");
+
+  assert.equal(parked.code, 0, parked.output);
+  const gate = box.journal("review-1").find((entry): entry is GateEntry => entry.type === "gate");
+  assert.ok(gate?.question.startsWith("gh pr diff 42 failed:"), gate?.question);
 });
 
 test("every catalog skill follows the SKILL.md format", () => {

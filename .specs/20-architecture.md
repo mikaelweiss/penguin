@@ -52,21 +52,23 @@ wa links a whole skill directory, never one skill: a skill the user adds later s
 
 Sync writes symlinks and `.order`, nothing else. A skill the user wrote into the target survives every sync, and a link to a directory that is gone disappears.
 
+`wa sync-skills` prints the links it wrote. Install syncs silently.
+
 A step's skill name resolves against an ordered list of roots: the project skills directory, then its links in `.order` order, then the home skills directory, then its links. The first root that holds the name wins. wa's own skills carry a `wa-` prefix, so they never take the name of a skill the user already has.
 
 ## Commands
 
 `install`, `list`, `run`, `ps`, `resume`, `sync-skills`, and no command.
 
-- `install`: draw the wa wordmark, create `~/.wa/` and `~/.wa/runs/`, then sync the global skills (skills above). The first wa command runs it.
-- `list`: what wa can use. `list workflows` is a plain table of the workflow files: name, scope, file. `<project>/.wa/*.ts` is local, `~/.wa/*.ts` is global. `list skills` is a plain table of the skills a step can name: name, scope, source, file, in resolution order, one row per name. Both tables print the real path, through any symlink. With no target, both.
+- `install`: draw the wa wordmark, create `~/.wa/` and `~/.wa/runs/`, copy the catalog (`30-defaults.md`) into `~/.wa/`, then sync the global skills (skills above). The first wa command runs it.
+- `list`: what wa can use. `list workflows` is a plain table of the workflow files: name, scope, file. `<project>/.wa/*.ts` is local, `~/.wa/*.ts` is global. `list skills` is a plain table of the skills a step can name: name, scope, source, file, in resolution order, one row per name. Both tables print the real path, through any symlink. A bare `list` fails and names the two targets.
 - `run`: validate params + create + execute (run lifecycle above). It takes a workflow name from the list, local before global, or a path to any workflow file. With no workflow it lists them.
 - `ps`: a plain table of the runs: run, workflow file, state, current step or pending gate question, age, run directory. Transcripts are files in that directory: read them with any tool.
 - `resume`: replay + continue, with an optional reply for the pending gate (run lifecycle above).
 - `sync-skills`: choose the skill directories again (skills above).
-- no command: the workflow table, plus the one line that runs one.
+- no command: the workflow table, plus the one line that runs one. When this command is the first wa command, the install output is the whole output.
 
-Every question is a keyboard list: arrows move, space toggles a choice, enter confirms. With no terminal wa takes the default answer and prints it. Nothing waits for input that cannot arrive.
+Every question is a keyboard list: arrows move, space toggles a choice, enter confirms. On confirm wa erases the question. With no terminal wa takes the default answer. Nothing waits for input that cannot arrive.
 
 ## Invariants
 

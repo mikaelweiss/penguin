@@ -161,7 +161,7 @@ test("wa help prints the usage", (t) => {
   const help = box.wa("help");
 
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /wa list \[workflows\|skills\]/);
+  assert.match(help.stdout, /wa list workflows\|skills/);
   assert.match(help.stdout, /wa run <workflow>/);
   assert.match(help.stdout, /wa ps/);
   assert.match(help.stdout, /wa resume <run>/);

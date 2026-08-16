@@ -15,7 +15,7 @@ import * as workflows from "./workflows.ts";
 const usage = `wa runs one workflow file as a foreground process.
 
 usage:
-  wa list [workflows|skills]                show what you can run and what an agent can follow
+  wa list workflows|skills                  show what you can run and what an agent can follow
   wa run <workflow> [--param value ...]     validate params, create the run, execute it
   wa ps                                     show every run
   wa resume <run> [reply]                   replay the journal, then continue
@@ -31,7 +31,11 @@ async function main(argv: string[]): Promise<number> {
     await install();
     return 0;
   }
-  await firstRun();
+  const fresh = await firstRun();
+  if (fresh) {
+    if (command === undefined) return 0;
+    say("");
+  }
   if (command === "run") return runWorkflow(rest);
   if (command === "resume") return resumeRun(rest);
   if (command === "list") return listWhat(rest);
@@ -53,9 +57,7 @@ function listWhat(argv: string[]): number {
   if (what === "workflows") return listWorkflows();
   if (what === "skills") return listSkills();
   if (what === undefined) {
-    listWorkflows();
-    say("");
-    return listSkills();
+    throw new WaError("wa list needs a target: wa list workflows or wa list skills");
   }
   if (what === "runs") throw new WaError("wa ps shows the runs");
   throw new WaError(`wa list takes workflows or skills, not ${what}\n\n${usage}`);

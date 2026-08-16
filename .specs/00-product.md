@@ -18,7 +18,7 @@ A TypeScript CLI on Node. It runs one workflow as a foreground process against a
 4. **Params are data, workflows are code.** What the engine must know before code runs is one schema. Everything inside a run's lifetime is TypeScript over a small primitive API, so control flow never grows a schema.
 5. **Agent-agnostic.** An agent is one shell command string. Any step can name its own.
 6. **The engine enforces what agents cannot self-enforce.** Gates, schema-valid results, and loop bounds live in workflow code that the engine executes, never in agent hands.
-7. **The core ships empty.** The engine depends on no agent and no definition. A fresh install contains the engine and an example catalog to copy from (`30-defaults.md`).
+7. **The engine ships empty, the home starts full.** The engine depends on no agent and no definition. Install copies the starter catalog (`30-defaults.md`) into `~/.wa/`. Every entry is an ordinary file the user can edit or delete.
 
 ## Glossary
 

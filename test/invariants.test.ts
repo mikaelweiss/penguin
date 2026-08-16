@@ -206,14 +206,15 @@ test("invariant 8: the first wa command installs, and a sync keeps what you wrot
   const second = box.wa("ps");
   assert.doesNotMatch(second.stdout, /created /);
 
-  box.writeSkill(path.join(box.home, "skills"), "wa-triage", "triage it\n");
+  box.writeSkill(path.join(box.home, "skills"), "house-style", "our style\n");
   fs.rmSync(claude, { recursive: true });
   assert.equal(box.wa("sync-skills", "--global").code, 0);
 
-  assert.deepEqual(fs.readdirSync(path.join(box.home, "skills")), ["wa-triage"]);
+  const kept = fs.readdirSync(path.join(box.home, "skills"));
+  assert.equal(kept.includes("claude"), false);
   assert.equal(
-    fs.readFileSync(path.join(box.home, "skills", "wa-triage", "SKILL.md"), "utf8"),
-    "triage it\n",
+    fs.readFileSync(path.join(box.home, "skills", "house-style", "SKILL.md"), "utf8"),
+    "our style\n",
   );
 });
 
