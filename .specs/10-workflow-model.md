@@ -17,8 +17,8 @@ export default workflow({
 Only `name` and `run` are required.
 
 - `name`, `description`: kebab-case name, unique within its resolution scope.
-- `params`: typed initial inputs (`param.text()`, `param.number()`, `param.url()`, `param.file()`, `param.enum()`, `param.bool()`). CLI args map onto them and are validated before the run is created.
-- `limits`: `timeout`, `maxAgentCalls`. Breaching a limit parks the run with a gate that states the reason. The engine enforces limits, never the workflow code.
+- `params`: typed initial inputs (`param.text()`, `param.number()`, `param.enum()`, `param.bool()`). CLI args map onto them and are validated before the run is created. A URL or file path is text the workflow hands to a command.
+- `limits`: `maxAgentCalls`. Breaching it parks the run with a gate that states the reason. The engine enforces the limit, never the workflow code.
 - `defaults`: agent and model for this workflow's steps. Absent by default: `~/.wa/config.toml` decides.
 
 Manifest extraction: the runner loads the module in the sandbox and reads the exported manifest without calling `run`. Module top level must be side-effect-free. Lint enforces this.
@@ -28,10 +28,10 @@ Manifest extraction: the runner loads the module in the sandbox and reads the ex
 `run(ctx)` receives everything. All IO goes through it. Every `await` on this API is a durable checkpoint: the run can park there for days, survive process death, and resume.
 
 - `ctx.params`: validated params.
-- `ctx.step.agent(skill, {input, result, executor, workspace})`: run a skill on an agent. `result` is a zod schema. The agent must satisfy it: on mismatch the engine retries once with the validation error, then gates to a human. Returns the typed result.
+- `ctx.step.agent(skill, {input, result, executor, workspace})`: run a skill on an agent. `result` is a plain `z.object` schema. The agent must satisfy it: on mismatch the engine retries once with the validation error, then gates to a human. Returns the typed result.
 - `ctx.step.command(cmd, {workspace})`: run a shell command. Returns `{code, stdout, stderr}`. Provider IO (read a ticket, open a PR, post a comment) is this primitive plus the provider's own CLI.
 - `ctx.step.workspace({repo, base, keep})`: create an isolated worktree. Defaults: `repo` is the invoking folder's repository, `base` is the branch the invoking folder is on (a worktree resolves to its own branch). Removed when the run exits clean, kept on failure or `keep: true`. A workflow that never calls workspace or git runs fine in a plain folder with no repository. Multiple calls give multi-repo runs: `workspace({repo: "~/code/api"})` beside `workspace({repo: "~/code/web"})`.
-- `ctx.gate(question, {options, reply})`: ask a question and wait for the answer. The question prints in the terminal when attached, and `options` renders as choices. `reply` is a zod schema for structured answers, validated like a result. An unanswered gate parks the run: `wa answer` resumes it (`20-architecture.md`, run lifecycle). Returns the chosen option or the validated reply object.
+- `ctx.gate(question, {options})`: ask a question and wait for the answer. The question prints in the terminal when attached, and `options` renders as choices. The answer is one of `options` when given, else free text. A workflow that needs two facts asks two gates. An unanswered gate parks the run: `wa answer` resumes it (`20-architecture.md`, run lifecycle). Returns the answer string.
 - `ctx.sleep(duration)`, `ctx.now()`: journaled time. The only clock a workflow may use. A sleeping run waits in the foreground. Parked and resumed later, it continues immediately when the wake time has passed, else waits the remainder.
 - `ctx.log(text)`: a line in the run log.
 
@@ -51,7 +51,7 @@ Every primitive call is journaled with its result. Resume and crash recovery re-
 
 ## Results and artifacts
 
-Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, artifact references. Result fields use zod types (`z.boolean()`, `z.enum([...])`). The `param.*` vocabulary declares workflow inputs only. Documents (a spec, a design note) are markdown files the agent writes to the run's `artifacts/` directory and references by path. Models write documents best as plain markdown, so prose never lives inside JSON strings. Outputs are whatever `run` returns: `wa run --output json` prints it to stdout. Any other destination (a GitHub issue, a file) is one `ctx.step.command` line.
+Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, artifact references. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. The `param.*` vocabulary declares workflow inputs only. Documents (a spec, a design note) are markdown files the agent writes to the run's `artifacts/` directory and references by path. Models write documents best as plain markdown, so prose never lives inside JSON strings. Outputs are whatever `run` returns: `wa run --output json` prints it to stdout. Any other destination (a GitHub issue, a file) is one `ctx.step.command` line.
 
 ## Skills
 
@@ -68,18 +68,18 @@ A run's name is `<workflow>-<n>`, unique per project. Names are the handle in ev
 ## Example
 
 ```typescript
-import { workflow, param, result } from "wa";
+import { workflow, param } from "wa";
 import { z } from "zod";
 
-const Triage = result({ actionable: z.boolean(), reason: z.string() });
-const Plan = result({ spec: z.string(), acceptance: z.string() });
-const Review = result({ verdict: z.enum(["approved", "changes_needed"]), findings: z.string() });
+const Triage = z.object({ actionable: z.boolean(), reason: z.string() });
+const Plan = z.object({ spec: z.string(), acceptance: z.string() });
+const Review = z.object({ verdict: z.enum(["approved", "changes_needed"]), findings: z.string() });
 
 export default workflow({
   name: "ticket",
   description: "One ticket, from triage to merged PR.",
-  params: { ticket: param.url() },
-  limits: { timeout: "3d", maxAgentCalls: 40 },
+  params: { ticket: param.text() },
+  limits: { maxAgentCalls: 40 },
 
   async run({ params, step, gate }) {
     const t = await step.agent("triage", { input: params.ticket, result: Triage });

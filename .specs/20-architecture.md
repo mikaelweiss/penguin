@@ -4,7 +4,7 @@
 
 - **CLI (Go)**: one binary, the whole engine: command parsing, journal, replay, step dispatch, agent spawning, output rendering. No daemon, no socket, no database server. Each `wa run`, `wa resume`, or `wa answer` executes exactly one run in the foreground.
 - **Runner (TypeScript, embedded)**: a prebuilt `runner.js`, bundled with esbuild at wa's build time and embedded in the Go binary. wa spawns it with the system Node, one process per executing run. It loads the workflow file in a sandboxed context (no `Date.now`, `Math.random`, `fetch`, `fs`, or timers) and proxies every step API call to the Go process over stdio. wa journals each call and its result. Replay re-executes the script while the journal answers proxied calls until the first unanswered one. wa requires Node on the machine and says so plainly when absent. Every coding agent wa drives is itself a Node app, so the audience already has it.
-- **wa package (TypeScript)**: the types workflow authors import (`workflow`, `param`, `result`, `wa/std`). Ships with wa, resolved locally, no npm install required. wa materializes the package and its bundled zod dependency under `~/.wa/runtime/<version>/`. `wa init` writes a `tsconfig.json` into `.wa/` that maps `wa` and `zod` there, so editor LSP and the `tsc` inside `wa lint` resolve the same types.
+- **wa package (TypeScript)**: the types workflow authors import (`workflow`, `param`, `wa/std`). Ships with wa, resolved locally, no npm install required. wa materializes the package and its bundled zod dependency under `~/.wa/runtime/<version>/`. `wa init` writes a `tsconfig.json` into `.wa/` that maps `wa` and `zod` there, so editor LSP and the `tsc` inside `wa lint` resolve the same types.
 
 The engine core defines no specific agent, workflow, or skill. What a fresh install ships is the catalog in `30-defaults.md`, and every entry is removable.
 
@@ -30,7 +30,7 @@ A gate prompts in the terminal. When the process has no terminal (cron) or the u
 Ctrl-C parks the run: the in-flight step stops, the journal keeps every completed step, and resume re-dispatches from the step boundary.
 
 - `wa resume <run>` replays the journal and continues in the foreground. A pending gate prompts again.
-- `wa answer <run> <reply>` validates the reply against the pending gate, journals it, and resumes the run in the foreground.
+- `wa answer <run> <reply>` journals the reply and resumes the run in the foreground. When the gate has options, a reply outside them is rejected and the gate stays pending.
 - `wa stop <run>` marks a parked run stopped. It does not resume.
 
 A lock file makes execution exclusive: a second wa process on the same run fails plainly with the holder's pid.
@@ -52,9 +52,9 @@ An agent is an entry in `config.toml`: the executable and how to pass a prompt a
 - `run`: create + execute (run lifecycle above). `--output json` prints the run output to stdout. Lint failure blocks `wa run` unless `--force`.
 - `list`: a plain table grouped by project: run, workflow, state, current step or pending gate question, age.
 - `logs <run>`: print the engine log, `--step <n>` for one agent transcript.
-- `skills`: `wa skills import <path>` copies a skill file into `~/.wa/skills/`. `--repo` writes to `.wa/skills/` instead. `--link` makes a symlink instead of a copy. The OS resolves a chain of symlinks, so an import from a symlinked `~/.claude` works.
+- `skills`: `wa skills import <path>` copies a skill file into `~/.wa/skills/`. `--repo` writes to `.wa/skills/` instead.
 - `lint`: esbuild parse, `tsc` typecheck against the wa package types, banned-global scan, side-effect-free manifest check, skill reference resolution. Position-accurate errors.
-- `sim <workflow> --fixture <file>`: execute the real run function with every primitive answered from the fixture instead of the engine. A fixture is a JSON file: `params`, an ordered list of `{match, result}` entries that answer primitive calls, and `expect`, the primitive-call trace the run must produce. Prints the trace and checks the expectations. Lint catches invalid workflows, sim catches valid-but-wrong ones. Together they let an author, human or AI, write and test a workflow without one agent call.
+- `sim <workflow> --fixture <file>`: execute the real run function with every primitive answered from the fixture instead of the engine. A fixture is a JSON file: `params` and an ordered list of `{match, result}` entries that answer primitive calls. The entries are also the assertion: a call that does not match the next entry fails the sim, and so does an unconsumed entry at the end. Prints the trace. Lint catches invalid workflows, sim catches valid-but-wrong ones. Together they let an author, human or AI, write and test a workflow without one agent call.
 
 ## Invariants
 

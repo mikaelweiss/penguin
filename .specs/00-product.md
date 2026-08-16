@@ -17,7 +17,7 @@ A single Go binary: a CLI, no daemon. It runs one workflow as a foreground proce
 3. **Definitions can live in the repo or globally. State always lives globally.** Team workflows go in `.wa/workflows/` and ship in git. Personal workflows go in `~/.wa/workflows/`. Run state never touches the repo.
 4. **Manifests are data, workflows are code.** What the engine needs before code runs (params, limits, defaults) is declarative. Everything inside a run's lifetime is TypeScript over a small primitive API, so control flow never grows a schema. `tsc`, `wa lint`, and `wa sim` give authors (human or AI) the same feedback loop a compiler gives a programmer.
 5. **Agent-agnostic by default.** An agent is a config entry: a command template, not code. A workflow with no executor config runs on the configured default. Agent and model are overridable per workflow and per step.
-6. **The engine enforces what agents cannot self-enforce.** Loop limits, gates, timeouts, schema-valid results.
+6. **The engine enforces what agents cannot self-enforce.** Loop limits, gates, schema-valid results.
 7. **The core ships empty.** The engine depends on no agent and no definition. The default agent config, default workflows, and skills are catalog entries in `30-defaults.md`, and every entry is removable.
 
 ## Non-goals
