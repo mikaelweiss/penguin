@@ -17,7 +17,7 @@ export default workflow({
 Only `name` and `run` are required.
 
 - `name`, `description`: kebab-case name, unique within its resolution scope.
-- `params`: typed initial inputs (`param.text()`, `param.number()`, `param.enum()`, `param.bool()`). CLI args map onto them and are validated before the run is created. A URL or file path is text the workflow hands to a command.
+- `params`: a `z.object` schema for the initial inputs. CLI args map onto its fields and are validated before the run is created. A URL or file path is text the workflow hands to a command.
 - `limits`: `maxAgentCalls`. Breaching it parks the run with a gate that states the reason. The engine enforces the limit, never the workflow code.
 - `defaults`: agent and model for this workflow's steps. Absent by default: `~/.wa/config.toml` decides.
 
@@ -51,7 +51,7 @@ Every primitive call is journaled with its result. Resume and crash recovery re-
 
 ## Results and artifacts
 
-Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, artifact references. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. The `param.*` vocabulary declares workflow inputs only. Documents (a spec, a design note) are markdown files the agent writes to the run's `artifacts/` directory and references by path. Models write documents best as plain markdown, so prose never lives inside JSON strings. Outputs are whatever `run` returns: `wa run --output json` prints it to stdout. Any other destination (a GitHub issue, a file) is one `ctx.step.command` line.
+Agent steps return a small typed envelope (zod-validated): verdicts, numbers, short strings, artifact references. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. Params and results use the same zod vocabulary. Documents (a spec, a design note) are markdown files the agent writes to the run's `artifacts/` directory and references by path. Models write documents best as plain markdown, so prose never lives inside JSON strings. Outputs are whatever `run` returns: `wa run --output json` prints it to stdout. Any other destination (a GitHub issue, a file) is one `ctx.step.command` line.
 
 ## Skills
 
@@ -68,7 +68,7 @@ A run's name is `<workflow>-<n>`, unique per project. Names are the handle in ev
 ## Example
 
 ```typescript
-import { workflow, param } from "wa";
+import { workflow } from "wa";
 import { z } from "zod";
 
 const Triage = z.object({ actionable: z.boolean(), reason: z.string() });
@@ -78,7 +78,7 @@ const Review = z.object({ verdict: z.enum(["approved", "changes_needed"]), findi
 export default workflow({
   name: "ticket",
   description: "One ticket, from triage to merged PR.",
-  params: { ticket: param.text() },
+  params: z.object({ ticket: z.string() }),
   limits: { maxAgentCalls: 40 },
 
   async run({ params, step, gate }) {

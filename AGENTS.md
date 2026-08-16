@@ -18,7 +18,7 @@ These were argued and closed. Do not reopen them:
 - No provider adapters. Provider IO is `step.command` with the provider's own CLI (`gh`, `linear`) under the user's existing credentials. An agent is a `config.toml` command template, not code.
 - Manifests are data, workflow bodies are code. New control-flow needs become stdlib functions, never schema fields.
 - Run state lives under `~/.wa/`, never in a repo.
-- zod for result schemas (`z.*` types). `param.*` declares workflow inputs only. Skills are markdown with no control flow.
+- zod for params and result schemas (`z.*` types), one vocabulary for both. Skills are markdown with no control flow.
 - No workflow inheritance and no child workflows. Reuse is plain TypeScript functions.
 - Gates are CLI only: the question prompts in the terminal or parks the run for `wa answer`. One answer per gate.
 - The core ships empty. The default agent config, default workflows, and skills are removable catalog entries in `.specs/30-defaults.md`. The core specs define no specific workflow, agent, or skill. Personal workflow ideas go in `WORKFLOWS.md`.
