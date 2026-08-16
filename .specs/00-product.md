@@ -8,7 +8,7 @@ wa splits the two concerns. Structured control flow belongs to a deterministic e
 
 ## What wa is
 
-A single Go binary: a CLI, no daemon. It runs one workflow as a foreground process against any repository or folder, with any coding agent. A workflow is one TypeScript file: a declarative manifest plus a run function over a small step API, executed durably through journaled replay. A run can park at a gate for days: parked state is files on disk, and one command resumes it.
+A TypeScript CLI on Node, no daemon. It runs one workflow as a foreground process against any repository or folder, with any coding agent. A workflow is one TypeScript file: a declarative manifest plus a run function over a small step API, loaded into the engine process and executed durably through journaled replay. A run can park at a gate for days: parked state is files on disk, and one command resumes it.
 
 ## Principles
 

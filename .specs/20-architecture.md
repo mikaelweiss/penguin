@@ -2,9 +2,9 @@
 
 ## Components
 
-- **CLI (Go)**: one binary, the whole engine: command parsing, journal, replay, step dispatch, agent spawning, output rendering. No daemon, no socket, no database server. Each `wa run`, `wa resume`, or `wa answer` executes exactly one run in the foreground.
-- **Runner (TypeScript, embedded)**: a prebuilt `runner.js`, bundled with esbuild at wa's build time and embedded in the Go binary. wa spawns it with the system Node, one process per executing run. It loads the workflow file in a sandboxed context (no `Date.now`, `Math.random`, `fetch`, `fs`, or timers) and proxies every step API call to the Go process over stdio. wa journals each call and its result. Replay re-executes the script while the journal answers proxied calls until the first unanswered one. wa requires Node on the machine and says so plainly when absent. Every coding agent wa drives is itself a Node app, so the audience already has it.
-- **wa package (TypeScript)**: the types workflow authors import (`workflow`, `param`, `wa/std`). Ships with wa, resolved locally, no npm install required. wa materializes the package and its bundled zod dependency under `~/.wa/runtime/<version>/`. `wa init` writes a `tsconfig.json` into `.wa/` that maps `wa` and `zod` there, so editor LSP and the `tsc` inside `wa lint` resolve the same types.
+- **CLI (TypeScript)**: one npm package, one `wa` command, the whole engine: command parsing, journal, replay, step dispatch, agent spawning, output rendering. It runs on system Node (20 or newer), one foreground process per executing run. No daemon, no socket, no database server. Each `wa run`, `wa resume`, or `wa answer` executes exactly one run in the foreground.
+- **Workflow loading**: wa bundles the workflow file with esbuild (a library dependency) and evaluates the bundle in a sandboxed `node:vm` context. The context exposes standard JS builtins, the `wa` package, and zod, and nothing else: no `Date.now`, `Math.random`, `fetch`, `fs`, or timers. Local imports bundle in, so reuse across files is plain functions. A step API call is a direct function call into the engine, which journals the call and its result. Replay re-executes the bundle while the journal answers each call in sequence, until execution reaches the first unanswered call and goes live.
+- **wa package (TypeScript)**: the types workflow authors import (`workflow`, `param`, `wa/std`), part of wa itself, with zod as a bundled dependency. `wa init` writes a `tsconfig.json` into `.wa/` that maps `wa` and `zod` to the installed wa package, so editor LSP and the `tsc` inside `wa lint` resolve the same types. The user's repo needs no npm install.
 
 The engine core defines no specific agent, workflow, or skill. What a fresh install ships is the catalog in `30-defaults.md`, and every entry is removable.
 
@@ -12,9 +12,8 @@ The engine core defines no specific agent, workflow, or skill. What a fresh inst
 
 Plain files, no database.
 
-- `~/.wa/projects/<id>/runs/<name>/`: one directory per run. `run.json` (status, params, workflow hash, timestamps), `journal.jsonl` (append-only), `workflow.ts` (the pinned copy), `logs/` (engine log, one transcript per agent invocation), `artifacts/`, `lock` (held by the executing process).
+- `~/.wa/projects/<id>/runs/<name>/`: one directory per run. `run.json` (status, params, workflow hash, timestamps), `journal.jsonl` (append-only), `workflow.js` (the pinned compiled bundle), `logs/` (engine log, one transcript per agent invocation), `artifacts/`, `lock` (held by the executing process).
 - `~/.wa/config.toml`: agent entries (command templates), default agent, default model.
-- `~/.wa/runtime/<version>/`: the materialized wa TypeScript package and bundled zod.
 - `~/.wa/workflows/`, `~/.wa/skills/`: personal definitions. Install seeds them with the default set (`30-defaults.md`).
 
 ## Project identity
@@ -54,14 +53,14 @@ An agent is an entry in `config.toml`: the executable and how to pass a prompt a
 - `logs <run>`: print the engine log, `--step <n>` for one agent transcript.
 - `skills`: `wa skills import <path>` copies a skill file into `~/.wa/skills/`. `--repo` writes to `.wa/skills/` instead.
 - `lint`: esbuild parse, `tsc` typecheck against the wa package types, banned-global scan, side-effect-free manifest check, skill reference resolution. Position-accurate errors.
-- `sim <workflow> --fixture <file>`: execute the real run function with every primitive answered from the fixture instead of the engine. A fixture is a JSON file: `params` and an ordered list of `{match, result}` entries that answer primitive calls. The entries are also the assertion: a call that does not match the next entry fails the sim, and so does an unconsumed entry at the end. Prints the trace. Lint catches invalid workflows, sim catches valid-but-wrong ones. Together they let an author, human or AI, write and test a workflow without one agent call.
+- `sim <workflow> --fixture <file>`: execute the real run function with every primitive answered from the fixture instead of the engine. A fixture is a JSON file: `params` and an ordered list of `{match, result}` entries that answer primitive calls. Sim runs through the replay layer: a fixture is a pre-seeded journal. The entries are also the assertion: a call that does not match the next entry fails the sim, and so does an unconsumed entry at the end. Prints the trace. Lint catches invalid workflows, sim catches valid-but-wrong ones. Together they let an author, human or AI, write and test a workflow without one agent call.
 
 ## Invariants
 
 Each one line, each pinned by a test:
 
-1. A run pins the content hash and a copy of its workflow file. Editing a definition never changes an existing run.
-2. The journal is append-only. Replay of an unchanged script against its journal reaches the same live point with zero re-executed side effects.
+1. A run pins the content hash and a copy of its compiled workflow bundle. Editing a definition never changes an existing run.
+2. The journal is append-only. Replay of an unchanged bundle against its journal reaches the same live point with zero re-executed side effects.
 3. At most one process executes a run at a time. A second `wa` process on the same run fails plainly with the holder's pid.
 4. A run interrupted mid-step resumes from the step boundary. Completed steps never re-execute.
 5. A gate consumes exactly one answer, and the answer is journaled. An invalid reply leaves the gate pending.

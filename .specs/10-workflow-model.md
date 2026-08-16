@@ -21,7 +21,7 @@ Only `name` and `run` are required.
 - `limits`: `maxAgentCalls`. Breaching it parks the run with a gate that states the reason. The engine enforces the limit, never the workflow code.
 - `defaults`: agent and model for this workflow's steps. Absent by default: `~/.wa/config.toml` decides.
 
-Manifest extraction: the runner loads the module in the sandbox and reads the exported manifest without calling `run`. Module top level must be side-effect-free. Lint enforces this.
+Manifest extraction: wa loads the module in the sandbox and reads the exported manifest without calling `run`. Module top level must be side-effect-free. Lint enforces this.
 
 ## The step API
 

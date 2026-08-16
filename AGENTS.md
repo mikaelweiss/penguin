@@ -13,7 +13,7 @@ The specs describe the final product. They contain no milestones, phases, or bui
 
 These were argued and closed. Do not reopen them:
 
-- Engine is Go, one CLI binary, no daemon. Workflow files are TypeScript, executed by a sandboxed runner subprocess on system Node with journaled replay. A YAML/CEL schema and Starlark were both considered and rejected.
+- Engine is TypeScript, one Node CLI, no daemon. Workflow files are TypeScript, bundled with esbuild and evaluated in a sandboxed vm context inside the engine process, with journaled replay. A YAML/CEL schema, Starlark, and a Go engine with a runner subprocess were all considered and rejected.
 - No background machinery. The daemon, sockets, SQLite, event triggers, watchers, subscriptions, mailboxes, messages, channels, mid-step interrupt policies, dedup, pools, and queues were specced in full and then cut. A run is a foreground process, a parked run is files on disk, and a human or cron resumes it. Do not reintroduce any of it.
 - No provider adapters. Provider IO is `step.command` with the provider's own CLI (`gh`, `linear`) under the user's existing credentials. An agent is a `config.toml` command template, not code.
 - Manifests are data, workflow bodies are code. New control-flow needs become stdlib functions, never schema fields.
@@ -28,5 +28,5 @@ These were argued and closed. Do not reopen them:
 
 - Every engine invariant in `20-architecture.md` is pinned by a test. A change that touches one updates its test.
 - Spec and code move together: a behavior change lands with its spec edit in the same commit.
-- Quality gates for every change: `go vet`, `golangci-lint run`, and `go test ./... -race` pass. Runner tests pass under system Node.
+- Quality gates for every change: `tsc --noEmit` and the test suite (`node --test`) pass under system Node.
 - `wa lint` rejects each documented invalid case (type error, banned global, side-effecting manifest, unknown skill) with file and line.
