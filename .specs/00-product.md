@@ -14,7 +14,7 @@ A TypeScript CLI on Node. It runs one workflow as a foreground process against a
 
 1. **A run is a foreground process.** A parked run is files on disk. A human or cron wakes it with a wa command.
 2. **Provider IO is a command plus a skill.** A workflow reads a ticket, posts a comment, or adds a worktree with `step.command` and the user's own CLIs (`gh`, `linear`, `git`), under the user's existing credentials.
-3. **Definitions are files the user keeps anywhere.** Team workflows sit in the repo and ship in git. Personal workflows sit in the home directory. Run state lives under `~/.wa/`.
+3. **Definitions are files the user keeps anywhere.** Team workflows and skills sit in `<project>/.wa/` and ship in git. Personal ones sit in `~/.wa/`. wa lists both and runs either. Run state lives under `~/.wa/`.
 4. **Params are data, workflows are code.** What the engine must know before code runs is one schema. Everything inside a run's lifetime is TypeScript over a small primitive API, so control flow never grows a schema.
 5. **Agent-agnostic.** An agent is one shell command string. Any step can name its own.
 6. **The engine enforces what agents cannot self-enforce.** Gates, schema-valid results, and loop bounds live in workflow code that the engine executes, never in agent hands.
@@ -28,7 +28,7 @@ One name for one thing, used everywhere (code, UI, specs):
 - **run**: one execution of a workflow, with its own name and journal.
 - **step**: one awaited primitive call in a run function.
 - **journal**: the append-only record of every primitive call and result. Replay reads it.
-- **skill**: the markdown craft file an agent step follows.
+- **skill**: the markdown craft file an agent step follows, in the Agent Skills format. A step names it, and wa finds it in a skills directory.
 - **result**: the small JSON envelope an agent step produces. Schema-validated.
 - **gate**: a step that asks a question and waits for the human answer.
 - **parked**: a run waiting on disk, at a gate or after an interruption, for resume.

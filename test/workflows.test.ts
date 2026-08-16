@@ -1,0 +1,102 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { sandbox } from "./helpers.ts";
+
+const writes = (text: string) => `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  params: z.object({}),
+  async run({ step }) {
+    await step.command("sh -c 'echo ${text} >> out.txt'");
+  },
+});
+`;
+
+test("list workflows shows the workflow files of both places", (t) => {
+  const box = sandbox(t);
+  box.write(".wa/ticket.ts", writes("local"));
+  fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
+
+  const listed = box.wa("list", "workflows");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /^WORKFLOW\s+SCOPE\s+FILE$/m);
+  assert.match(listed.stdout, new RegExp(`^ticket\\s+local\\s+${path.join(box.project, ".wa")}`, "m"));
+  assert.match(listed.stdout, new RegExp(`^release\\s+global\\s+${box.home}`, "m"));
+  assert.doesNotMatch(listed.stdout, /run one with/);
+});
+
+test("wa with no command lists the workflows and says how to run one", (t) => {
+  const box = sandbox(t);
+  box.write(".wa/ticket.ts", writes("local"));
+
+  const listed = box.wa();
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /^ticket\s+local/m);
+  assert.match(listed.stdout, /run one with: wa run <workflow>/);
+});
+
+test("wa run with no workflow lists them instead of failing", (t) => {
+  const box = sandbox(t);
+  box.write(".wa/ticket.ts", writes("local"));
+
+  const listed = box.wa("run");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /^ticket\s+local/m);
+  assert.match(listed.stdout, /run one with: wa run <workflow>/);
+});
+
+test("wa with no workflow file says where to put one", (t) => {
+  const box = sandbox(t);
+
+  const empty = box.wa();
+
+  assert.equal(empty.code, 0);
+  assert.match(empty.stdout, new RegExp(`no workflow file in ${path.join(box.project, ".wa")}`));
+  assert.match(empty.stdout, new RegExp(box.home));
+});
+
+test("wa run takes a workflow name", (t) => {
+  const box = sandbox(t);
+  fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
+
+  const done = box.wa("run", "release");
+
+  assert.equal(done.code, 0, done.output);
+  assert.match(done.stdout, /^run release-1$/m);
+  assert.deepEqual(box.lines("out.txt"), ["global"]);
+});
+
+test("a project workflow shadows the home workflow of the same name", (t) => {
+  const box = sandbox(t);
+  box.write(".wa/ticket.ts", writes("local"));
+  fs.writeFileSync(path.join(box.home, "ticket.ts"), writes("global"));
+
+  assert.equal(box.wa("run", "ticket").code, 0);
+
+  assert.deepEqual(box.lines("out.txt"), ["local"]);
+});
+
+test("a name that matches nothing names both places", (t) => {
+  const box = sandbox(t);
+
+  const failed = box.wa("run", "nothing");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /no workflow file at .*nothing/);
+  assert.match(failed.stderr, /no workflow named nothing in/);
+});
+
+test("wa run still takes a path", (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", writes("path"));
+
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+
+  assert.deepEqual(box.lines("out.txt"), ["path"]);
+});

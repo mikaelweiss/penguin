@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import * as journal from "./journal.ts";
 import { holder } from "./lock.ts";
-import { runDir, runsRoot } from "./paths.ts";
+import { runDir, runsRoot, short } from "./paths.ts";
+import { table } from "./table.ts";
 
 export type Row = {
   run: string;
@@ -26,27 +27,9 @@ export function rows(now: number): Row[] {
 }
 
 export function render(list: Row[]): string {
-  const header: Row = {
-    run: "RUN",
-    workflow: "WORKFLOW",
-    state: "STATE",
-    step: "STEP",
-    age: "AGE",
-    dir: "DIRECTORY",
-  };
-  const all = [header, ...list];
   const columns: (keyof Row)[] = ["run", "workflow", "state", "step", "age", "dir"];
-  const widths = columns.map((column) =>
-    Math.max(...all.map((entry) => entry[column].length)),
-  );
-  return all
-    .map((entry) =>
-      columns
-        .map((column, index) => entry[column].padEnd(widths[index] ?? 0))
-        .join("  ")
-        .trimEnd(),
-    )
-    .join("\n");
+  const header = ["RUN", "WORKFLOW", "STATE", "STEP", "AGE", "DIRECTORY"];
+  return table([header, ...list.map((entry) => columns.map((column) => entry[column]))]);
 }
 
 function row(name: string, now: number): Row {
@@ -58,11 +41,11 @@ function row(name: string, now: number): Row {
   const state = pid !== undefined ? `running (${pid})` : done ? "done" : "parked";
   return {
     run: name,
-    workflow: start.workflow,
+    workflow: short(start.workflow),
     state,
     step: done ? "-" : detail(entries),
     age: age(now - Date.parse(start.createdAt)),
-    dir,
+    dir: short(dir),
   };
 }
 

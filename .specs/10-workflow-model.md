@@ -21,7 +21,7 @@ wa imports the module and reads the exported params schema without calling `run`
 `run(ctx)` receives everything. All IO goes through it. Every `await` on this API is a durable checkpoint: the run can park there for days, survive process death, and resume.
 
 - `ctx.params`: validated params.
-- `ctx.step.agent(skill, {input, result, agent, cwd})`: run a skill on an agent. `skill` is the path to a markdown file, relative to the workflow file. `result` is a plain `z.object` schema. The agent must satisfy it: on mismatch the engine retries once with the validation error, then gates to a human. A non-zero exit is a mismatch. `agent` is a shell command string that overrides the default agent (`20-architecture.md`, agents). Returns the typed result.
+- `ctx.step.agent(skill, {input, result, agent, cwd})`: run a skill on an agent. `skill` is a skill name or a path to a markdown file (skills below). `result` is a plain `z.object` schema. The agent must satisfy it: on mismatch the engine retries once with the validation error, then gates to a human. A non-zero exit is a mismatch. `agent` is a shell command string that overrides the default agent (`20-architecture.md`, agents). Returns the typed result.
 - `ctx.step.command(cmd, {cwd})`: run a shell command. Returns `{code, stdout, stderr}`. Provider IO (read a ticket, open a PR, add a worktree) is this primitive plus the provider's own CLI (`gh`, `linear`, `git`).
 - `ctx.gate(question)`: ask a question and wait for the answer. The question prints in the terminal when attached. The answer is free text. A workflow that wants fixed choices writes them into the question and loops on the answer. A workflow that needs two facts asks two gates. An unanswered gate parks the run: `wa resume` with a reply resumes it (`20-architecture.md`, run lifecycle). Returns the answer string.
 
@@ -49,7 +49,14 @@ Agent steps return a small typed envelope (zod-validated): verdicts, numbers, sh
 
 ## Skills
 
-A skill is a markdown craft file: how to do one step well. The skill holds craft, and the workflow holds control flow. A step references its skill by path, relative to the workflow file. wa reads the file and sends its content with the step prompt.
+A skill is a markdown craft file: how to do one step well. The skill holds craft, and the workflow holds control flow. wa reads the file and sends its content with the step prompt.
+
+A step names its skill two ways:
+
+- **By name**, for example `wa-review`. The name is a directory that holds a `SKILL.md`, or one markdown file named for the skill. wa looks in the project skills roots, then the home skills roots (`20-architecture.md`, skills).
+- **By path**, for example `./skills/review.md`, resolved against the workflow file. A path holds a `/` or starts with a `.`.
+
+A name that resolves nowhere parks the run, and the error names every place wa looked.
 
 ## Run identity
 
@@ -69,7 +76,7 @@ export default workflow({
   params: z.object({ ticket: z.string() }),
 
   async run({ params, step, gate }) {
-    const t = await step.agent("./skills/triage.md", { input: params.ticket, result: Triage });
+    const t = await step.agent("wa-triage", { input: params.ticket, result: Triage });
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
@@ -77,22 +84,22 @@ export default workflow({
 
     let plan;
     do {
-      plan = await step.agent("./skills/plan.md", { result: Plan });
+      plan = await step.agent("wa-plan", { result: Plan });
     } while ((await gate("Approve the plan? (approve / revise)")) !== "approve");
 
     const ws = `../wa-${params.ticket}`;
     await step.command(`git worktree add ${ws}`);
     let approved = false;
     for (let round = 0; round < 3 && !approved; round++) {
-      await step.agent("./skills/implement.md", { input: plan.spec, cwd: ws });
-      const review = await step.agent("./skills/review.md", { input: plan.acceptance, cwd: ws, result: Review });
+      await step.agent("wa-implement", { input: plan.spec, cwd: ws });
+      const review = await step.agent("wa-review", { input: plan.acceptance, cwd: ws, result: Review });
       approved = review.verdict === "approved";
     }
     if (!approved) await gate("Three review rounds. Take a look.");
 
     const pr = await step.command("gh pr create --fill", { cwd: ws });
     while ((await gate(`PR is up: ${pr.stdout.trim()} (address-feedback / done)`)) !== "done") {
-      await step.agent("./skills/address-feedback.md", { cwd: ws });
+      await step.agent("wa-address-feedback", { cwd: ws });
     }
   },
 });

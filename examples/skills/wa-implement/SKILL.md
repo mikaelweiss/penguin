@@ -1,3 +1,8 @@
+---
+name: wa-implement
+description: Builds the change a plan describes, with its tests and quality gates. Use when a plan is approved and the code must be written.
+---
+
 # Implement the plan
 
 Build the change in the plan. The input is the plan file path.

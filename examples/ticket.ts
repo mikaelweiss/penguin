@@ -12,7 +12,7 @@ export default workflow({
   params: z.object({ ticket: z.string() }),
 
   async run({ params, step, gate }) {
-    const t = await step.agent("./skills/triage.md", { input: params.ticket, result: Triage });
+    const t = await step.agent("wa-triage", { input: params.ticket, result: Triage });
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
@@ -20,15 +20,15 @@ export default workflow({
 
     let plan;
     do {
-      plan = await step.agent("./skills/plan.md", { input: params.ticket, result: Plan });
+      plan = await step.agent("wa-plan", { input: params.ticket, result: Plan });
     } while ((await gate("Approve the plan? (approve / revise)")) !== "approve");
 
     const ws = `../wa-${params.ticket}`;
     await step.command(`git worktree add ${ws}`);
     let approved = false;
     for (let round = 0; round < 3 && !approved; round++) {
-      await step.agent("./skills/implement.md", { input: plan.spec, cwd: ws });
-      const review = await step.agent("./skills/review.md", {
+      await step.agent("wa-implement", { input: plan.spec, cwd: ws });
+      const review = await step.agent("wa-review", {
         input: plan.acceptance,
         cwd: ws,
         result: Review,
@@ -39,7 +39,7 @@ export default workflow({
 
     const pr = await step.command("gh pr create --fill", { cwd: ws });
     while ((await gate(`PR is up: ${pr.stdout.trim()} (address-feedback / done)`)) !== "done") {
-      await step.agent("./skills/address-feedback.md", { cwd: ws });
+      await step.agent("wa-address-feedback", { cwd: ws });
     }
   },
 });

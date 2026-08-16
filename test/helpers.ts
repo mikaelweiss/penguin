@@ -29,8 +29,10 @@ process.stdin.on("end", () => {
 
 export type Sandbox = {
   home: string;
+  userHome: string;
   project: string;
   agentPath: string;
+  writeSkill(dir: string, name: string, text: string): void;
   wa(...args: string[]): Result;
   start(...args: string[]): ChildProcess;
   write(relative: string, text: string): string;
@@ -45,20 +47,28 @@ export type Sandbox = {
 };
 
 export function sandbox(t: TestContext): Sandbox {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wa-test-"));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wa-test-")));
   const home = path.join(root, "wa-home");
+  const userHome = path.join(root, "user-home");
   const project = path.join(root, "project");
   fs.mkdirSync(home);
+  fs.mkdirSync(userHome);
   fs.mkdirSync(project);
   const agentPath = path.join(root, "fake-agent.js");
   fs.writeFileSync(agentPath, fakeAgent);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  const env = { ...process.env, WA_HOME: home };
+  const env = { ...process.env, WA_HOME: home, HOME: userHome };
   const box: Sandbox = {
     home,
+    userHome,
     project,
     agentPath,
+    writeSkill(dir, name, text) {
+      const file = path.join(dir, name, "SKILL.md");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+    },
     wa(...args) {
       const done = spawnSync(process.execPath, [cli, ...args], {
         cwd: project,

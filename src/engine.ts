@@ -8,6 +8,7 @@ import * as journal from "./journal.ts";
 import { acquire } from "./lock.ts";
 import { load } from "./loader.ts";
 import { agentFile, pinnedWorkflow, runDir, transcriptsDir } from "./paths.ts";
+import { resolve as resolveSkill } from "./skills.ts";
 import { killActive, runCommand } from "./spawn.ts";
 import type { AgentOptions, CommandOptions, CommandResult, Step } from "./types.ts";
 
@@ -144,9 +145,11 @@ class Execution {
     if (command === undefined) {
       throw this.parkError(`no agent is configured. Write this line to ${agentFile()}: claude -p`, true);
     }
-    const skillPath = path.resolve(path.dirname(this.start.workflow), skill);
-    if (!fs.existsSync(skillPath)) throw this.parkError(`no skill file at ${skillPath}`, true);
-    const skillText = fs.readFileSync(skillPath, "utf8");
+    const found = resolveSkill(skill, this.start.workflow, this.start.cwd);
+    if (found.file === undefined) {
+      throw this.parkError(`no skill ${skill}. Looked in ${found.searched.join(", ")}`, true);
+    }
+    const skillText = fs.readFileSync(found.file, "utf8");
     const cwd = this.resolveCwd(options?.cwd);
     fs.mkdirSync(transcriptsDir(this.dir), { recursive: true });
 

@@ -10,11 +10,12 @@ const examples = fileURLToPath(new URL("../examples", import.meta.url));
 
 test("the catalog ticket workflow runs on a fresh install", (t) => {
   const box = sandbox(t);
+  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
   box.setAgent(box.agentCommand('{"actionable":false,"reason":"no repro"}'));
 
   const parked = box.wa("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1");
 
-  assert.equal(parked.code, 0);
+  assert.equal(parked.code, 0, parked.output);
   const gate = box.journal("ticket-1").find((entry): entry is GateEntry => entry.type === "gate");
   assert.equal(gate?.question, "Not actionable: no repro");
 });
@@ -24,14 +25,44 @@ test("every skill the ticket workflow names ships with it", () => {
   const named = [...source.matchAll(/step\.agent\("([^"]+)"/g)].map((match) => match[1] ?? "");
 
   assert.deepEqual(named.sort(), [
-    "./skills/address-feedback.md",
-    "./skills/implement.md",
-    "./skills/plan.md",
-    "./skills/review.md",
-    "./skills/triage.md",
+    "wa-address-feedback",
+    "wa-implement",
+    "wa-plan",
+    "wa-review",
+    "wa-triage",
   ]);
   for (const skill of named) {
-    assert.ok(fs.existsSync(path.join(examples, skill)), `${skill} is missing`);
+    assert.ok(
+      fs.existsSync(path.join(examples, "skills", skill, "SKILL.md")),
+      `${skill} is missing`,
+    );
+  }
+});
+
+test("every catalog skill follows the SKILL.md format", () => {
+  const dir = path.join(examples, "skills");
+  const names = fs.readdirSync(dir);
+  assert.ok(names.length > 0);
+
+  for (const name of names) {
+    assert.match(name, /^wa-[a-z0-9]+(-[a-z0-9]+)*$/, `${name} is not a wa- prefixed skill name`);
+    assert.ok(name.length <= 64, `${name} is longer than 64 characters`);
+
+    const text = fs.readFileSync(path.join(dir, name, "SKILL.md"), "utf8");
+    const front = /^---\n([\s\S]*?)\n---\n/.exec(text);
+    assert.ok(front !== null, `${name} has no frontmatter`);
+
+    const fields = new Map(
+      (front[1] ?? "")
+        .split("\n")
+        .map((line) => line.split(/:(.*)/s))
+        .map(([key, value]) => [key ?? "", (value ?? "").trim()]),
+    );
+    assert.deepEqual([...fields.keys()].sort(), ["description", "name"], `${name} has extra keys`);
+    assert.equal(fields.get("name"), name, `the name of ${name} is not the directory name`);
+    const description = fields.get("description") ?? "";
+    assert.ok(description.length > 0 && description.length <= 1024);
+    assert.match(description, /Use (when|after|before)/, `${name} says nothing about when to use it`);
   }
 });
 

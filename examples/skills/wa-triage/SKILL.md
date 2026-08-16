@@ -1,3 +1,8 @@
+---
+name: wa-triage
+description: Decides if a ticket is ready to work on and names the deciding fact. Use before any planning, when a ticket needs a go or no-go.
+---
+
 # Triage a ticket
 
 Decide if the ticket is ready to work on. Do not write code.

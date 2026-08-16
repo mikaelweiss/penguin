@@ -10,10 +10,15 @@
 
 Plain files.
 
+- `~/.wa/*.ts`: the personal workflow files.
+- `~/.wa/skills/`: the skills every workflow can name. A skill directly inside it is wa's own. A symlink inside it points at a whole skill directory the user already keeps, and `.order` holds those link names, most preferred first.
 - `~/.wa/runs/<name>/`: one flat directory per run, the run name as the directory name. `journal.jsonl` (append-only; entry zero records the params, the workflow file path, the invoking folder, and the creation time), `workflow.ts` (the pinned source copy), `transcripts/` (one file per agent invocation), `lock` (held by the executing process).
 - `~/.wa/agent`: one line, the default agent command.
+- `<project>/.wa/`: the same two definition places for one repository, `*.ts` and `skills/`. It ships in git. It holds no runs.
 
 `WA_HOME` moves the whole tree.
+
+The first wa command installs (commands below). A home that exists is left alone.
 
 Run state derives from the files: a held lock means running, a journal that ends at an unanswered gate or a recorded interruption means parked, a journal that records the run function's return means done.
 
@@ -37,13 +42,31 @@ OS cron calling `wa` covers schedules.
 
 An agent is one shell command string, for example `claude -p`. wa spawns the string through the shell, writes the step prompt to its stdin, pipes its output unchanged to the terminal and the transcript, and validates `result.json`. The agent renders itself. The default string lives in `~/.wa/agent`. A step's `agent` option overrides it. An agent step with no agent configured parks the run, with the one line to write to `~/.wa/agent` as the recorded reason.
 
+## Skills
+
+A skill is a directory that holds a `SKILL.md`, in the [Agent Skills](https://agentskills.io) format: frontmatter with `name` (the directory name) and `description`, then the craft in markdown. One markdown file named for the skill works too. wa sends the file content with the step prompt.
+
+wa links a whole skill directory, never one skill: a skill the user adds later shows up with no second command. The two sources are `.claude/skills/` and `.agents/skills/`. A link keeps its source's short name, `claude` or `agents`.
+
+`wa sync-skills` writes those links. On a terminal it asks which directories to use. When both hold a skill of the same name it asks which directory is the preference, and writes the answer to `.order`. With no terminal it takes every directory that exists, `claude` first. `--global` reads the two directories under the home folder and writes `~/.wa/skills/`. `--local` reads the two under the invoking folder and writes `<project>/.wa/skills/`. With no option it does both.
+
+Sync writes symlinks and `.order`, nothing else. A skill the user wrote into the target survives every sync, and a link to a directory that is gone disappears.
+
+A step's skill name resolves against an ordered list of roots: the project skills directory, then its links in `.order` order, then the home skills directory, then its links. The first root that holds the name wins. wa's own skills carry a `wa-` prefix, so they never take the name of a skill the user already has.
+
 ## Commands
 
-`run`, `resume`, `list`.
+`install`, `list`, `run`, `ps`, `resume`, `sync-skills`, and no command.
 
-- `run`: validate params + create + execute (run lifecycle above).
+- `install`: draw the wa wordmark, create `~/.wa/` and `~/.wa/runs/`, then sync the global skills (skills above). The first wa command runs it.
+- `list`: what wa can use. `list workflows` is a plain table of the workflow files: name, scope, file. `<project>/.wa/*.ts` is local, `~/.wa/*.ts` is global. `list skills` is a plain table of the skills a step can name: name, scope, source, file, in resolution order, one row per name. Both tables print the real path, through any symlink. With no target, both.
+- `run`: validate params + create + execute (run lifecycle above). It takes a workflow name from the list, local before global, or a path to any workflow file. With no workflow it lists them.
+- `ps`: a plain table of the runs: run, workflow file, state, current step or pending gate question, age, run directory. Transcripts are files in that directory: read them with any tool.
 - `resume`: replay + continue, with an optional reply for the pending gate (run lifecycle above).
-- `list`: a plain table: run, workflow file, state, current step or pending gate question, age, run directory. Transcripts are files in that directory: read them with any tool.
+- `sync-skills`: choose the skill directories again (skills above).
+- no command: the workflow table, plus the one line that runs one.
+
+Every question is a keyboard list: arrows move, space toggles a choice, enter confirms. With no terminal wa takes the default answer and prints it. Nothing waits for input that cannot arrive.
 
 ## Invariants
 
@@ -56,3 +79,5 @@ Each one line, each pinned by a test:
 5. A gate consumes exactly one answer, and the answer is journaled.
 6. Replay verifies every call against the journal. A call that does not match its journal entry parks the run before any side effect runs.
 7. The engine depends on no agent and no definition. The engine test suite passes with an empty `~/.wa/`.
+8. The first wa command installs. Sync links whole directories, and never removes a skill the user put in the target.
+9. A skill name resolves from the project roots before the home roots, and from the preferred link before the other. A skill path resolves against the workflow file.

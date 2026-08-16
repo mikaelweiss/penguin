@@ -12,19 +12,46 @@ npm install -g wa
 
 wa needs Node 24 or newer. Your repository needs no npm install.
 
+## Install
+
+```sh
+wa install
+```
+
+The first wa command runs it for you. It creates `~/.wa/` and asks which skill directories wa should use, `~/.claude/skills` and `~/.agents/skills`. Arrows move, space toggles, enter confirms. When both hold a skill of the same name it asks which directory you prefer.
+
+```
+skills in ~/.wa/skills
+  claude -> ~/.claude/skills  (preferred)
+  agents -> ~/.agents/skills
+  1 skill is in both: review
+  a skill you add later shows up on its own
+```
+
+wa links the whole directory, so a skill you write next week is there already. Run `wa sync-skills` only to change which directories wa uses:
+
+```sh
+wa sync-skills --global   # ~/.claude/skills and ~/.agents/skills    -> ~/.wa/skills
+wa sync-skills --local    # <repo>/.claude/skills and .agents/skills -> <repo>/.wa/skills
+```
+
+Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into `~/.wa/skills/` yourself stays, and it wins the name.
+
 ## Start from the catalog
 
 The package ships an example catalog. Copy what you want:
 
 ```sh
 wa=$(npm root -g)/wa
-mkdir -p ~/.wa && cp "$wa/examples/agent" ~/.wa/agent
-cp "$wa/examples/ticket.ts" ./ticket.ts
-cp -r "$wa/examples/skills" ./skills
-cp "$wa/examples/tsconfig.json" ./tsconfig.json
+cp "$wa/examples/agent" ~/.wa/agent
+cp "$wa/examples/ticket.ts" ~/.wa/ticket.ts
+cp -r "$wa/examples/skills/." ~/.wa/skills/
+cp "$wa/examples/tsconfig.json" ~/.wa/tsconfig.json
 ```
 
 `~/.wa/agent` holds one line: the shell command that runs your agent, for example `claude -p`.
+
+Workflow files live in `~/.wa/` for every repository, or in `<repo>/.wa/` for one. Skills live next to them, in `skills/`.
 
 ## Write a workflow
 
@@ -38,7 +65,7 @@ export default workflow({
   params: z.object({ ticket: z.string() }),
 
   async run({ params, step, gate }) {
-    const t = await step.agent("./skills/triage.md", { input: params.ticket, result: Triage });
+    const t = await step.agent("wa-triage", { input: params.ticket, result: Triage });
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
@@ -51,17 +78,30 @@ export default workflow({
 ## Run it
 
 ```sh
-wa run ./ticket.ts --ticket ABC-123
-wa list
+wa list                           # the workflows and the skills wa can use
+wa list workflows                 # just the workflows
+wa list skills                    # just the skills, and where each one comes from
+wa run ticket --ticket ABC-123    # by name, or by path: wa run ./ticket.ts
+wa ps                             # every run and its state
 wa resume ticket-1 approve
 ```
 
-`run` validates the params against the schema, creates the run, and executes it. `resume` replays the journal and continues, with an optional reply for the pending gate. `list` prints every run with its state.
+`list` is how you see what wa has. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them, as bare `wa` does. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
+
+```
+$ wa list skills
+SKILL      SCOPE   SOURCE  FILE
+wa-triage  global  wa      ~/.wa/skills/wa-triage
+review     global  claude  ~/.claude/skills/review
+migrate    global  agents  ~/.agents/skills/migrate
+```
+
+One row per name, in the order a step resolves them. A name held by two directories shows the winner.
 
 ## The step API
 
 - `ctx.params`: the validated params.
-- `ctx.step.agent(skill, {input, result, agent, cwd})`: run a skill on an agent. The engine validates the result against the schema.
+- `ctx.step.agent(skill, {input, result, agent, cwd})`: run a skill on an agent. `skill` is a name from your skills directories, or a path to a markdown file. The engine validates the result against the schema.
 - `ctx.step.command(cmd, {cwd})`: run a shell command. Provider work is this primitive plus `gh`, `linear`, or `git`.
 - `ctx.gate(question)`: ask a question and wait for the answer.
 
@@ -75,7 +115,9 @@ Every await on this API is a durable checkpoint. Control flow, batching, and par
 
 ## Where the state lives
 
-`~/.wa/runs/<run>/` holds `journal.jsonl`, the pinned copy of the workflow file, the agent transcripts, and the lock. To discard a run, delete the directory. Set `WA_HOME` to move the whole tree.
+`~/.wa/` holds your workflow files, `skills/`, `agent`, and `runs/`. `~/.wa/runs/<run>/` holds `journal.jsonl`, the pinned copy of the workflow file, the agent transcripts, and the lock. To discard a run, delete the directory. Set `WA_HOME` to move the whole tree.
+
+`<repo>/.wa/` holds the workflow files and skills of one repository, and ships in git.
 
 ## Specs
 

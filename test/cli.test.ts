@@ -85,22 +85,22 @@ test("run names count up per workflow file", (t) => {
   ]);
 });
 
-test("list shows the state and the pending gate question", (t) => {
+test("ps shows the state and the pending gate question", (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
   box.wa("run", "./w.ts");
 
-  const parked = box.wa("list");
+  const parked = box.wa("ps");
   assert.equal(parked.code, 0);
   assert.match(parked.stdout, /w-1\s+\S+w\.ts\s+parked\s+gate: keep going\?/);
 
   fs.writeFileSync(path.join(box.home, "runs", "w-1", "lock"), String(process.pid));
-  const running = box.wa("list");
+  const running = box.wa("ps");
   assert.match(running.stdout, new RegExp(`w-1\\s+\\S+w\\.ts\\s+running \\(${process.pid}\\)`));
   fs.rmSync(path.join(box.home, "runs", "w-1", "lock"));
 
   box.wa("resume", "w-1", "yes");
-  const finished = box.wa("list");
+  const finished = box.wa("ps");
   assert.match(finished.stdout, /w-1\s+\S+w\.ts\s+done\s+-/);
   assert.match(finished.stdout, new RegExp(path.join(box.home, "runs", "w-1")));
 });
@@ -155,13 +155,15 @@ test("a file that exports no workflow is refused", (t) => {
   assert.equal(fs.existsSync(path.join(box.home, "runs")), false);
 });
 
-test("wa with no command prints the usage", (t) => {
+test("wa help prints the usage", (t) => {
   const box = sandbox(t);
 
-  const help = box.wa();
+  const help = box.wa("help");
 
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /wa run <workflow\.ts>/);
+  assert.match(help.stdout, /wa list \[workflows\|skills\]/);
+  assert.match(help.stdout, /wa run <workflow>/);
+  assert.match(help.stdout, /wa ps/);
   assert.match(help.stdout, /wa resume <run>/);
-  assert.match(help.stdout, /wa list/);
+  assert.match(help.stdout, /wa sync-skills/);
 });

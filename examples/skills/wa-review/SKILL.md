@@ -1,3 +1,8 @@
+---
+name: wa-review
+description: Reviews a working tree against its acceptance checks and reports each defect. Use after an implementation step, before the pull request.
+---
+
 # Review the change
 
 Review the working tree against the acceptance checks. The input is the checks file path.

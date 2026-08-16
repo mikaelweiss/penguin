@@ -11,6 +11,30 @@ export function runsRoot(): string {
   return path.join(home(), "runs");
 }
 
+export function homeSkills(): string {
+  return path.join(home(), "skills");
+}
+
+export function projectHome(cwd: string): string {
+  return path.join(cwd, ".wa");
+}
+
+export function projectSkills(cwd: string): string {
+  return path.join(projectHome(cwd), "skills");
+}
+
+export type Scope = "local" | "global";
+
+export function userRoot(): string {
+  return os.homedir();
+}
+
+export function short(target: string): string {
+  const root = userRoot();
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) return target;
+  return `~${target.slice(root.length)}`;
+}
+
 export function runDir(name: string): string {
   return path.join(runsRoot(), name);
 }

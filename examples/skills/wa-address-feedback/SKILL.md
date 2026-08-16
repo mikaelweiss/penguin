@@ -1,3 +1,8 @@
+---
+name: wa-address-feedback
+description: Answers the open review threads on a pull request, with code changes or replies. Use when a pull request has unresolved review comments.
+---
+
 # Address the pull request feedback
 
 Answer the open review comments on the pull request for this branch.

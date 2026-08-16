@@ -161,7 +161,7 @@ test("invariant 7: the engine needs no agent and no definition in an empty home"
   const box = sandbox(t);
   assert.deepEqual(fs.readdirSync(box.home), []);
 
-  const listed = box.wa("list");
+  const listed = box.wa("ps");
   assert.equal(listed.code, 0);
   assert.match(listed.stdout, /^RUN\s+WORKFLOW\s+STATE\s+STEP\s+AGE\s+DIRECTORY$/m);
 
@@ -188,6 +188,59 @@ export default workflow({
   const park = entries[entries.length - 1] as ParkEntry;
   assert.equal(park.type, "park");
   assert.match(park.reason, new RegExp(`${path.join(box.home, "agent")}`));
+});
+
+test("invariant 8: the first wa command installs, and a sync keeps what you wrote", (t) => {
+  const box = sandbox(t);
+  fs.rmSync(box.home, { recursive: true });
+  const claude = path.join(box.userHome, ".claude", "skills");
+  box.writeSkill(claude, "review", "review it\n");
+
+  const first = box.wa("ps");
+
+  assert.equal(first.code, 0, first.output);
+  assert.match(first.stdout, new RegExp(`created ${box.home}`));
+  assert.equal(fs.existsSync(path.join(box.home, "runs")), true);
+  assert.equal(fs.readlinkSync(path.join(box.home, "skills", "claude")), claude);
+
+  const second = box.wa("ps");
+  assert.doesNotMatch(second.stdout, /created /);
+
+  box.writeSkill(path.join(box.home, "skills"), "wa-triage", "triage it\n");
+  fs.rmSync(claude, { recursive: true });
+  assert.equal(box.wa("sync-skills", "--global").code, 0);
+
+  assert.deepEqual(fs.readdirSync(path.join(box.home, "skills")), ["wa-triage"]);
+  assert.equal(
+    fs.readFileSync(path.join(box.home, "skills", "wa-triage", "SKILL.md"), "utf8"),
+    "triage it\n",
+  );
+});
+
+test("invariant 9: a skill name resolves from the project before the home", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  params: z.object({}),
+  async run({ step }) {
+    await step.agent("wa-review");
+  },
+});
+`,
+  );
+  box.writeSkill(path.join(box.home, "skills"), "wa-review", "the home craft\n");
+  box.setAgent(box.agentCommand("none", "prompts.txt"));
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.match(box.invocations("prompts.txt")[0] ?? "", /the home craft/);
+
+  box.writeSkill(path.join(box.project, ".wa", "skills"), "wa-review", "the project craft\n");
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+
+  assert.match(box.invocations("prompts.txt")[1] ?? "", /the project craft/);
 });
 
 function countCalls(box: ReturnType<typeof sandbox>, run: string): number {
