@@ -1,15 +1,10 @@
-# Defaults
+# Catalog
 
-The engine ships empty. No agent, workflow, or skill is part of the core, and every entry below is removable (`20-architecture.md`, invariant 7). This file is the catalog of what a fresh install contains.
+The core ships empty (`20-architecture.md`, invariant 7). The npm package carries an `examples/` directory, and copying a file out of it is the whole install. Every entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
-## Default agent config
-
-Install writes `~/.wa/config.toml` with one agent entry, claude, set as the default agent. An agent entry is a command template, not code: edit it, replace it, or add others freely.
-
-## Default workflows
-
-Install writes one workflow into `~/.wa/workflows/` and its skills into `~/.wa/skills/`, and never overwrites an existing file. After that it is an ordinary personal definition: edit, delete, or replace it freely.
-
-- `ticket`: a generic ticket to merged PR pipeline: triage, plan, plan gate, implement, review loop, PR, then a gate loop that runs address-feedback until the user answers done. Step skills: triage, plan, implement, review, address-feedback.
+- `examples/agent`: the line `claude -p`. Copy it to `~/.wa/agent` to set the default agent.
+- `examples/ticket.ts`: a generic ticket to merged PR pipeline: triage, plan, plan gate, implement, review loop, PR, then a gate loop that runs address-feedback until the user answers done.
+- `examples/skills/`: the step skills for `ticket.ts`: `triage.md`, `plan.md`, `implement.md`, `review.md`, `address-feedback.md`.
+- `examples/tsconfig.json`: maps `wa` and `zod` to the installed package for editor types. Copy it next to your workflow files.
 
 Personal workflow ideas live in `WORKFLOWS.md`, not here.
