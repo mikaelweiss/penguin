@@ -24,7 +24,7 @@ Run state derives from the files: a held lock means running, a journal that ends
 
 ## Run lifecycle
 
-`wa run <file> [params]` validates params, creates the run, and executes it in the foreground. Each agent step spawns the agent command, writes the step prompt (input, skill content, result path) to its stdin, and pipes its output unchanged to the terminal and the transcript. The step ends when the agent writes `result.json` to the path the prompt supplies. The engine validates it against the step's schema (the retry rule is in `10-workflow-model.md`).
+`wa run <file> [params]` validates params, creates the run, and executes it in the foreground. Before the first step it prints one line: the run name, that the run started, and the default agent command, or that no agent is configured. Each agent step spawns the agent command, writes the step prompt (input, skill content, result path) to its stdin, and pipes its output unchanged to the terminal and the transcript. The step ends when the agent writes `result.json` to the path the prompt supplies. The engine validates it against the step's schema (the retry rule is in `10-workflow-model.md`).
 
 A gate prompts in the terminal. When the process has no terminal (cron) or the user gives no answer, the run parks: the process exits, and the question stays recorded in the journal.
 
@@ -62,7 +62,7 @@ A step's skill name resolves against an ordered list of roots: the project skill
 
 - `install`: draw the wa wordmark, create `~/.wa/` and `~/.wa/runs/`, copy the catalog (`30-defaults.md`) into `~/.wa/`, then sync the global skills (skills above). The first wa command runs it.
 - `list`: what wa can use. Default columns are name and description. `--verbose` adds scope and file, and for skills, source. `list workflows` is the workflow files: `<project>/.wa/*.ts` is local, `~/.wa/*.ts` is global. The description is the workflow export. `list skills` is the skills a step can name, in resolution order, one row per name. The description is the skill frontmatter. The verbose file column prints the real path, through any symlink. A bare `list` fails and names the two targets.
-- `run`: validate params + create + execute (run lifecycle above). It takes a workflow name from the list, local before global, or a path to any workflow file. With no workflow it lists them (name and description, plus the one line that runs one).
+- `run`: validate params + create + execute, after the start line (run lifecycle above). It takes a workflow name from the list, local before global, or a path to any workflow file. With no workflow it lists them (name and description, plus the one line that runs one).
 - `ps`: a plain table of the runs: run, workflow file, state, current step or pending gate question, age, run directory. Transcripts are files in that directory: read them with any tool.
 - `resume`: replay + continue, with an optional reply for the pending gate (run lifecycle above).
 - `sync-skills`: choose the skill directories again (skills above).

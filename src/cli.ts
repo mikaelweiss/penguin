@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createRun } from "./create.ts";
-import { type Outcome, execute } from "./engine.ts";
+import { defaultAgent, type Outcome, execute } from "./engine.ts";
 import { messageOf, WaError } from "./errors.ts";
 import { firstRun, install, syncSkills } from "./install.ts";
 import { load } from "./loader.ts";
@@ -114,8 +114,13 @@ async function runWorkflow(argv: string[]): Promise<number> {
   const definition = await load(source);
   const params = validate(definition.params, parseParams(definition.params, rest));
   const name = createRun(source, params);
-  say(`run ${name}`);
+  say(`run ${name} started, ${agentLine()}`);
   return code(await execute(name));
+}
+
+function agentLine(): string {
+  const command = defaultAgent();
+  return command === undefined ? "no agent is configured" : `agent ${command}`;
 }
 
 function sourceOf(target: string): string {

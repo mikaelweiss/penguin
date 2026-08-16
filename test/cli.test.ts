@@ -77,14 +77,27 @@ test("run names count up per workflow file", (t) => {
   box.write("w.ts", gateWorkflow);
   box.write("other.ts", gateWorkflow);
 
-  assert.match(box.wa("run", "./w.ts").stdout, /^run w-1$/m);
-  assert.match(box.wa("run", "./w.ts").stdout, /^run w-2$/m);
-  assert.match(box.wa("run", "./other.ts").stdout, /^run other-1$/m);
+  assert.match(box.wa("run", "./w.ts").stdout, /^run w-1 started,/m);
+  assert.match(box.wa("run", "./w.ts").stdout, /^run w-2 started,/m);
+  assert.match(box.wa("run", "./other.ts").stdout, /^run other-1 started,/m);
   assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")).sort(), [
     "other-1",
     "w-1",
     "w-2",
   ]);
+});
+
+test("run starts by naming the run and the agent it uses", (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", gateWorkflow);
+
+  const bare = box.wa("run", "./w.ts");
+  assert.equal(bare.code, 0, bare.output);
+  assert.match(bare.stdout, /^run w-1 started, no agent is configured$/m);
+
+  box.setAgent("claude -p");
+  const configured = box.wa("run", "./w.ts");
+  assert.match(configured.stdout, /^run w-2 started, agent claude -p$/m);
 });
 
 test("ps shows the state and the pending gate question", (t) => {

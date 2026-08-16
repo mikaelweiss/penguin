@@ -74,7 +74,14 @@ wa ps                             # every run and its state
 wa resume ticket-1 approve
 ```
 
-`list` is how you see what wa has. `--verbose` adds where each row comes from. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them. Bare `wa` prints the usage. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
+`list` is how you see what wa has. `--verbose` adds where each row comes from. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them. It opens with one line, the run name and the agent it uses:
+
+```
+$ wa run task --task "rename the flag"
+run task-1 started, agent claude -p
+```
+
+Bare `wa` prints the usage. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
 
 ```
 $ wa list skills

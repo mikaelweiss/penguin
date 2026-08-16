@@ -96,7 +96,7 @@ test("wa run takes a workflow name", (t) => {
   const done = box.wa("run", "release");
 
   assert.equal(done.code, 0, done.output);
-  assert.match(done.stdout, /^run release-1$/m);
+  assert.match(done.stdout, /^run release-1 started,/m);
   assert.deepEqual(box.lines("out.txt"), ["global"]);
 });
 
