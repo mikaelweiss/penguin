@@ -65,13 +65,13 @@ export function pick(list: Found[], role: string, name?: string): Picked {
     return {
       missing:
         implementations.length === 0
-          ? `no ${role} adapter is installed. penguin list adapters shows what penguin found.`
+          ? `no ${role} adapter is installed. pn list adapters shows what penguin found.`
           : `no ${role} adapter named ${wanted}. Installed: ${names}.`,
     };
   }
   const first = implementations[0];
   if (first === undefined) {
-    return { missing: `no ${role} adapter is installed. penguin list adapters shows what penguin found.` };
+    return { missing: `no ${role} adapter is installed. pn list adapters shows what penguin found.` };
   }
   if (implementations.length > 1) {
     const names = implementations.map((entry) => entry.name).join(", ");

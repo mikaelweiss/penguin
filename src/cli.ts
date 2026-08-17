@@ -21,13 +21,13 @@ import * as workflows from "./workflows.ts";
 const usage = `penguin runs one workflow as a live process, and the terminal watches it.
 
 usage:
-  penguin list workflows|skills|adapters [--verbose]   show what penguin can use
-  penguin run <workflow> [--param value ...]           start a run and watch it
-  penguin run <workflow> --background                  start a run and leave it alone
-  penguin ps                                           the live runs, and a picker to attach
-  penguin attach <run>                                 watch a run, with its history first
-  penguin install                                      set up ~/.penguin and choose your skill directories
-  penguin sync-skills [--global|--local]               choose your skill directories again
+  pn list workflows|skills|adapters [--verbose]   show what penguin can use
+  pn run <workflow> [--param value ...]           start a run and watch it
+  pn run <workflow> --background                  start a run and leave it alone
+  pn ps                                           the live runs, and a picker to attach
+  pn attach <run>                                 watch a run, with its history first
+  pn install                                      set up ~/.penguin and choose your skill directories
+  pn sync-skills [--global|--local]               choose your skill directories again
 
 <workflow> is a name from the list, or a path to a workflow file.
 In a run: type to send a message, q detaches, Ctrl-C stops the run.
@@ -68,10 +68,10 @@ async function listWhat(argv: string[]): Promise<number> {
   if (what === "skills") return listSkills(verbose);
   if (what === "adapters") return listAdapters(verbose);
   if (what === undefined) {
-    throw new PenguinError("penguin list needs a target: penguin list workflows, penguin list skills, or penguin list adapters");
+    throw new PenguinError("pn list needs a target: pn list workflows, pn list skills, or pn list adapters");
   }
-  if (what === "runs") throw new PenguinError("penguin ps shows the runs");
-  throw new PenguinError(`penguin list takes workflows, skills, or adapters, not ${what}\n\n${usage}`);
+  if (what === "runs") throw new PenguinError("pn ps shows the runs");
+  throw new PenguinError(`pn list takes workflows, skills, or adapters, not ${what}\n\n${usage}`);
 }
 
 async function listAdapters(verbose = false): Promise<number> {
@@ -102,14 +102,14 @@ async function listWorkflows(hint = false, verbose = false): Promise<number> {
     return 0;
   }
   say(workflows.render(list, verbose));
-  if (hint) say("\nrun one with: penguin run <workflow> [--param value ...]");
+  if (hint) say("\nrun one with: pn run <workflow> [--param value ...]");
   return 0;
 }
 
 function listSkills(verbose = false): number {
   const list = skills.available(process.cwd());
   if (list.length === 0) {
-    say("no skill yet. penguin sync-skills links the ones you have");
+    say("no skill yet. pn sync-skills links the ones you have");
     return 0;
   }
   say(skills.render(list, verbose));
@@ -160,7 +160,7 @@ function start(name: string): number {
 
 async function runProcess(argv: string[]): Promise<number> {
   const [name] = argv;
-  if (name === undefined) throw new PenguinError("penguin _run needs a run name");
+  if (name === undefined) throw new PenguinError("pn _run needs a run name");
   process.exit(await execute(name));
 }
 
@@ -184,7 +184,7 @@ async function listRuns(): Promise<number> {
 
 async function attachRun(argv: string[]): Promise<number> {
   const [name] = argv;
-  if (name === undefined) throw new PenguinError(`penguin attach needs a run name\n\n${usage}`);
+  if (name === undefined) throw new PenguinError(`pn attach needs a run name\n\n${usage}`);
   return attach(name);
 }
 
@@ -204,7 +204,7 @@ function say(text: string): void {
 try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (error) {
-  process.stderr.write(`penguin: ${messageOf(error)}\n`);
+  process.stderr.write(`pn: ${messageOf(error)}\n`);
   if (!(error instanceof PenguinError) && error instanceof Error && error.stack !== undefined) {
     process.stderr.write(`${error.stack}\n`);
   }

@@ -16,14 +16,14 @@ The first penguin command sets up `~/.penguin/` and copies the starter catalog i
 
 ```
 created ~/.penguin
-run `penguin list workflows` to see what's available and then `penguin run <workflow>` from a project directory to get started
+run `pn list workflows` to see what's available and then `pn run <workflow>` from a project directory to get started
 ```
 
-On a terminal it also asks which skill directories penguin should link, `~/.claude/skills` and `~/.agents/skills`. Arrows move, space toggles, enter confirms. When both hold a skill of the same name it asks which directory you prefer. penguin links the whole directory, so a skill you write next week is there already. Run `penguin sync-skills` to choose again:
+On a terminal it also asks which skill directories penguin should link, `~/.claude/skills` and `~/.agents/skills`. Arrows move, space toggles, enter confirms. When both hold a skill of the same name it asks which directory you prefer. penguin links the whole directory, so a skill you write next week is there already. Run `pn sync-skills` to choose again:
 
 ```sh
-penguin sync-skills --global   # ~/.claude/skills and ~/.agents/skills    -> ~/.penguin/skills
-penguin sync-skills --local    # <repo>/.claude/skills and .agents/skills -> <repo>/.penguin/skills
+pn sync-skills --global   # ~/.claude/skills and ~/.agents/skills    -> ~/.penguin/skills
+pn sync-skills --local    # <repo>/.claude/skills and .agents/skills -> <repo>/.penguin/skills
 ```
 
 Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into `~/.penguin/skills/` yourself stays, and it wins the name.
@@ -32,18 +32,18 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 Install fills `~/.penguin/` with nine workflows, their skills, four adapters, and a tsconfig for editor types. Two of them are pipelines:
 
-- `penguin run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, a worktree, implement, then the pull request.
-- `penguin run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, then the pull request.
+- `pn run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, a worktree, implement, then the pull request.
+- `pn run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, then the pull request.
 
 The other seven are small workflows. Each one runs alone, and a pipeline calls all but `review-pr`:
 
-- `penguin run triage --ticket ABC-123`: is the ticket ready to work on, and why.
-- `penguin run plan --ticket ABC-123`: the plan and its acceptance checks, held at an approve-or-revise gate.
-- `penguin run implement --task "..."`: implement in the current repository, review each round, up to `--rounds`.
-- `penguin run review --acceptance acceptance.md`: one review of the working tree against the checks.
-- `penguin run verify`: run the checks of your repository and report what fails.
-- `penguin run pr`: open the pull request, then a gate loop that runs address-feedback until you answer done.
-- `penguin run review-pr --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
+- `pn run triage --ticket ABC-123`: is the ticket ready to work on, and why.
+- `pn run plan --ticket ABC-123`: the plan and its acceptance checks, held at an approve-or-revise gate.
+- `pn run implement --task "..."`: implement in the current repository, review each round, up to `--rounds`.
+- `pn run review --acceptance acceptance.md`: one review of the working tree against the checks.
+- `pn run verify`: run the checks of your repository and report what fails.
+- `pn run pr`: open the pull request, then a gate loop that runs address-feedback until you answer done.
+- `pn run review-pr --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
 
 A pipeline is the small ones called as functions (Compose workflows, below).
 
@@ -77,26 +77,26 @@ export default workflow({
 ## Run it
 
 ```sh
-penguin list workflows                 # name, params, and description
-penguin list skills --verbose          # plus scope, source, and file
-penguin list adapters                  # role, implementation, and description
-penguin run ticket --ticket ABC-123    # by name, or by path: penguin run ./ticket.ts
-penguin run ticket --ticket ABC-123 --background
-penguin ps                             # the live runs
-penguin attach ticket-1                # watch one again
+pn list workflows                 # name, params, and description
+pn list skills --verbose          # plus scope, source, and file
+pn list adapters                  # role, implementation, and description
+pn run ticket --ticket ABC-123    # by name, or by path: pn run ./ticket.ts
+pn run ticket --ticket ABC-123 --background
+pn ps                             # the live runs
+pn attach ticket-1                # watch one again
 ```
 
 `list` is how you see what penguin has. Each entry is a block: the name and the params it takes, then the description under it. `--verbose` adds a line for where the entry comes from. `run` validates the params against the schema, creates the run, starts the run process, and attaches your terminal to it. With no workflow it lists them. It opens with one line, the run name and the agent it uses:
 
 ```
-$ penguin run implement --task "rename the flag"
+$ pn run implement --task "rename the flag"
 run implement-1 started, agent claude
 ```
 
-`--background` starts the run and gives the terminal back. `ps` lists the live runs: on a terminal it is a picker, and enter attaches to the run under the cursor. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw. Bare `penguin` prints the usage.
+`--background` starts the run and gives the terminal back. `ps` lists the live runs: on a terminal it is a picker, and enter attaches to the run under the cursor. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw. Bare `pn` prints the usage.
 
 ```
-$ penguin list workflows
+$ pn list workflows
 fix  --bug <text> [--rounds <number>]
   reproduce a bug, fix it against the repo checks, then the pull request
 
@@ -129,7 +129,7 @@ In an attached terminal:
 
 - Type a line and press enter to send a message. A gate takes it as the answer.
 - `Tab` picks which session fills the screen, and addresses your next message to it.
-- `q` detaches. The run keeps going, and `penguin attach` comes back to it.
+- `q` detaches. The run keeps going, and `pn attach` comes back to it.
 - `Ctrl-C` stops the run. penguin kills the steps in flight and records the stop.
 
 Closing the terminal never touches the run.
@@ -144,7 +144,7 @@ import triage from "./triage.ts";
 const t = await triage(ctx, { ticket: params.ticket });
 ```
 
-The call validates the arguments against the callee's params schema, runs the callee on the same `ctx`, and returns what the callee returns. Only the root is a run, so `penguin ps` shows one line. `run` may return a value: a caller receives it, and at the root `penguin run` prints it.
+The call validates the arguments against the callee's params schema, runs the callee on the same `ctx`, and returns what the callee returns. Only the root is a run, so `pn ps` shows one line. `run` may return a value: a caller receives it, and at the root `pn run` prints it.
 
 ## Where the state lives
 

@@ -4,7 +4,7 @@
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "type": "module",
   "bin": {
-    "penguin": "./dist/cli.js"
+    "pn": "./dist/cli.js"
   },
   "exports": {
     ".": {

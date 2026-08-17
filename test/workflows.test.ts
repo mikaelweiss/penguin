@@ -83,7 +83,7 @@ test("list workflows --verbose adds scope and file", (t) => {
   );
 });
 
-test("penguin with no command prints the usage", (t) => {
+test("pn with no command prints the usage", (t) => {
   const box = sandbox(t);
   box.write(".penguin/ticket.ts", writes("local"));
 
@@ -94,7 +94,7 @@ test("penguin with no command prints the usage", (t) => {
   assert.doesNotMatch(listed.stdout, /^ticket/m);
 });
 
-test("penguin run with no workflow lists them instead of failing", (t) => {
+test("pn run with no workflow lists them instead of failing", (t) => {
   const box = sandbox(t);
   box.write(".penguin/ticket.ts", writes("local"));
 
@@ -102,10 +102,10 @@ test("penguin run with no workflow lists them instead of failing", (t) => {
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(listed.stdout, /^ticket\s+local$/m);
-  assert.match(listed.stdout, /run one with: penguin run <workflow>/);
+  assert.match(listed.stdout, /run one with: pn run <workflow>/);
 });
 
-test("penguin list workflows with no file says where to put one", (t) => {
+test("pn list workflows with no file says where to put one", (t) => {
   const box = sandbox(t);
 
   const empty = box.penguin("list", "workflows");
@@ -115,7 +115,7 @@ test("penguin list workflows with no file says where to put one", (t) => {
   assert.match(empty.stdout, new RegExp(box.home));
 });
 
-test("the first bare penguin stops after the install output", (t) => {
+test("the first bare pn stops after the install output", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
 
@@ -123,12 +123,12 @@ test("the first bare penguin stops after the install output", (t) => {
 
   assert.equal(first.code, 0);
   assert.match(first.stdout, /created/);
-  assert.match(first.stdout, /penguin list workflows/);
+  assert.match(first.stdout, /pn list workflows/);
   assert.doesNotMatch(first.stdout, /no workflow file/);
   assert.doesNotMatch(first.stdout, /usage:/);
 });
 
-test("penguin run takes a workflow name", (t) => {
+test("pn run takes a workflow name", (t) => {
   const box = sandbox(t);
   box.withShell();
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
@@ -161,7 +161,7 @@ test("a name that matches nothing names both places", (t) => {
   assert.match(failed.stderr, /no workflow named nothing in/);
 });
 
-test("penguin run still takes a path", (t) => {
+test("pn run still takes a path", (t) => {
   const box = sandbox(t);
   box.withShell();
   box.write("w.ts", writes("path"));

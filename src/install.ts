@@ -17,7 +17,7 @@ import { interactive, pick, pickMany } from "./prompt.ts";
 import { link, shared, type Source, sources } from "./skills.ts";
 
 const hint =
-  "run `penguin list workflows` to see what's available and then `penguin run <workflow>` from a project directory to get started";
+  "run `pn list workflows` to see what's available and then `pn run <workflow>` from a project directory to get started";
 
 export async function install(): Promise<void> {
   const fresh = !fs.existsSync(home());

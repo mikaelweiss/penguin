@@ -12,8 +12,8 @@ A TypeScript CLI on Node. It runs one workflow as one live process against any r
 
 ## Principles
 
-1. **A run is a live process.** It executes until the run function returns or the user stops it. It waits in memory for input, and `penguin ps` shows its state: running, blocked, idle, or done.
-2. **The terminal is a viewer.** `penguin run` attaches one, `q` detaches, and `penguin attach` joins any run with its full history, as if attached from the start. Closing a terminal never touches a run.
+1. **A run is a live process.** It executes until the run function returns or the user stops it. It waits in memory for input, and `pn ps` shows its state: running, blocked, idle, or done.
+2. **The terminal is a viewer.** `pn run` attaches one, `q` detaches, and `pn attach` joins any run with its full history, as if attached from the start. Closing a terminal never touches a run.
 3. **The outside world is an adapter.** All IO goes through named adapters with typed interfaces: `ctx.agent`, `ctx.vcs`, `ctx.github`, `ctx.view`. Each is an ordinary TypeScript file the user can read, edit, or replace. Provider CLIs (`claude`, `git`, `gh`) run inside adapters, under the user's existing credentials. A workflow can only do what an adapter offers.
 4. **Definitions are files the user keeps anywhere.** Team workflows, skills, and adapters sit in `<project>/.penguin/` and ship in git. Personal ones sit in `~/.penguin/`. penguin lists both and runs either. Run state lives under `~/.penguin/`.
 5. **Params are data, workflows are code.** What the engine must know before code runs is one schema. Everything inside a run's lifetime is TypeScript over `ctx`, so control flow never grows a schema.

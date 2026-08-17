@@ -399,7 +399,7 @@ export default workflow({
   const agentless = box.penguin("run", "./w.ts");
   assert.equal(agentless.code, 1);
   assert.match(agentless.stdout, /no agent adapter is installed/);
-  assert.match(agentless.stdout, /penguin list adapters/);
+  assert.match(agentless.stdout, /pn list adapters/);
   assert.match(String(box.ended("w-1")?.["reason"]), /no agent adapter is installed/);
 });
 

@@ -10,7 +10,7 @@ Build exactly what the design says. The input names the design file and the dest
 1. Read the design.
 2. Write the workflow file to `<destination>/<name>.ts`. The name is kebab-case and becomes the run name, so keep it short.
 3. Write each new skill the design names to `<destination>/skills/<skill-name>/SKILL.md`: frontmatter with `name` (the directory name) and `description`, then the craft in markdown.
-4. Run `penguin list workflows` and confirm the new workflow lists with its description and params. Fix the file until it does.
+4. Run `pn list workflows` and confirm the new workflow lists with its description and params. Fix the file until it does.
 5. Put the workflow file path in `file` and the workflow name (the file stem) in `name`.
 
 File rules:

@@ -69,6 +69,6 @@ export default workflow({
     }
 
     view.artifact({ title: "Workflow", path: written!.file });
-    return { file: written!.file, run: `penguin run ${written!.name}` };
+    return { file: written!.file, run: `pn run ${written!.name}` };
   },
 });

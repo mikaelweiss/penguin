@@ -171,25 +171,25 @@ test("attach names the runs it cannot open", (t) => {
 
   const bare = box.penguin("attach");
   assert.equal(bare.code, 1);
-  assert.match(bare.stderr, /penguin attach needs a run name/);
+  assert.match(bare.stderr, /pn attach needs a run name/);
 
   const missing = box.penguin("attach", "nothing-1");
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /no run named nothing-1/);
 });
 
-test("penguin help prints the usage", (t) => {
+test("pn help prints the usage", (t) => {
   const box = sandbox(t);
 
   const help = box.penguin("help");
 
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /penguin list workflows\|skills\|adapters \[--verbose\]/);
-  assert.match(help.stdout, /penguin run <workflow> \[--param value \.\.\.\]/);
-  assert.match(help.stdout, /penguin run <workflow> --background/);
-  assert.match(help.stdout, /penguin ps/);
-  assert.match(help.stdout, /penguin attach <run>/);
-  assert.match(help.stdout, /penguin sync-skills/);
+  assert.match(help.stdout, /pn list workflows\|skills\|adapters \[--verbose\]/);
+  assert.match(help.stdout, /pn run <workflow> \[--param value \.\.\.\]/);
+  assert.match(help.stdout, /pn run <workflow> --background/);
+  assert.match(help.stdout, /pn ps/);
+  assert.match(help.stdout, /pn attach <run>/);
+  assert.match(help.stdout, /pn sync-skills/);
   assert.match(help.stdout, /q detaches, Ctrl-C stops the run/);
   assert.doesNotMatch(help.stdout, /resume/);
 });

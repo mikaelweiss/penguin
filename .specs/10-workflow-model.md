@@ -13,9 +13,9 @@ export default workflow({
 });
 ```
 
-`description` is required: a non-empty string. `penguin list workflows` reads it from the export. A file with no description fails to load.
+`description` is required: a non-empty string. `pn list workflows` reads it from the export. A file with no description fails to load.
 
-`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. `penguin list workflows` prints the fields as the params the workflow takes. A URL or file path is text the workflow hands to an agent.
+`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. `pn list workflows` prints the fields as the params the workflow takes. A URL or file path is text the workflow hands to an agent.
 
 penguin imports the module and reads the exported params schema without calling `run`. Module top level is side-effect-free.
 
@@ -83,9 +83,9 @@ import triage from "./triage.ts";
 const t = await triage(ctx, { ticket: params.ticket });
 ```
 
-The call validates the arguments against the callee's params schema, runs the callee's run function on the same ctx with the callee's params, and returns what the callee returns. The engine wraps the call in an activity named for the callee, so the view shows the structure. A composed call creates no run: `penguin ps` shows the root alone.
+The call validates the arguments against the callee's params schema, runs the callee's run function on the same ctx with the callee's params, and returns what the callee returns. The engine wraps the call in an activity named for the callee, so the view shows the structure. A composed call creates no run: `pn ps` shows the root alone.
 
-`run` may return a value. A composing caller receives it. At the root, `penguin run` prints it.
+`run` may return a value. A composing caller receives it. At the root, `pn run` prints it.
 
 ## The view
 

@@ -322,7 +322,7 @@ test("the catalog make-workflow workflow designs, writes, and reviews the new wo
   const ended = await box.waitForEnd("make-workflow-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
-  assert.deepEqual(ended["result"], { file: "new-thing.ts", run: "penguin run new-thing" });
+  assert.deepEqual(ended["result"], { file: "new-thing.ts", run: "pn run new-thing" });
 
   const labels = activities(box, "make-workflow-1").map((span) => span.label);
   assert.deepEqual(labels, ["round 1 of 3"]);

@@ -2,9 +2,9 @@
 
 ## Components
 
-- **CLI (TypeScript)**: one npm package, one `penguin` command, the whole engine: command parsing, step dispatch, adapter loading, the event bus. It runs on system Node (24 or newer).
+- **CLI (TypeScript)**: one npm package, one `pn` command, the whole engine: command parsing, step dispatch, adapter loading, the event bus. It runs on system Node (24 or newer).
 - **Run process**: one detached process per run. It executes the run function, holds the lock, appends events and transcripts, and reads messages. It owns no terminal, and it outlives the terminal that started it.
-- **Viewer**: the terminal side of a run. `penguin run` attaches one on start, and `penguin attach` joins one later. A viewer renders the event history, follows new events, and sends messages. Closing a viewer never touches the run.
+- **Viewer**: the terminal side of a run. `pn run` attaches one on start, and `pn attach` joins one later. A viewer renders the event history, follows new events, and sends messages. Closing a viewer never touches the run.
 - **Workflow and adapter loading**: penguin imports the files directly. Node strips the types on import. A workflow imports `penguin`, `zod`, other workflow files, and shared TypeScript files by relative path.
 - **penguin package (TypeScript)**: the functions authors import (`workflow`, `adapter`) and their types, part of penguin itself, with zod as a bundled dependency. The catalog ships a `tsconfig.json` that maps `penguin` and `zod` to the installed package (`30-defaults.md`), so the author's editor resolves the same types. The user's repo needs no npm install.
 
@@ -16,7 +16,7 @@ Plain files.
 - `~/.penguin/adapters/*.ts`: the personal adapter files. Install copies the shipped ones here.
 - `~/.penguin/skills/`: the skills every workflow can name. A skill directly inside it is penguin's own. A symlink inside it points at a whole skill directory the user already keeps, and `.order` holds those link names, most preferred first.
 - `~/.penguin/defaults`: one line per role, `<role> <name>`, choosing among installed implementations. Only a role with more than one implementation needs a line.
-- `~/.penguin/penguin-env.d.ts`: generated. It types `ctx` from the installed adapters, so workflow files autocomplete with zero imports. penguin rewrites it on install, on every `penguin run`, and on `penguin list adapters`. A stale copy misleads the editor only: the engine resolves adapters when it runs.
+- `~/.penguin/penguin-env.d.ts`: generated. It types `ctx` from the installed adapters, so workflow files autocomplete with zero imports. penguin rewrites it on install, on every `pn run`, and on `pn list adapters`. A stale copy misleads the editor only: the engine resolves adapters when it runs.
 - `~/.penguin/runs/<name>/`: one flat directory per run, the run name as the directory name. `run.json` (the params, the workflow file path, the invoking folder, the creation time), `events.jsonl` (every emitted event, append-only), `inbox.jsonl` (every message sent in, append-only), `transcripts/` (one file per agent session), `lock` (held by the run process).
 - `<project>/.penguin/`: the same definition places for one repository: `*.ts`, `adapters/`, and `skills/`. It ships in git. It holds no runs.
 
@@ -55,7 +55,7 @@ Opening a session generates a session id. The transcript of a session is one fil
 
 ## Run lifecycle
 
-`penguin run <file> [params]` validates params, creates the run, starts the run process, and attaches a viewer. `--background` starts the run process and prints the run name. Before the first step the run announces one line: the run name, that the run started, and the default agent adapter's name, or that no agent adapter is installed.
+`pn run <file> [params]` validates params, creates the run, starts the run process, and attaches a viewer. `--background` starts the run process and prints the run name. Before the first step the run announces one line: the run name, that the run started, and the default agent adapter's name, or that no agent adapter is installed.
 
 A run is in one of four states:
 
@@ -74,7 +74,7 @@ To discard a run, delete its directory.
 
 A lock file makes execution exclusive: a second penguin process on the same run fails plainly with the holder's pid.
 
-OS cron calling `penguin run --background` covers schedules.
+OS cron calling `pn run --background` covers schedules.
 
 ## Skills
 
@@ -82,11 +82,11 @@ A skill is a directory that holds a `SKILL.md`, in the [Agent Skills](https://ag
 
 penguin links a whole skill directory, never one skill: a skill the user adds later shows up with no second command. The two sources are `.claude/skills/` and `.agents/skills/`. A link keeps its source's short name, `claude` or `agents`.
 
-`penguin sync-skills` writes those links. On a terminal it asks which directories to use. When both hold a skill of the same name it asks which directory is the preference, and writes the answer to `.order`. With no terminal it takes every directory that exists, `claude` first. `--global` reads the two directories under the home folder and writes `~/.penguin/skills/`. `--local` reads the two under the invoking folder and writes `<project>/.penguin/skills/`. With no option it does both.
+`pn sync-skills` writes those links. On a terminal it asks which directories to use. When both hold a skill of the same name it asks which directory is the preference, and writes the answer to `.order`. With no terminal it takes every directory that exists, `claude` first. `--global` reads the two directories under the home folder and writes `~/.penguin/skills/`. `--local` reads the two under the invoking folder and writes `<project>/.penguin/skills/`. With no option it does both.
 
 Sync writes symlinks and `.order`, nothing else. A skill the user wrote into the target survives every sync, and a link to a directory that is gone disappears.
 
-`penguin sync-skills` prints the links it wrote. Install syncs silently.
+`pn sync-skills` prints the links it wrote. Install syncs silently.
 
 A turn's skill name resolves against an ordered list of roots: the project skills directory, then its links in `.order` order, then the home skills directory, then its links. The first root that holds the name wins. penguin's own skills carry a `penguin-` prefix, so they never take the name of a skill the user already has.
 
@@ -97,7 +97,7 @@ A turn's skill name resolves against an ordered list of roots: the project skill
 - `install`: draw the penguin wordmark, create `~/.penguin/` and `~/.penguin/runs/`, copy the catalog (`30-defaults.md`) into `~/.penguin/`, write `penguin-env.d.ts`, then sync the global skills (skills above). The first penguin command runs it.
 - `list`: what penguin can use, as one block per entry. The first line is the name, then the params a workflow takes. The next lines are the description, indented two spaces and wrapped to the terminal width. `--verbose` adds a last line: scope and file, and for skills, source. A param prints as `--name <text>`, a boolean as `--name`, an enum as `--name <one|two>`, and an optional param in brackets. `list workflows` is the workflow files: `<project>/.penguin/*.ts` is local, `~/.penguin/*.ts` is global. The description and the params are the workflow export. `list skills` is the skills a turn can name, in resolution order, one block per name. The description is the skill frontmatter. `list adapters` is the installed adapters: the first line is the role and the implementation name, then the description. It also rewrites `penguin-env.d.ts`. The verbose file line prints the real path, through any symlink. A bare `list` fails and names the three targets.
 - `run`: validate params + create + start + attach (run lifecycle above). It takes a workflow name from the list, local before global, or a path to any workflow file. With no workflow it lists them (the same blocks, plus the one line that runs one). It rewrites `penguin-env.d.ts` first.
-- `ps`: the live runs. On a TTY it is a picker: arrows or hjkl move, enter attaches, `q` leaves. Piped, it is a plain table: run, workflow file, state, current step or pending question, age, run directory. Done runs never list: their directories stay on disk, and `penguin attach` still opens them.
+- `ps`: the live runs. On a TTY it is a picker: arrows or hjkl move, enter attaches, `q` leaves. Piped, it is a plain table: run, workflow file, state, current step or pending question, age, run directory. Done runs never list: their directories stay on disk, and `pn attach` still opens them.
 - `attach`: join a run by name: render the event history, then follow live with the input field. For a done run, the history alone.
 - `sync-skills`: choose the skill directories again (skills above).
 - no command: the usage text. When this command is the first penguin command, the install output is the whole output.
@@ -108,7 +108,7 @@ Every question penguin's own commands ask is a keyboard list: arrows move, space
 
 Each one line, each pinned by a test:
 
-1. At most one process executes a run. A second `penguin` process on the same run fails plainly with the holder's pid.
+1. At most one process executes a run. A second `pn` process on the same run fails plainly with the holder's pid.
 2. Every event appends to `events.jsonl`, and a viewer that joins late renders the same story a live viewer saw.
 3. `q` detaches and the run continues. Ctrl-C stops the run, and the stop is recorded.
 4. Done is final: no command revives a done run, and attach to one is read-only.

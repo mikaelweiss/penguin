@@ -39,7 +39,7 @@ test("install on a home that exists copies nothing", (t) => {
 
   assert.equal(again.code, 0, again.output);
   assert.match(again.stdout, /penguin home is/);
-  assert.match(again.stdout, /penguin list workflows/);
+  assert.match(again.stdout, /pn list workflows/);
   assert.equal(fs.existsSync(path.join(box.home, "ticket.ts")), false);
 });
 
@@ -52,8 +52,8 @@ test("a fresh install prints the two lines and no skills report", (t) => {
 
   assert.equal(first.code, 0, first.output);
   assert.match(first.stdout, new RegExp(`^created ${box.home}$`, "m"));
-  assert.match(first.stdout, /^run `penguin list workflows` to see what's available/m);
-  assert.match(first.stdout, /`penguin run <workflow>` from a project directory to get started$/m);
+  assert.match(first.stdout, /^run `pn list workflows` to see what's available/m);
+  assert.match(first.stdout, /`pn run <workflow>` from a project directory to get started$/m);
   assert.doesNotMatch(first.stdout, /skills in /);
   assert.doesNotMatch(first.stdout, /no \.claude\/skills/);
 });

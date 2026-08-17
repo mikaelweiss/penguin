@@ -28,7 +28,7 @@ export async function attach(name: string, pid?: number): Promise<number> {
   const found = await adapters.installed(record.cwd);
   const viewer = new Viewer(name, dir, build(found, record.cwd), agentLine(found));
   if (pid !== undefined && !(await started(dir, pid))) {
-    process.stderr.write(`penguin: the run process for ${name} died before it started\n`);
+    process.stderr.write(`pn: the run process for ${name} died before it started\n`);
     return 1;
   }
   const tail = new Tail(eventsPath(dir), (line) => viewer.line(line));
@@ -58,7 +58,7 @@ function follow(dir: string, tail: Tail, viewer: Viewer): Promise<number> {
       if (holder(dir) !== undefined) return;
       tail.read();
       if (settled) return;
-      process.stderr.write("penguin: the run process died\n");
+      process.stderr.write("pn: the run process died\n");
       finish(1);
     }, WATCH);
     const keys = interactive() ? keyboard(viewer, finish) : undefined;
@@ -307,7 +307,7 @@ class Viewer {
     try {
       this.renderer.render(event);
     } catch (error) {
-      process.stderr.write(`penguin: the view adapter failed: ${messageOf(error)}\n`);
+      process.stderr.write(`pn: the view adapter failed: ${messageOf(error)}\n`);
     }
   }
 
@@ -386,7 +386,7 @@ function build(found: adapters.Found[], cwd: string): ViewAdapter {
   try {
     return picked.found.definition.build(host(cwd)) as ViewAdapter;
   } catch (error) {
-    process.stderr.write(`penguin: the view adapter failed to build: ${messageOf(error)}\n`);
+    process.stderr.write(`pn: the view adapter failed to build: ${messageOf(error)}\n`);
     return plainRenderer();
   }
 }

@@ -210,16 +210,16 @@ test("list with no target names the three targets and fails", (t) => {
   const bare = box.penguin("list");
 
   assert.equal(bare.code, 1);
-  assert.match(bare.stderr, /penguin list needs a target: penguin list workflows, penguin list skills, or penguin list adapters/);
+  assert.match(bare.stderr, /pn list needs a target: pn list workflows, pn list skills, or pn list adapters/);
 });
 
-test("list runs points at penguin ps", (t) => {
+test("list runs points at pn ps", (t) => {
   const box = sandbox(t);
 
   const wrong = box.penguin("list", "runs");
 
   assert.equal(wrong.code, 1);
-  assert.match(wrong.stderr, /penguin ps shows the runs/);
+  assert.match(wrong.stderr, /pn ps shows the runs/);
 });
 
 test("list with no skill says how to get one", (t) => {
