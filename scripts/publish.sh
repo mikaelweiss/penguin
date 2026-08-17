@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NAMES=("@mikaelweiss/penguin" "falcra")
+CANONICAL="@mikaelweiss/penguin"
+ALIASES=("falcra")
 
 cd "$(dirname "$0")/.."
 
-original=$(node -p "require('./package.json').name")
-trap 'npm pkg set name="$original"' EXIT
+trap 'npm pkg set name="$CANONICAL"' EXIT
 
 npm run build
 
-for name in "${NAMES[@]}"; do
+for name in "$CANONICAL" "${ALIASES[@]}"; do
   npm pkg set name="$name"
   npm publish --access public --ignore-scripts
 done
