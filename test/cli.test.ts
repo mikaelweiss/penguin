@@ -288,3 +288,14 @@ test("run and list adapters write the penguin-env declaration", (t) => {
   assert.match(env, /shell: ReturnType<\(typeof adapter0\)\["build"\]>;/);
   assert.match(env, /\.\/adapters\/shell\.ts/);
 });
+
+test("run -i without a terminal is refused", (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", quickWorkflow);
+
+  const done = box.penguin("run", "./w.ts", "-i");
+
+  assert.equal(done.code, 1);
+  assert.match(done.stderr, /pn run -i needs a terminal/);
+  assert.equal(fs.existsSync(path.join(box.home, "runs", "w-1")), false);
+});

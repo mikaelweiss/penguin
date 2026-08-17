@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { allocateRun, discardRun, finishRun, readRun } from "../src/create.ts";
+import { rows } from "../src/runs.ts";
 import { attach } from "../src/viewer.ts";
 import { type Event, sandbox, terminal, waitFor } from "./helpers.ts";
 
@@ -628,3 +630,74 @@ function alive(pid: number): boolean {
     return false;
   }
 }
+
+test("invariant 14: an unfinished run directory is invisible, and discard spares a finished one", (t) => {
+  const box = sandbox(t);
+  const was = process.env["PENGUIN_HOME"];
+  process.env["PENGUIN_HOME"] = box.home;
+  t.after(() => {
+    if (was === undefined) delete process.env["PENGUIN_HOME"];
+    else process.env["PENGUIN_HOME"] = was;
+  });
+  const file = path.join(box.project, "w.ts");
+
+  const { name, dir } = allocateRun(file);
+  assert.equal(name, "w-1");
+  assert.equal(rows(Date.now()).length, 0, "ps never lists an allocated directory");
+  assert.throws(() => readRun(dir), /no run at/, "attach cannot open it");
+
+  discardRun(dir);
+  assert.equal(fs.existsSync(dir), false);
+
+  const again = allocateRun(file);
+  finishRun(again.dir, file, { count: 1 });
+  assert.deepEqual(readRun(again.dir).params, { count: 1 });
+  discardRun(again.dir);
+  assert.equal(fs.existsSync(again.dir), true, "a finished run survives discard");
+});
+
+test("invariant 15: a paste sends as one message, newlines kept", async (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", gateWorkflow);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const screen = terminal(t, box.home);
+  const watching = attach("w-1");
+  await waitFor(() => screen.text().includes("keep going?"));
+  screen.input.write("\x1b[200~line one\nline two\x1b[201~");
+  await waitFor(() => screen.text().includes("line two"));
+  screen.input.write("\r");
+  const ended = await box.waitForEnd("w-1");
+  const code = await watching;
+
+  assert.equal(code, 0);
+  assert.equal(ended["result"], "line one\nline two");
+  const sent = fs
+    .readFileSync(path.join(box.runDir("w-1"), "inbox.jsonl"), "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+  assert.equal(sent.length, 1);
+});
+
+test("invariant 15: a collapsed paste sends its full text, never the token", async (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", gateWorkflow);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const big = Array.from({ length: 10 }, (_, n) => `line ${n}`).join("\n");
+  const screen = terminal(t, box.home);
+  const watching = attach("w-1");
+  await waitFor(() => screen.text().includes("keep going?"));
+  screen.input.write(`\x1b[200~${big}\x1b[201~`);
+  await waitFor(() => screen.text().includes("[pasted #1, 10 lines]"));
+  screen.input.write("\r");
+  const ended = await box.waitForEnd("w-1");
+  const code = await watching;
+
+  assert.equal(code, 0);
+  assert.equal(ended["result"], big);
+  const sent = fs.readFileSync(path.join(box.runDir("w-1"), "inbox.jsonl"), "utf8");
+  assert.doesNotMatch(sent, /pasted #1/);
+});

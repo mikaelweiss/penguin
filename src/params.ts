@@ -79,7 +79,25 @@ export function validate(schema: z.ZodObject, values: Record<string, unknown>): 
   return values;
 }
 
-function coerce(kind: string, name: string, raw: string): unknown {
+export type Asked = { name: string; kind: string; optional: boolean; choices: string[]; hint: string };
+
+/** The non-boolean params nothing has filled, in the order the schema declares them. */
+export function unfilled(schema: z.ZodObject, values: Record<string, unknown>): Asked[] {
+  const shape = schema.shape as Record<string, unknown>;
+  return Object.entries(shape)
+    .filter(([name]) => !(name in values))
+    .map(([name, field]) => ({ name, param: inspect(field) }))
+    .filter(({ param }) => param.kind !== "boolean")
+    .map(({ name, param }) => ({
+      name,
+      kind: param.kind,
+      optional: param.optional,
+      choices: param.choices,
+      hint: placeholder(param),
+    }));
+}
+
+export function coerce(kind: string, name: string, raw: string): unknown {
   if (kind === "number") {
     const value = Number(raw);
     if (Number.isNaN(value)) throw new PenguinError(`--${name} needs a number, got ${raw}`);

@@ -3,16 +3,19 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { z } from "zod";
 import * as adapters from "./adapters.ts";
-import { createRun } from "./create.ts";
+import { pasteImage } from "./clipboard.ts";
+import { allocateRun, createRun, discardRun, finishRun } from "./create.ts";
+import { ask } from "./editor.ts";
 import { execute } from "./engine.ts";
 import { messageOf, PenguinError } from "./errors.ts";
 import { firstRun, install, syncSkills } from "./install.ts";
 import { blocks } from "./layout.ts";
 import { load } from "./loader.ts";
-import { parseParams, validate } from "./params.ts";
-import { type Scope, short } from "./paths.ts";
-import { choose, interactive } from "./prompt.ts";
+import { type Asked, coerce, parseParams, unfilled, validate } from "./params.ts";
+import { attachmentsDir, type Scope, short } from "./paths.ts";
+import { choose, control, interactive } from "./prompt.ts";
 import { render as renderRuns, rows } from "./runs.ts";
 import * as skills from "./skills.ts";
 import { agentLine, attach } from "./viewer.ts";
@@ -23,6 +26,7 @@ const usage = `penguin runs one workflow as a live process, and the terminal wat
 usage:
   pn list workflows|skills|adapters [--verbose]   show what penguin can use
   pn run <workflow> [--param value ...]           start a run and watch it
+  pn run <workflow> -i                            ask for the params the args did not fill
   pn run <workflow> --background                  start a run and leave it alone
   pn ps                                           the live runs, and a picker to attach
   pn attach <run>                                 watch a run, with its history first
@@ -131,20 +135,105 @@ function scopeOf(flag: string): Scope {
 
 async function runWorkflow(argv: string[]): Promise<number> {
   const background = argv.includes("--background");
-  const [target, ...rest] = argv.filter((arg) => arg !== "--background");
+  const asked = argv.includes("-i") || argv.includes("--interactive");
+  const [target, ...rest] = argv.filter(
+    (arg) => arg !== "--background" && arg !== "-i" && arg !== "--interactive",
+  );
   if (target === undefined) return listWorkflows(true);
   const source = sourceOf(target);
   const definition = await load(source);
-  const params = validate(definition.params, parseParams(definition.params, rest));
+  const values = parseParams(definition.params, rest);
+  if (asked && !interactive()) throw new PenguinError("pn run -i needs a terminal");
   const installed = await adapters.installed(process.cwd());
   adapters.writeEnv(process.cwd(), installed);
-  const name = createRun(source, params);
+  const name = asked
+    ? await startAsked(source, definition.params, values)
+    : createRun(source, checkedParams(definition.params, values, target));
   const pid = start(name);
   if (background) {
     say(`run ${name} started, ${agentLine(installed)}`);
     return 0;
   }
   return attach(name, pid);
+}
+
+function checkedParams(
+  schema: z.ZodObject,
+  values: Record<string, unknown>,
+  target: string,
+): unknown {
+  try {
+    return validate(schema, values);
+  } catch (error) {
+    if (error instanceof PenguinError && interactive()) {
+      throw new PenguinError(`${error.message}\n  pn run ${target} -i asks for anything missing`);
+    }
+    throw error;
+  }
+}
+
+/** The run directory exists first, so a pasted image lands in its attachments. */
+async function startAsked(
+  source: string,
+  schema: z.ZodObject,
+  values: Record<string, unknown>,
+): Promise<string> {
+  const { name, dir } = allocateRun(source);
+  const leave = (): void => {
+    discardRun(dir);
+    process.stdout.write("\x1b[?2004l\n");
+    process.exit(130);
+  };
+  try {
+    for (const param of unfilled(schema, values)) {
+      await fillParam(param, values, attachmentsDir(dir), leave);
+    }
+    validate(schema, values);
+    finishRun(dir, source, values);
+    return name;
+  } catch (error) {
+    discardRun(dir);
+    throw error;
+  }
+}
+
+async function fillParam(
+  param: Asked,
+  values: Record<string, unknown>,
+  attachments: string,
+  interrupt: () => void,
+): Promise<void> {
+  const question = `--${param.name} <${param.hint}>`;
+  if (param.choices.length > 0) {
+    const labels = param.optional ? [...param.choices, "skip"] : param.choices;
+    const running = control(
+      question,
+      labels.map((label) => ({ label })),
+      { many: false, interrupt },
+    );
+    const picked = (await running.picked)?.[0];
+    if (picked !== undefined && picked < param.choices.length) {
+      values[param.name] = param.choices[picked] ?? "";
+    }
+    return;
+  }
+  for (;;) {
+    const answer = await ask(question, {
+      notes: param.optional ? ["enter skips"] : [],
+      attach: () => pasteImage(attachments),
+      interrupt,
+    });
+    if (answer === "") {
+      if (param.optional) return;
+      continue;
+    }
+    try {
+      values[param.name] = coerce(param.kind, param.name, answer);
+      return;
+    } catch (error) {
+      say(messageOf(error));
+    }
+  }
 }
 
 function start(name: string): number {

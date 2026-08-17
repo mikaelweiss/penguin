@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { reserve } from "../src/clipboard.ts";
 import { attach, controlFor } from "../src/viewer.ts";
 import { type Sandbox, sandbox, terminal, waitFor } from "./helpers.ts";
 
@@ -222,4 +223,14 @@ test("the terminal adapter renders the same call, with thinking set apart", (t) 
   assert.match(done.stdout, /^\[Read\]$/m);
   assert.match(done.stdout, /^ {2}I need the branch$/m);
   assert.match(done.stdout, /^the branch is clean$/m);
+});
+
+test("attachment names never collide", (t) => {
+  const box = sandbox(t);
+  const dir = path.join(box.home, "runs", "w-1", "attachments");
+  fs.mkdirSync(dir, { recursive: true });
+  assert.equal(reserve(dir), path.join(dir, "paste-1.png"));
+  assert.equal(reserve(dir), path.join(dir, "paste-2.png"));
+  fs.rmSync(path.join(dir, "paste-1.png"));
+  assert.equal(reserve(dir), path.join(dir, "paste-1.png"));
 });

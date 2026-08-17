@@ -2,12 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import * as adapters from "./adapters.ts";
+import { pasteImage } from "./clipboard.ts";
 import { readRun } from "./create.ts";
 import * as credentials from "./credentials.ts";
+import { Editor, Field, type Key } from "./editor.ts";
 import { messageOf, PenguinError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { alive, holder } from "./lock.ts";
-import { credentialFile, eventsPath, inboxPath, runDir } from "./paths.ts";
+import { attachmentsDir, credentialFile, eventsPath, inboxPath, runDir } from "./paths.ts";
 import { control, entry, interactive } from "./prompt.ts";
 import { edit, runArgv, runCommand } from "./spawn.ts";
 import type { Host, ViewAdapter, ViewEvent } from "./types.ts";
@@ -15,6 +17,7 @@ import { plainRenderer } from "./view.ts";
 
 const START_TIMEOUT = 10_000;
 const WATCH = 500;
+const HINT = "enter sends, esc clears, ctrl-v pastes an image";
 
 type Keys = { start(): void; stop(): void };
 
@@ -78,41 +81,33 @@ function follow(dir: string, tail: Tail, viewer: Viewer): Promise<number> {
 
 function keyboard(viewer: Viewer, finish: (code: number) => void): Keys {
   const input = process.stdin;
-  const onKey = (text: string | undefined, key: { name?: string; ctrl?: boolean }): void => {
-    if (key.ctrl === true && key.name === "c") {
+  const onKey = (text: string | undefined, key: Key): void => {
+    if (key.ctrl === true && key.name === "c" && !viewer.busy()) {
       viewer.stopRun();
       return;
     }
-    if (key.name === "tab") {
-      viewer.cycle();
-      return;
+    if (!viewer.typing()) {
+      if (key.name === "q") {
+        finish(0);
+        return;
+      }
+      if (key.name === "tab") {
+        viewer.cycle();
+        return;
+      }
     }
-    if (key.name === "return" || key.name === "enter") {
-      viewer.send();
-      return;
-    }
-    if (key.name === "escape") {
-      viewer.clear();
-      return;
-    }
-    if (key.name === "backspace") {
-      viewer.erase();
-      return;
-    }
-    if (!viewer.typing() && key.name === "q") {
-      finish(0);
-      return;
-    }
-    if (text !== undefined && text.length === 1 && text >= " ") viewer.type(text);
+    viewer.key(text, key);
   };
   return {
     start(): void {
       readline.emitKeypressEvents(input);
       input.setRawMode(true);
       input.resume();
+      process.stdout.write("\x1b[?2004h");
       input.on("keypress", onKey);
     },
     stop(): void {
+      process.stdout.write("\x1b[?2004l");
       input.off("keypress", onKey);
       input.setRawMode(false);
       input.pause();
@@ -130,7 +125,8 @@ class Viewer {
   private sessions = new Map<string, string>();
   private order: string[] = [];
   private selected: string | undefined;
-  private buffer = "";
+  private editor = new Editor();
+  private field: Field | undefined;
   private held: ViewEvent[] = [];
   private ended: number | undefined;
   private keys: Keys | undefined;
@@ -163,7 +159,7 @@ class Viewer {
       this.show(event);
       return;
     }
-    if (this.buffer !== "" || this.control !== undefined) {
+    if (!this.editor.empty || this.control !== undefined) {
       this.held.push(event);
       if (event.type === "gate" && event.phase === "answered") this.control?.cancel();
       if (event.type === "credential" && event.phase === "ready") this.control?.cancel();
@@ -174,7 +170,9 @@ class Viewer {
 
   live(keys: Keys): void {
     this.keys = keys;
+    this.field = new Field(process.stdout, this.editor, HINT);
     keys.start();
+    process.stdout.on("resize", this.redraw);
     void this.open();
   }
 
@@ -183,42 +181,42 @@ class Viewer {
   }
 
   typing(): boolean {
-    return this.buffer !== "";
+    return !this.editor.empty;
   }
 
-  type(text: string): void {
-    this.buffer += text;
-    this.prompt();
+  busy(): boolean {
+    return this.editor.busy;
   }
 
-  erase(): void {
-    if (this.buffer === "") return;
-    this.buffer = this.buffer.slice(0, -1);
-    if (this.buffer === "") this.clear();
-    else this.prompt();
-  }
-
-  clear(): void {
-    if (this.buffer === "") return;
-    this.buffer = "";
-    this.erasePrompt();
-    this.flush();
+  key(text: string | undefined, key: Key): void {
+    const act = this.editor.key(text, key);
+    if (act === "send") {
+      const message = this.editor.take();
+      this.field?.erase();
+      this.deliver(message);
+      this.flush();
+      return;
+    }
+    if (act === "image") {
+      void this.attach();
+      return;
+    }
+    if (act !== "changed") return;
+    if (this.editor.empty) {
+      this.field?.erase();
+      this.flush();
+    } else {
+      this.field?.draw();
+    }
   }
 
   close(): void {
     this.closed = true;
     this.control?.cancel();
     this.control = undefined;
-    this.clear();
-    this.flush();
-  }
-
-  send(): void {
-    const text = this.buffer;
-    if (text === "") return;
-    this.buffer = "";
-    this.erasePrompt();
-    this.deliver(text);
+    this.editor.take();
+    this.field?.erase();
+    process.stdout.off("resize", this.redraw);
     this.flush();
   }
 
@@ -423,12 +421,19 @@ class Viewer {
     for (const event of held) this.show(event);
   }
 
-  private prompt(): void {
-    this.write(`\r\x1b[2K> ${this.buffer}`);
-  }
+  private redraw = (): void => {
+    if (!this.editor.empty) this.field?.draw();
+  };
 
-  private erasePrompt(): void {
-    this.write("\r\x1b[2K");
+  private async attach(): Promise<void> {
+    const got = await pasteImage(attachmentsDir(this.dir));
+    if (this.closed) return;
+    if ("path" in got) {
+      this.editor.insert(got.path);
+      this.field?.draw();
+    } else {
+      this.field?.note(got.warn);
+    }
   }
 
   private write(text: string): void {

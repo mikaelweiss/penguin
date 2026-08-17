@@ -78,3 +78,7 @@ export function runJsonPath(dir: string): string {
 export function transcriptsDir(dir: string): string {
   return path.join(dir, "transcripts");
 }
+
+export function attachmentsDir(dir: string): string {
+  return path.join(dir, "attachments");
+}
