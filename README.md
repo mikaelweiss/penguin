@@ -7,7 +7,7 @@ A workflow is one TypeScript file: a params schema and a run function over `ctx`
 ## Install
 
 ```sh
-npm install -g penguin
+npm install -g @mikaelweiss/penguin
 ```
 
 penguin needs Node 24 or newer. Your repository needs no npm install.

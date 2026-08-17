@@ -10,8 +10,12 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "penguin": ["./node_modules/penguin/dist/index.d.ts", "../src/index.ts"],
-      "zod": ["./node_modules/penguin/node_modules/zod", "./node_modules/zod", "../node_modules/zod"]
+      "penguin": ["./node_modules/@mikaelweiss/penguin/dist/index.d.ts", "../src/index.ts"],
+      "zod": [
+        "./node_modules/@mikaelweiss/penguin/node_modules/zod",
+        "./node_modules/zod",
+        "../node_modules/zod"
+      ]
     }
   },
   "include": ["*.ts", "adapters/*.ts"]

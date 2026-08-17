@@ -1,8 +1,12 @@
 {
-  "name": "penguin",
-  "version": "1.0.0",
+  "name": "@mikaelweiss/penguin",
+  "version": "0.0.1",
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mikaelweiss/penguin.git"
+  },
   "type": "module",
   "bin": {
     "pn": "./dist/cli.js"
@@ -23,7 +27,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "check": "tsc --noEmit",
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "zod": "^4.4.3"
