@@ -2,15 +2,21 @@ import { workflow } from "penguin";
 import { z } from "zod";
 
 const Findings = z.object({
-  blockers: z.array(z.string()).describe("the issues that must change before an approve"),
-  nonBlockers: z.array(z.string()).describe("the improvements the author may take or leave"),
+  blockers: z
+    .array(z.string())
+    .describe("the issues that must change before an approve"),
+  nonBlockers: z
+    .array(z.string())
+    .describe("the improvements the author may take or leave"),
 });
 
 type Findings = z.infer<typeof Findings>;
 type Note = { author: string; at: string; body: string };
 
 function listed(items: string[]): string {
-  return items.length === 0 ? "none" : items.map((item) => `- ${item}`).join("\n");
+  return items.length === 0
+    ? "none"
+    : items.map((item) => `- ${item}`).join("\n");
 }
 
 function report(findings: Findings): string {
@@ -18,7 +24,9 @@ function report(findings: Findings): string {
 }
 
 function noted(notes: Note[]): string {
-  return notes.map((note) => `## ${note.author} on ${note.at}\n\n${note.body}`).join("\n\n");
+  return notes
+    .map((note) => `## ${note.author} on ${note.at}\n\n${note.body}`)
+    .join("\n\n");
 }
 
 export default workflow({
@@ -34,13 +42,18 @@ export default workflow({
     }
     const pr = found.pr;
     if (pr.state !== "OPEN") {
-      view.event({ message: `PR #${pr.number} is ${pr.state}, nothing to review` });
+      view.event({
+        message: `PR #${pr.number} is ${pr.state}, nothing to review`,
+      });
       return { rounds: 0, posted: 0 };
     }
 
     const said = await github.pr.comments(params.pr);
     if (!said.ok)
-      view.event({ level: "warn", message: `The PR comments did not read: ${said.reason}` });
+      view.event({
+        level: "warn",
+        message: `The PR comments did not read: ${said.reason}`,
+      });
     let description = pr.body;
     let notes: Note[] = said.comments;
 
@@ -53,7 +66,7 @@ export default workflow({
     view.artifact({ title: `PR #${pr.number}: ${pr.title}`, url: pr.url });
     view.watch({ elapsed: true });
 
-    const changes = await github.pr.changes(params.pr);
+    const changes = github.pr.changes(params.pr);
     let inbound = changes.next();
     let previous: Findings | undefined;
     let inDraft = pr.isDraft;
@@ -62,7 +75,8 @@ export default workflow({
     let posted = 0;
 
     const briefing = (): string => {
-      const conversation = notes.length === 0 ? "" : `\n\n# Comments\n\n${noted(notes)}`;
+      const conversation =
+        notes.length === 0 ? "" : `\n\n# Comments\n\n${noted(notes)}`;
       return `# PR #${pr.number}: ${pr.title}\n\n${pr.url}\n\n${description}${conversation}`;
     };
 
@@ -74,11 +88,15 @@ export default workflow({
     const pulled = async (): Promise<void> => {
       const done = await vcs.pull(ref, { cwd: ws.path });
       if (!done.ok)
-        await gate(`The pull failed: ${done.reason} Reply to go on with the last fetched code.`);
+        await gate(
+          `The pull failed: ${done.reason} Reply to go on with the last fetched code.`,
+        );
     };
 
     const post = async (findings: Findings): Promise<void> => {
-      const sent = await github.pr.comment(params.pr, { body: report(findings) });
+      const sent = await github.pr.comment(params.pr, {
+        body: report(findings),
+      });
       if (!sent.ok) {
         await gate(`The comment failed: ${sent.reason}`);
         return;
@@ -86,10 +104,15 @@ export default workflow({
       posted += 1;
     };
 
-    const review = async (): Promise<"approved" | "sent" | "closed" | "draft"> => {
+    const review = async (): Promise<
+      "approved" | "sent" | "closed" | "draft"
+    > => {
       await pulled();
       const reviewer = agent({ cwd: ws.path, name: `reviewer-${rounds}` });
-      let turn = reviewer.run("penguin-review-pr", { input: opening(), result: Findings });
+      let turn = reviewer.run("penguin-review-pr", {
+        input: opening(),
+        result: Findings,
+      });
       for (;;) {
         const first = await Promise.race([
           turn.then(() => "turn" as const),
@@ -100,12 +123,16 @@ export default workflow({
         inbound = changes.next();
         if (change.kind === "closed") {
           await turn.stop();
-          view.event({ message: `PR #${pr.number} is ${change.state}, the review stops` });
+          view.event({
+            message: `PR #${pr.number} is ${change.state}, the review stops`,
+          });
           return "closed";
         }
         if (change.kind === "draft") {
           await turn.stop();
-          view.event({ message: `PR #${pr.number} went to draft, the review waits` });
+          view.event({
+            message: `PR #${pr.number} went to draft, the review waits`,
+          });
           return "draft";
         }
         if (change.kind === "ready") continue;
@@ -122,7 +149,10 @@ export default workflow({
           notes = notes.concat(change.comments);
           update = `New comments arrived on the PR:\n\n${noted(change.comments)}\n\nTake them as added context and continue the review.`;
         }
-        turn = reviewer.run("penguin-review-pr", { input: update, result: Findings });
+        turn = reviewer.run("penguin-review-pr", {
+          input: update,
+          result: Findings,
+        });
       }
 
       let findings = (await turn)!;
@@ -133,7 +163,9 @@ export default workflow({
         );
         if (answer === "send") {
           await post(findings);
-          view.event({ message: `Posted feedback on PR #${pr.number} without approving` });
+          view.event({
+            message: `Posted feedback on PR #${pr.number} without approving`,
+          });
           return "sent";
         }
         findings = (await reviewer.run("penguin-review-pr", {
