@@ -9,6 +9,7 @@ export class Tail {
   private offset = 0;
   private watcher: fs.FSWatcher | undefined;
   private timer: NodeJS.Timeout | undefined;
+  private stopped = false;
 
   constructor(file: string, onLine: (line: string) => void) {
     this.file = file;
@@ -41,6 +42,7 @@ export class Tail {
 
   follow(): void {
     this.read();
+    if (this.stopped) return;
     try {
       this.watcher = fs.watch(path.dirname(this.file), () => this.read());
     } catch {
@@ -50,6 +52,7 @@ export class Tail {
   }
 
   stop(): void {
+    this.stopped = true;
     this.watcher?.close();
     this.watcher = undefined;
     if (this.timer !== undefined) clearInterval(this.timer);

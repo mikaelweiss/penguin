@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { PassThrough } from "node:stream";
 import test from "node:test";
 import { attach } from "../src/viewer.ts";
-import { sandbox, waitFor } from "./helpers.ts";
+import { type Event, sandbox, terminal, waitFor } from "./helpers.ts";
 
 const gateWorkflow = `import { workflow } from "wa";
 import { z } from "zod";
@@ -160,7 +159,7 @@ export default workflow({
   assert.match(revived.stderr, /unknown command resume/);
 });
 
-test("invariant 5: each message at most once, in order, and a gate consumes one", async (t) => {
+test("invariant 5: each message at most once, in order, and each ask consumes one", async (t) => {
   const box = sandbox(t);
   box.write(
     "w.ts",
@@ -172,9 +171,9 @@ export default workflow({
   params: z.object({}),
   async run({ gate, messages }) {
     const answer = await gate("first?");
-    const second = await messages.next();
-    const third = await messages.next();
-    return [answer, second.text, third.text].join("|");
+    const choice = await gate("second?", z.enum(["dev", "prod"]));
+    const last = await messages.next();
+    return [answer, choice, last.text].join("|");
   },
 });
 `,
@@ -183,21 +182,29 @@ export default workflow({
   await box.waitForState("w-1", "blocked");
 
   box.send("w-1", "one");
-  box.send("w-1", "two");
+  box.send("w-1", "nope");
+  box.send("w-1", "prod");
   box.send("w-1", "three");
   const ended = await box.waitForEnd("w-1");
 
-  assert.equal(ended["result"], "one|two|three");
+  assert.equal(ended["result"], "one|prod|three");
   const events = box.events("w-1");
   assert.deepEqual(
     events.filter((event) => event["type"] === "message").map((event) => event["text"]),
-    ["one", "two", "three"],
+    ["one", "nope", "prod", "three"],
+  );
+  assert.equal(
+    events.filter((event) => event["phase"] === "asked").length,
+    3,
+    "three asks took three messages",
   );
   const answered = events.filter((event) => event["phase"] === "answered");
   assert.deepEqual(
     answered.map((event) => [event["question"], event["answer"]]),
-    [["first?", "one"]],
-    "the gate consumed exactly one message",
+    [
+      ["first?", "one"],
+      ["second?", "prod"],
+    ],
   );
 });
 
@@ -526,38 +533,56 @@ export default workflow({
   assert.equal(box.ended("w-1")?.["result"], "the project shell");
 });
 
-type Screen = { input: PassThrough; stop(): string };
+test("invariant 11: a typed gate validates the answer and asks again on a mismatch", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
 
-function terminal(t: { after(fn: () => void): void }, home: string): Screen {
-  const input = new PassThrough() as PassThrough & { isTTY: boolean; setRawMode(on: boolean): void };
-  input.isTTY = true;
-  input.setRawMode = () => {};
-  const stdin = Object.getOwnPropertyDescriptor(process, "stdin");
-  const isTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
-  const write = process.stdout.write.bind(process.stdout);
-  const waHome = process.env["WA_HOME"];
-  const chunks: string[] = [];
-  let stopped = false;
-  const restore = (): string => {
-    if (stopped) return chunks.join("");
-    stopped = true;
-    process.stdout.write = write;
-    if (stdin !== undefined) Object.defineProperty(process, "stdin", stdin);
-    if (isTTY === undefined) delete (process.stdout as { isTTY?: boolean }).isTTY;
-    else Object.defineProperty(process.stdout, "isTTY", isTTY);
-    if (waHome === undefined) delete process.env["WA_HOME"];
-    else process.env["WA_HOME"] = waHome;
-    return chunks.join("");
-  };
-  Object.defineProperty(process, "stdin", { value: input, configurable: true });
-  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    chunks.push(chunk.toString());
-    return true;
-  }) as typeof process.stdout.write;
-  process.env["WA_HOME"] = home;
-  t.after(restore);
-  return { input, stop: restore };
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate }) {
+    const port = await gate("Port?", z.number().min(1).max(65535));
+    return { port, kind: typeof port };
+  },
+});
+`,
+  );
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  box.send("w-1", "eighty");
+  await waitFor(() => asks(box.events("w-1")).length === 2);
+
+  assert.equal(box.ended("w-1"), undefined, "the mismatch kept the run alive");
+  const warned = box.events("w-1").find((event) => event["level"] === "warn");
+  assert.match(String(warned?.["message"]), /the answer "eighty" does not fit/);
+  assert.equal(box.lastState("w-1")?.["detail"], "Port?");
+
+  box.send("w-1", "8080");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.deepEqual(ended["result"], { port: 8080, kind: "number" });
+  const events = box.events("w-1");
+  assert.deepEqual(
+    asks(events).map((event) => event["schema"]),
+    [
+      { type: "number", minimum: 1, maximum: 65535 },
+      { type: "number", minimum: 1, maximum: 65535 },
+    ],
+    "every ask carries the shape",
+  );
+  assert.deepEqual(
+    events.filter((event) => event["phase"] === "answered").map((event) => event["answer"]),
+    ["8080"],
+    "only the answer that fits is an answer",
+  );
+});
+
+function asks(events: Event[]): Event[] {
+  return events.filter((event) => event["phase"] === "asked");
 }
 
 function alive(pid: number): boolean {

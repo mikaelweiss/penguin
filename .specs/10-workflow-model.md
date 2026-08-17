@@ -24,7 +24,7 @@ wa imports the module and reads the exported params schema without calling `run`
 `run(ctx)` receives everything. All IO goes through it: a workflow can only do what an adapter offers.
 
 - `ctx.params`: validated params.
-- `ctx.gate(question)`: ask a question and wait for the answer. The run shows blocked with the question, and the answer arrives as a message from an attached viewer. The answer is free text. A workflow that wants fixed choices writes them into the question and loops on the answer. A workflow that needs two facts asks two gates. Returns the answer string.
+- `ctx.gate(question, shape?)`: ask a question and wait for the answer. The run shows blocked with the question, and the answer arrives as a message from an attached viewer. With no shape the answer is free text, and the gate returns a string. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`, `z.url()`) the gate returns that type. The engine takes the first reading of the answer text the shape accepts: the text itself, a number, yes or no, a comma-separated list, or JSON. An answer no reading fits gets a warning, and the gate asks the same question again. A shape checks the form of an answer, never its meaning, so a workflow that wants approval still loops on the answer. A workflow that needs two facts asks two gates.
 - `ctx.agent(options?)`: open an agent session (below).
 - `ctx.messages`: the inbound message stream (below).
 - `ctx.view`: the typed output surface (below).
@@ -53,7 +53,7 @@ Options: `use` names the agent adapter implementation when more than one is inst
 
 ## Messages
 
-`ctx.messages.next()` returns the next message sent into the run: `{text, session?}`. An attached viewer sends messages, addressed to the run or to a named session. The engine delivers each message once, in order, to the earliest waiting reader. A gate is a reader too: it posts its question and takes the next message as the answer.
+`ctx.messages.next()` returns the next message sent into the run: `{text, session?}`. An attached viewer sends messages, addressed to the run or to a named session. The engine delivers each message once, in order, to the earliest waiting reader. A gate is a reader too: each ask posts its question and takes the next message as the answer.
 
 A workflow chooses what a message means. Race it against a turn to allow interruption. Read it between turns to queue it. Never read it to ignore it.
 

@@ -132,7 +132,7 @@ class Execution {
     );
     const base: Record<string, unknown> = {
       params,
-      gate: (question: string) => this.gate(question),
+      gate: (question: string, shape?: z.ZodType) => this.gate(question, shape),
       messages: { next: () => this.read().message },
       view: this.view(),
       agent: (options?: AgentOptions) => this.session(options ?? {}),
@@ -322,11 +322,7 @@ class Execution {
       throw new WaError(`no skill ${call.skill}. Looked in ${found.searched.join(", ")}`);
     }
     const skillText = fs.readFileSync(found.file, "utf8");
-    let schema: Record<string, unknown> | undefined;
-    if (call.result !== undefined) {
-      schema = z.toJSONSchema(call.result) as Record<string, unknown>;
-      delete schema["$schema"];
-    }
+    const schema = call.result === undefined ? undefined : jsonSchema(call.result);
     const label = `agent ${call.skill}`;
     const activity = this.als.getStore()?.id;
     this.bus.emit({ type: "step", phase: "start", id, label, activity });
@@ -406,10 +402,25 @@ class Execution {
     }
   }
 
-  private async gate(question: string): Promise<string> {
-    this.bus.emit({ type: "gate", phase: "asked", question });
-    const { message } = this.read(question);
-    return this.answered(question, await message);
+  private async gate(question: string, shape?: z.ZodType): Promise<unknown> {
+    const schema = shape === undefined ? undefined : jsonSchema(shape);
+    for (;;) {
+      this.bus.emit({ type: "gate", phase: "asked", question, schema });
+      const { message } = this.read(question);
+      const answer = await message;
+      if (shape === undefined) return this.answered(question, answer);
+      const taken = coerce(shape, answer.text);
+      if ("value" in taken) {
+        this.answered(question, answer);
+        return taken.value;
+      }
+      this.bus.emit({
+        type: "event",
+        level: "warn",
+        message: `the answer "${answer.text}" does not fit: ${taken.problem}`,
+        activity: this.als.getStore()?.id,
+      });
+    }
   }
 
   private async gateUntil(question: string, halted: Promise<void>): Promise<string | undefined> {
@@ -558,6 +569,45 @@ function composePrompt(skillText: string, input: string | undefined, failure: st
     parts.push(`# Correction\n\nThe last attempt failed: ${failure}\nDo the step again and fix that.`);
   }
   return `${parts.join("\n\n")}\n`;
+}
+
+function jsonSchema(shape: z.ZodType): Record<string, unknown> {
+  const schema = z.toJSONSchema(shape) as Record<string, unknown>;
+  delete schema["$schema"];
+  return schema;
+}
+
+function coerce(shape: z.ZodType, text: string): { value: unknown } | { problem: string } {
+  let problem = "";
+  for (const candidate of candidates(text)) {
+    const checked = shape.safeParse(candidate);
+    if (checked.success) return { value: checked.data };
+    if (problem === "") problem = issues(checked.error);
+  }
+  return { problem };
+}
+
+function candidates(text: string): unknown[] {
+  const trimmed = text.trim();
+  const list: unknown[] = [text, trimmed];
+  const asNumber = Number(trimmed);
+  if (trimmed !== "" && Number.isFinite(asNumber)) list.push(asNumber);
+  const lowered = trimmed.toLowerCase();
+  if (["yes", "y", "true"].includes(lowered)) list.push(true);
+  if (["no", "n", "false"].includes(lowered)) list.push(false);
+  if (text.includes(",")) list.push(trimmed.split(",").map((part) => part.trim()));
+  list.push([trimmed]);
+  const json = asJson(text);
+  if (json !== undefined) list.push(json);
+  return list;
+}
+
+function asJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 function issues(error: z.ZodError): string {

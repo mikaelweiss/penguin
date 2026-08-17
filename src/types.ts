@@ -36,7 +36,7 @@ export type ViewEvent =
   | { type: "artifact"; title: string; path?: string; url?: string }
   | { type: "watch"; elapsed?: boolean; diff?: string }
   | { type: "agent"; session: string; kind: "text" | "tool" | "output"; text: string; activity?: string }
-  | { type: "gate"; phase: "asked"; question: string }
+  | { type: "gate"; phase: "asked"; question: string; schema?: Record<string, unknown> }
   | { type: "gate"; phase: "answered"; question: string; answer: string };
 
 export type View = {
@@ -76,6 +76,7 @@ export interface Adapters {}
 export type Ctx<Params> = {
   params: Params;
   gate(question: string): Promise<string>;
+  gate<Shape extends z.ZodType>(question: string, shape: Shape): Promise<z.infer<Shape>>;
   messages: Messages;
   view: View;
   agent: AgentFactory;

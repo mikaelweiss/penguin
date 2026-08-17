@@ -36,7 +36,7 @@ One name for one thing, used everywhere (code, UI, specs):
 - **turn**: one prompt to a session and its result. A workflow awaits it or stops it early.
 - **skill**: the markdown craft file an agent turn follows, in the Agent Skills format. A turn names it, and wa finds it in a skills directory.
 - **result**: the small JSON envelope an agent turn produces. Schema-validated.
-- **gate**: a step that asks a question and waits for the human answer.
+- **gate**: a step that asks a question and waits for the human answer. A shape types the answer.
 - **message**: one line sent into a run from a viewer, addressed to the run or to one named session.
 - **agent**: an external coding CLI, driven by an adapter with the `agent` role.
 - **event**: one typed object about the run, sent to whatever is watching. The run's `events.jsonl` keeps them all.

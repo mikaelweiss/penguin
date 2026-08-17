@@ -7,7 +7,7 @@ import { messageOf, WaError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { alive, holder } from "./lock.ts";
 import { eventsPath, inboxPath, runDir } from "./paths.ts";
-import { interactive } from "./prompt.ts";
+import { type Control, control, interactive } from "./prompt.ts";
 import { runArgv, runCommand } from "./spawn.ts";
 import type { Host, ViewAdapter, ViewEvent } from "./types.ts";
 import { plainRenderer } from "./view.ts";
@@ -15,21 +15,29 @@ import { plainRenderer } from "./view.ts";
 const START_TIMEOUT = 10_000;
 const WATCH = 500;
 
+type Keys = { start(): void; stop(): void };
+
+type GateEvent = Extract<ViewEvent, { type: "gate" }>;
+
+export type GateControl = { list: string[]; many: boolean } | { hint: string | undefined };
+
 export async function attach(name: string, pid?: number): Promise<number> {
   const dir = runDir(name);
   if (!fs.existsSync(dir)) throw new WaError(`no run named ${name}`);
   const record = readRun(dir);
   const found = await adapters.installed(record.cwd);
-  const viewer = new Viewer(name, build(found, record.cwd), agentLine(found));
+  const viewer = new Viewer(name, dir, build(found, record.cwd), agentLine(found));
   if (pid !== undefined && !(await started(dir, pid))) {
     process.stderr.write(`wa: the run process for ${name} died before it started\n`);
     return 1;
   }
   const tail = new Tail(eventsPath(dir), (line) => viewer.line(line));
   tail.read();
+  const live = holder(dir) !== undefined;
+  if (!live) tail.read();
   const code = viewer.code();
   if (code !== undefined) return code;
-  if (holder(dir) === undefined) return 0;
+  if (!live) return 0;
   return follow(dir, tail, viewer);
 }
 
@@ -41,6 +49,7 @@ function follow(dir: string, tail: Tail, viewer: Viewer): Promise<number> {
       settled = true;
       clearInterval(watchdog);
       tail.stop();
+      viewer.close();
       keys?.stop();
       resolve(code);
     };
@@ -52,19 +61,17 @@ function follow(dir: string, tail: Tail, viewer: Viewer): Promise<number> {
       process.stderr.write("wa: the run process died\n");
       finish(1);
     }, WATCH);
-    const keys = interactive() ? keyboard(dir, viewer, finish) : undefined;
+    const keys = interactive() ? keyboard(viewer, finish) : undefined;
+    if (keys !== undefined) viewer.live(keys);
     tail.follow();
   });
 }
 
-function keyboard(dir: string, viewer: Viewer, finish: (code: number) => void): { stop(): void } {
+function keyboard(viewer: Viewer, finish: (code: number) => void): Keys {
   const input = process.stdin;
-  readline.emitKeypressEvents(input);
-  input.setRawMode(true);
-  input.resume();
   const onKey = (text: string | undefined, key: { name?: string; ctrl?: boolean }): void => {
     if (key.ctrl === true && key.name === "c") {
-      viewer.stopRun(dir);
+      viewer.stopRun();
       return;
     }
     if (key.name === "tab") {
@@ -72,7 +79,7 @@ function keyboard(dir: string, viewer: Viewer, finish: (code: number) => void): 
       return;
     }
     if (key.name === "return" || key.name === "enter") {
-      viewer.send(dir);
+      viewer.send();
       return;
     }
     if (key.name === "escape") {
@@ -89,8 +96,13 @@ function keyboard(dir: string, viewer: Viewer, finish: (code: number) => void): 
     }
     if (text !== undefined && text.length === 1 && text >= " ") viewer.type(text);
   };
-  input.on("keypress", onKey);
   return {
+    start(): void {
+      readline.emitKeypressEvents(input);
+      input.setRawMode(true);
+      input.resume();
+      input.on("keypress", onKey);
+    },
     stop(): void {
       input.off("keypress", onKey);
       input.setRawMode(false);
@@ -102,6 +114,7 @@ function keyboard(dir: string, viewer: Viewer, finish: (code: number) => void): 
 class Viewer {
   onEnd: (code: number) => void = () => {};
   private name: string;
+  private dir: string;
   private renderer: ViewAdapter;
   private agent: string;
   private tty = process.stdout.isTTY === true;
@@ -111,9 +124,14 @@ class Viewer {
   private buffer = "";
   private held: ViewEvent[] = [];
   private ended: number | undefined;
+  private keys: Keys | undefined;
+  private control: Control | undefined;
+  private pending: { question: string; list: string[]; many: boolean } | undefined;
+  private closed = false;
 
-  constructor(name: string, renderer: ViewAdapter, agent: string) {
+  constructor(name: string, dir: string, renderer: ViewAdapter, agent: string) {
     this.name = name;
+    this.dir = dir;
     this.renderer = renderer;
     this.agent = agent;
   }
@@ -130,15 +148,22 @@ class Viewer {
       if (!this.order.includes(event.name)) this.order.push(event.name);
     }
     if (event.type === "run" && event.phase !== "started") {
-      this.clear();
+      this.close();
       this.show(event);
       return;
     }
-    if (this.buffer !== "") {
+    if (this.buffer !== "" || this.control !== undefined) {
       this.held.push(event);
+      if (event.type === "gate" && event.phase === "answered") this.control?.cancel();
       return;
     }
     this.show(event);
+  }
+
+  live(keys: Keys): void {
+    this.keys = keys;
+    keys.start();
+    void this.open();
   }
 
   code(): number | undefined {
@@ -168,13 +193,20 @@ class Viewer {
     this.flush();
   }
 
-  send(dir: string): void {
+  close(): void {
+    this.closed = true;
+    this.control?.cancel();
+    this.control = undefined;
+    this.clear();
+    this.flush();
+  }
+
+  send(): void {
     const text = this.buffer;
     if (text === "") return;
     this.buffer = "";
     this.erasePrompt();
-    const message = { at: new Date().toISOString(), text, session: this.selected };
-    fs.appendFileSync(inboxPath(dir), `${JSON.stringify(message)}\n`);
+    this.deliver(text);
     this.flush();
   }
 
@@ -185,8 +217,8 @@ class Viewer {
     this.write(`viewing: ${next ?? "all"}\n`);
   }
 
-  stopRun(dir: string): void {
-    const pid = holder(dir);
+  stopRun(): void {
+    const pid = holder(this.dir);
     if (pid === undefined) {
       this.onEnd(130);
       return;
@@ -198,6 +230,44 @@ class Viewer {
     }
   }
 
+  private deliver(text: string): void {
+    const message = { at: new Date().toISOString(), text, session: this.selected };
+    fs.appendFileSync(inboxPath(this.dir), `${JSON.stringify(message)}\n`);
+  }
+
+  private async open(): Promise<void> {
+    const gate = this.pending;
+    const keys = this.keys;
+    if (gate === undefined || keys === undefined || this.control !== undefined) return;
+    keys.stop();
+    const running = control(
+      gate.question,
+      gate.list.map((label) => ({ label })),
+      { many: gate.many, interrupt: () => this.stopRun() },
+    );
+    this.control = running;
+    const picked = await running.picked;
+    this.control = undefined;
+    if (this.closed) return;
+    keys.start();
+    if (picked !== undefined && picked.length > 0) {
+      this.deliver(picked.map((index) => gate.list[index] ?? "").join(", "));
+    }
+    this.flush();
+  }
+
+  private gated(event: GateEvent): void {
+    this.pending = undefined;
+    if (event.phase !== "asked" || event.schema === undefined) return;
+    const shape = controlFor(event.schema);
+    if ("hint" in shape) {
+      if (this.tty && shape.hint !== undefined) this.write(`expects: ${shape.hint}\n`);
+      return;
+    }
+    this.pending = { question: event.question, list: shape.list, many: shape.many };
+    void this.open();
+  }
+
   private show(event: ViewEvent): void {
     if (event.type === "run" && event.phase === "started") {
       this.render({ type: "event", level: "info", message: `run ${this.name} started, ${this.agent}` });
@@ -205,6 +275,7 @@ class Viewer {
     }
     if (this.hidden(event)) return;
     this.render(event);
+    if (event.type === "gate") this.gated(event);
     if (event.type !== "run") return;
     if (event.phase === "done") {
       const line = resultLine(event.result);
@@ -258,6 +329,32 @@ class Viewer {
     if (!this.tty && text.startsWith("\r")) return;
     process.stdout.write(text);
   }
+}
+
+export function controlFor(schema: Record<string, unknown>): GateControl {
+  const labels = enumOf(schema);
+  if (labels !== undefined) return { list: labels, many: false };
+  if (schema["type"] === "array") {
+    const items = enumOf(schema["items"]);
+    if (items !== undefined) return { list: items, many: true };
+  }
+  if (schema["type"] === "boolean") return { list: ["yes", "no"], many: false };
+  return { hint: hintOf(schema) };
+}
+
+function enumOf(schema: unknown): string[] | undefined {
+  if (schema === null || typeof schema !== "object") return undefined;
+  const values = (schema as { enum?: unknown }).enum;
+  if (!Array.isArray(values) || values.length === 0) return undefined;
+  if (values.some((value) => typeof value !== "string")) return undefined;
+  return values as string[];
+}
+
+function hintOf(schema: Record<string, unknown>): string | undefined {
+  const format = schema["format"];
+  if (typeof format === "string") return format === "uri" ? "url" : format;
+  const type = schema["type"];
+  return typeof type === "string" ? type : undefined;
 }
 
 function resultLine(result: unknown): string | undefined {

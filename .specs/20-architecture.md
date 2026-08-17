@@ -43,7 +43,7 @@ Two roles the engine treats specially:
 
 ## Events
 
-Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended with its activity, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, gates asked and answered. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
+Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended with its activity, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, gates asked and answered. A gate asked event carries the answer shape as a JSON schema when the gate has one. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
 
 ## Messages
 
@@ -66,7 +66,7 @@ A run is in one of four states:
 
 When waits overlap, running beats blocked, and blocked beats idle. The run process emits a state event on every change.
 
-In a viewer: typing into the input field sends a message, a key switches which session's stream fills the screen, `q` detaches, and Ctrl-C stops the run. A stop kills the steps in flight, records the stop, and the run is done. Attaching to a done run renders the history read-only: no input field, because nothing can react.
+In a viewer: typing into the input field sends a message, a key switches which session's stream fills the screen, `q` detaches, and Ctrl-C stops the run. A gate with a shape draws a control on a terminal, picked from the shape: a list for an enum, a checkbox list for an array of enum, yes or no for a boolean, and the input field with the expected type for anything else. The choice goes back as a message like any other, and an answer from elsewhere closes the control. The engine validates every answer against the shape, and asks the same question again until one fits. A stop kills the steps in flight, records the stop, and the run is done. Attaching to a done run renders the history read-only: no input field, because nothing can react.
 
 An uncaught error from the run function ends the run with the error recorded. The run process exits zero when the run function returns and one on an error, which is what cron reads.
 
@@ -112,9 +112,10 @@ Each one line, each pinned by a test:
 2. Every event appends to `events.jsonl`, and a viewer that joins late renders the same story a live viewer saw.
 3. `q` detaches and the run continues. Ctrl-C stops the run, and the stop is recorded.
 4. Done is final: no command revives a done run, and attach to one is read-only.
-5. The engine delivers each message at most once, in order, and a gate consumes exactly one message.
+5. The engine delivers each message at most once, in order, and each gate ask consumes exactly one message.
 6. `turn.stop()` kills the agent process, and the session's next turn continues the same conversation.
 7. A workflow call validates the callee's params before the callee runs, and a composed call creates no run.
 8. The engine depends on no adapter and no definition. The engine test suite passes with an empty `~/.wa/`, and a workflow that names a missing role or agent fails plainly.
 9. The first wa command installs. Sync links whole directories, and never removes a skill the user put in the target.
 10. A skill name resolves from the project roots before the home roots, and from the preferred link before the other. A skill path resolves against the workflow file. An adapter resolves from the project before the home.
+11. A gate with a shape validates the answer against it, and asks the same question again until an answer fits.

@@ -525,6 +525,101 @@ export default workflow({
   );
 });
 
+test("a typed gate parses the answer and carries the schema", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate }) {
+    const port = await gate("Port?", z.number().min(1).max(65535));
+    const env = await gate("Environment?", z.enum(["dev", "staging", "prod"]));
+    const targets = await gate("Which targets?", z.array(z.enum(["web", "ios"])));
+    const ship = await gate("Ship it?", z.boolean());
+    const notes = await gate("Notes?", z.string());
+    const free = await gate("Anything to add?");
+    return { port, env, targets, ship, notes, free };
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  box.send("w-1", "8080");
+  box.send("w-1", "staging");
+  box.send("w-1", "web, ios");
+  box.send("w-1", "yes");
+  box.send("w-1", "one, two");
+  box.send("w-1", "a, b");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.deepEqual(ended["result"], {
+    port: 8080,
+    env: "staging",
+    targets: ["web", "ios"],
+    ship: true,
+    notes: "one, two",
+    free: "a, b",
+  });
+  const asked = box.events("w-1").filter((event) => event["phase"] === "asked");
+  assert.deepEqual(
+    asked.map((event) => event["schema"]),
+    [
+      { type: "number", minimum: 1, maximum: 65535 },
+      { type: "string", enum: ["dev", "staging", "prod"] },
+      { type: "array", items: { type: "string", enum: ["web", "ios"] } },
+      { type: "boolean" },
+      { type: "string" },
+      undefined,
+    ],
+  );
+});
+
+test("a typed gate warns and asks the same question again", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate }) {
+    return await gate("Repo URL?", z.url());
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  box.send("w-1", "not a url");
+  await waitFor(
+    () => box.events("w-1").filter((event) => event["phase"] === "asked").length === 2,
+  );
+
+  assert.equal(box.ended("w-1"), undefined, "the run waits for an answer that fits");
+  const warned = box.events("w-1").find((event) => event["level"] === "warn");
+  assert.equal(warned?.["message"], 'the answer "not a url" does not fit: Invalid URL');
+
+  box.send("w-1", "https://example.com/x");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["result"], "https://example.com/x");
+  assert.deepEqual(
+    box.events("w-1")
+      .filter((event) => event["phase"] === "answered")
+      .map((event) => event["answer"]),
+    ["https://example.com/x"],
+  );
+});
+
 test("ctx.messages delivers the text and the session it was addressed to", async (t) => {
   const box = sandbox(t);
   box.write(

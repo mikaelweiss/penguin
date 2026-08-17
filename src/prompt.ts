@@ -2,19 +2,28 @@ import readline from "node:readline";
 
 export type Choice = { label: string; note?: string };
 
-type Style = { many?: boolean; cancel?: boolean; plain?: boolean; keys?: string };
+export type Control = { picked: Promise<number[] | undefined>; cancel(): void };
+
+type Style = {
+  many?: boolean;
+  cancel?: boolean;
+  plain?: boolean;
+  keys?: string;
+  empty?: boolean;
+  interrupt?: () => void;
+};
 
 export function interactive(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
 export async function pick(question: string, choices: Choice[]): Promise<number> {
-  const picked = await drive(question, choices, {});
-  return picked[0] ?? 0;
+  const picked = await drive(question, choices, {}).picked;
+  return picked?.[0] ?? 0;
 }
 
-export function pickMany(question: string, choices: Choice[]): Promise<number[]> {
-  return drive(question, choices, { many: true });
+export async function pickMany(question: string, choices: Choice[]): Promise<number[]> {
+  return (await drive(question, choices, { many: true }).picked) ?? [];
 }
 
 export async function choose(
@@ -22,8 +31,16 @@ export async function choose(
   choices: Choice[],
   keys: string,
 ): Promise<number | undefined> {
-  const picked = await drive(question, choices, { cancel: true, plain: true, keys });
-  return picked[0];
+  const picked = await drive(question, choices, { cancel: true, plain: true, keys }).picked;
+  return picked?.[0];
+}
+
+export function control(
+  question: string,
+  choices: Choice[],
+  style: { many: boolean; interrupt: () => void },
+): Control {
+  return drive(question, choices, { many: style.many, empty: true, interrupt: style.interrupt });
 }
 
 function rowsOf(line: string): number {
@@ -32,13 +49,13 @@ function rowsOf(line: string): number {
   return Math.max(1, Math.ceil(line.length / width));
 }
 
-function drive(question: string, choices: Choice[], style: Style): Promise<number[]> {
-  if (choices.length === 0) return Promise.resolve([]);
+function drive(question: string, choices: Choice[], style: Style): Control {
+  if (choices.length === 0) return { picked: Promise.resolve([]), cancel: () => {} };
   const many = style.many === true;
   const input = process.stdin;
   const out = process.stdout;
   out.write("\n");
-  const chosen = new Set(many ? choices.map((_, index) => index) : []);
+  const chosen = new Set(many && style.empty !== true ? choices.map((_, index) => index) : []);
   let cursor = 0;
   let tall = 0;
 
@@ -63,21 +80,29 @@ function drive(question: string, choices: Choice[], style: Style): Promise<numbe
     tall = lines.reduce((total, line) => total + rowsOf(line), 0);
   };
 
-  return new Promise((resolve) => {
+  let cancel = (): void => {};
+  const picked = new Promise<number[] | undefined>((resolve) => {
     readline.emitKeypressEvents(input);
     input.setRawMode(true);
     input.resume();
 
-    const leave = (picked: number[]): void => {
+    let settled = false;
+    const leave = (taken: number[] | undefined): void => {
+      if (settled) return;
+      settled = true;
       out.write(`\x1b[${tall + 1}A\x1b[J`);
       input.off("keypress", onKey);
       input.setRawMode(false);
       input.pause();
-      resolve(picked);
+      resolve(taken);
     };
 
     const onKey = (text: string, key: { name?: string; ctrl?: boolean }): void => {
       if (key.ctrl === true && key.name === "c") {
+        if (style.interrupt !== undefined) {
+          style.interrupt();
+          return;
+        }
         out.write("\n");
         process.exit(130);
       }
@@ -100,7 +125,9 @@ function drive(question: string, choices: Choice[], style: Style): Promise<numbe
       draw();
     };
 
+    cancel = (): void => leave(undefined);
     draw();
     input.on("keypress", onKey);
   });
+  return { picked, cancel: () => cancel() };
 }

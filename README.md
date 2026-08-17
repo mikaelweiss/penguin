@@ -112,7 +112,7 @@ A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name
 - `ctx.agent({use, cwd, name})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A fresh handle is a fresh conversation. `turn.stop()` kills the agent process and keeps the partial work, and the next turn on the same handle continues the conversation.
 - `ctx.vcs`, `ctx.github`, and any role you add: the installed adapters, typed in your editor through the generated `wa-env.d.ts`. Every method call is one step in the view.
 - `ctx.view`: typed output. `activity` wraps a span, `fact` sets what is true now, `event` appends to the scroll, `artifact` names a thing to open, `watch` declares live numbers the view samples.
-- `ctx.gate(question)`: ask a question and wait for the answer. The answer is the next message you send.
+- `ctx.gate(question, shape?)`: ask a question and wait for the answer. The answer is the next message you send. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`) the gate returns that type, the terminal draws a list for it, and an answer that does not fit gets the question again.
 - `ctx.messages.next()`: the next message sent into the run, as `{text, session}`. Race it against a turn to interrupt an agent, or read it between turns.
 
 Control flow, batching, and parallelism are plain TypeScript. `Promise.all` fans out, `Promise.race` takes the first.
