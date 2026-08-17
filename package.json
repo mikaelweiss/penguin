@@ -1,6 +1,6 @@
 {
   "name": "falcra",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "license": "Apache-2.0",
   "repository": {
