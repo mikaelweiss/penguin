@@ -1,16 +1,27 @@
 import { workflow } from "wa";
 import { z } from "zod";
+import pr from "./pr.ts";
+import verify from "./verify.ts";
 
 const Reproduce = z.object({ reproduced: z.boolean(), notes: z.string() });
-const Verify = z.object({ passing: z.boolean(), details: z.string() });
+
+function brief(bug: string, notes: string, failures: string): string {
+  const report = `${bug}\n\n${notes}`;
+  if (failures === "") return report;
+  return `${report}\n\n# The checks that still fail\n\n${failures}`;
+}
 
 export default workflow({
   description: "reproduce a bug, fix it against the repo checks, then the pull request",
-  params: z.object({ bug: z.string() }),
+  params: z.object({ bug: z.string(), rounds: z.number().int().min(1).default(3) }),
 
-  async run({ params, agent, github, view, gate }) {
+  async run(ctx) {
+    const { params, agent, view, gate } = ctx;
     const investigator = agent();
-    const repro = (await investigator.run("wa-reproduce", { input: params.bug, result: Reproduce }))!;
+    const repro = (await investigator.run("wa-reproduce", {
+      input: params.bug,
+      result: Reproduce,
+    }))!;
     if (!repro.reproduced) {
       await gate(`Not reproduced: ${repro.notes}`);
       return;
@@ -18,25 +29,22 @@ export default workflow({
 
     view.watch({ elapsed: true, diff: "." });
     const implementer = agent();
+    let failures = "";
     let passing = false;
-    for (let round = 1; round <= 3 && !passing; round++) {
-      view.fact({ round: `${round}/3` });
-      await implementer.run("wa-implement", { input: `${params.bug}\n\n${repro.notes}` });
-      const verifier = agent();
-      const checks = (await verifier.run("wa-verify", { result: Verify }))!;
-      passing = checks.passing;
-    }
-    if (!passing) await gate("Three fix rounds. The checks still fail. Take a look.");
 
-    const pr = await github.pr.create();
-    if (!pr.ok) {
-      await gate(`No pull request: ${pr.reason}`);
-      return;
+    for (let round = 1; round <= params.rounds && !passing; round++) {
+      passing = await view.activity(`round ${round} of ${params.rounds}`, async () => {
+        view.fact({ round: `${round}/${params.rounds}` });
+        await implementer.run("wa-implement", {
+          input: brief(params.bug, repro.notes, failures),
+        });
+        const checks = await verify(ctx, {});
+        failures = checks.details;
+        return checks.passing;
+      });
     }
-    view.artifact({ title: "Pull request", url: pr.url });
-    while ((await gate(`PR is up: ${pr.url} (address-feedback / done)`)) !== "done") {
-      const fixer = agent();
-      await fixer.run("wa-address-feedback");
-    }
+    if (!passing) await gate("The checks still fail. Take a look.");
+
+    return pr(ctx, {});
   },
 });

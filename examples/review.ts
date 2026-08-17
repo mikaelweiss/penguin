@@ -1,31 +1,31 @@
 import { workflow } from "wa";
 import { z } from "zod";
 
-const Findings = z.object({
+const Review = z.object({
   verdict: z.enum(["approved", "changes_needed"]),
-  report: z.string(),
+  findings: z.string(),
 });
 
+function checklist(acceptance: string, findings: string): string {
+  if (findings === "") return acceptance;
+  return `${acceptance}\n\n# Prior review findings\n\nMake sure each one is fixed, then look wider.\n\n${findings}`;
+}
+
 export default workflow({
-  description: "review an open pull request into a findings file, then post it as a comment",
-  params: z.object({ pr: z.string() }),
+  description: "review a working tree against its acceptance checks",
+  params: z.object({
+    acceptance: z.string(),
+    dir: z.string().optional(),
+    findings: z.string().default(""),
+  }),
 
-  async run({ params, agent, github, view, gate }) {
-    const diff = await github.pr.diff(params.pr);
-    if (!diff.ok) {
-      await gate(`gh pr diff ${params.pr} failed: ${diff.reason}`);
-      return;
-    }
-
-    const reviewer = agent();
-    const review = (await reviewer.run("wa-review-diff", { input: diff.diff, result: Findings }))!;
-    view.artifact({ title: "Review findings", path: review.report });
-    const answer = await gate(
-      `${review.verdict}, findings in ${review.report}. Post the findings to the PR? (post / skip)`,
-    );
-    if (answer !== "post") return;
-
-    const posted = await github.pr.comment(params.pr, { bodyFile: review.report });
-    if (!posted.ok) await gate(`The comment failed: ${posted.reason}`);
+  async run({ params, agent, view }) {
+    const reviewer = agent({ cwd: params.dir });
+    const review = (await reviewer.run("wa-review", {
+      input: checklist(params.acceptance, params.findings),
+      result: Review,
+    }))!;
+    view.fact({ verdict: review.verdict });
+    return review;
   },
 });

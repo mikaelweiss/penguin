@@ -30,12 +30,22 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.wa/` with four workflows, their skills, four adapters, and a tsconfig for editor types:
+Install fills `~/.wa/` with nine workflows, their skills, four adapters, and a tsconfig for editor types. Two of them are pipelines:
 
-- `wa run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, plan gate, implement, review loop, PR, feedback loop.
-- `wa run task --task "..."`: one small change in the current repository: implement, review loop, then a commit gate.
-- `wa run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, PR, feedback loop.
-- `wa run review --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
+- `wa run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, a worktree, implement, then the pull request.
+- `wa run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, then the pull request.
+
+The other seven are small workflows. Each one runs alone, and a pipeline calls all but `review-pr`:
+
+- `wa run triage --ticket ABC-123`: is the ticket ready to work on, and why.
+- `wa run plan --ticket ABC-123`: the plan and its acceptance checks, held at an approve-or-revise gate.
+- `wa run implement --task "..."`: implement in the current repository, review each round, up to `--rounds`.
+- `wa run review --acceptance acceptance.md`: one review of the working tree against the checks.
+- `wa run verify`: run the checks of your repository and report what fails.
+- `wa run pr`: open the pull request, then a gate loop that runs address-feedback until you answer done.
+- `wa run review-pr --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
+
+A pipeline is the small ones called as functions (Compose workflows, below).
 
 `~/.wa/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, and `terminal`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
@@ -79,15 +89,15 @@ wa attach ticket-1                # watch one again
 `list` is how you see what wa has. Each entry is a block: the name and the params it takes, then the description under it. `--verbose` adds a line for where the entry comes from. `run` validates the params against the schema, creates the run, starts the run process, and attaches your terminal to it. With no workflow it lists them. It opens with one line, the run name and the agent it uses:
 
 ```
-$ wa run task --task "rename the flag"
-run task-1 started, agent claude
+$ wa run implement --task "rename the flag"
+run implement-1 started, agent claude
 ```
 
 `--background` starts the run and gives the terminal back. `ps` lists the live runs: on a terminal it is a picker, and enter attaches to the run under the cursor. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw. Bare `wa` prints the usage.
 
 ```
 $ wa list workflows
-fix  --bug <text>
+fix  --bug <text> [--rounds <number>]
   reproduce a bug, fix it against the repo checks, then the pull request
 
 ticket  --ticket <text>

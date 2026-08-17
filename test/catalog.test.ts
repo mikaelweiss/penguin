@@ -4,9 +4,55 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { installed, renderEnv } from "../src/adapters.ts";
-import { type Sandbox, sandbox } from "./helpers.ts";
+import { load } from "../src/loader.ts";
+import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
 const examples = fileURLToPath(new URL("../examples", import.meta.url));
+
+const workflowFiles = [
+  "fix.ts",
+  "implement.ts",
+  "plan.ts",
+  "pr.ts",
+  "review-pr.ts",
+  "review.ts",
+  "ticket.ts",
+  "triage.ts",
+  "verify.ts",
+];
+
+const fakeVcs = `import { adapter } from "wa";
+
+export default adapter({
+  role: "vcs",
+  name: "git",
+  description: "fake vcs",
+  build: (host) => ({
+    stageAll: async () => ({ ok: true, reason: "" }),
+    commit: async () => ({ ok: true, reason: "" }),
+    worktree: {
+      add: async (name) => ({ ok: true, path: host.cwd + "/" + name, reason: "" }),
+      remove: async () => ({ ok: true, reason: "" }),
+    },
+  }),
+});
+`;
+
+const fakeGithub = `import { adapter } from "wa";
+
+export default adapter({
+  role: "github",
+  name: "gh",
+  description: "fake github",
+  build: () => ({
+    pr: {
+      create: async () => ({ ok: true, url: "https://example.test/pr/7", reason: "" }),
+      diff: async () => ({ ok: true, diff: "diff --git a/a b/a", reason: "" }),
+      comment: async () => ({ ok: true, reason: "" }),
+    },
+  }),
+});
+`;
 
 function catalogReady(box: Sandbox, result: string): void {
   fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
@@ -15,12 +61,110 @@ function catalogReady(box: Sandbox, result: string): void {
   box.setDefaults("agent fake");
 }
 
+function outsideReady(box: Sandbox): void {
+  box.writeAdapter("git", fakeVcs);
+  box.writeAdapter("gh", fakeGithub);
+}
+
 async function gateOf(box: Sandbox, run: string): Promise<string> {
   await box.waitForState(run, "blocked");
   return String(box.lastState(run)?.["detail"]);
 }
 
-test("the catalog ticket workflow runs on a fresh install", async (t) => {
+async function answerGate(box: Sandbox, run: string, opens: string, text: string): Promise<void> {
+  await waitFor(() => String(box.lastState(run)?.["detail"] ?? "").startsWith(opens));
+  box.send(run, text);
+}
+
+type Span = { id: string; parent: string | undefined; label: string };
+
+function activities(box: Sandbox, run: string): Span[] {
+  return box
+    .events(run)
+    .filter((event) => event["type"] === "activity" && event["phase"] === "start")
+    .map((event) => ({
+      id: String(event["id"]),
+      parent: event["parent"] as string | undefined,
+      label: String(event["label"]),
+    }));
+}
+
+function ancestors(spans: Span[], span: Span): string[] {
+  const byId = new Map(spans.map((one) => [one.id, one]));
+  const labels: string[] = [];
+  for (let at = span.parent; at !== undefined; at = byId.get(at)?.parent) {
+    const found = byId.get(at);
+    if (found === undefined) break;
+    labels.push(found.label);
+  }
+  return labels;
+}
+
+function runNames(box: Sandbox): string[] {
+  return fs.readdirSync(path.join(box.home, "runs")).sort();
+}
+
+async function description(file: string): Promise<string> {
+  return (await load(path.join(examples, file))).description;
+}
+
+test("every catalog workflow loads with a description and params", async () => {
+  const files = fs
+    .readdirSync(examples)
+    .filter((name) => name.endsWith(".ts") && !name.endsWith(".d.ts"));
+  assert.deepEqual(files.sort(), workflowFiles);
+
+  for (const file of files) {
+    const definition = await load(path.join(examples, file));
+    assert.ok(definition.description.trim() !== "", `${file} has no description`);
+    assert.ok(Object.keys(definition.params.shape).length > 0, `${file} takes no params`);
+  }
+});
+
+test("the catalog composes the big workflows out of the small ones", async () => {
+  const ticket = await load(path.join(examples, "ticket.ts"));
+  const source = fs.readFileSync(path.join(examples, "ticket.ts"), "utf8");
+  const imports = [...source.matchAll(/from "\.\/([a-z-]+)\.ts"/g)].map((match) => match[1] ?? "");
+  assert.deepEqual(imports.sort(), ["implement", "plan", "pr", "triage"]);
+  assert.equal(typeof ticket, "function");
+});
+
+test("the catalog ticket workflow runs triage to the pull request", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"actionable":true,"reason":"go","spec":"plan.md","acceptance":"acceptance.md","verdict":"approved","findings":"none"}',
+  );
+  outsideReady(box);
+
+  const started = box.wa("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "ticket-1", "Approve the plan?", "approve");
+  await answerGate(box, "ticket-1", "PR is up:", "done");
+  const ended = await box.waitForEnd("ticket-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
+  assert.deepEqual(runNames(box), ["ticket-1"]);
+
+  const spans = activities(box, "ticket-1");
+  const labels = spans.map((span) => span.label);
+  for (const file of ["triage.ts", "plan.ts", "implement.ts", "review.ts", "pr.ts"]) {
+    assert.ok(labels.includes(await description(file)), `${file} has no activity: ${labels}`);
+  }
+
+  const reviews = await description("review.ts");
+  const reviewed = spans.find((span) => span.label === reviews);
+  assert.ok(reviewed !== undefined);
+  assert.ok(ancestors(spans, reviewed).includes(await description("implement.ts")));
+
+  const worktree = path.join(box.project, "wa-ABC-1");
+  const dirs = box.sessions().map((line) => line.cwd);
+  assert.ok(dirs.includes(worktree), `no session ran in the worktree: ${dirs.join(", ")}`);
+});
+
+test("the catalog ticket workflow stops at the triage gate", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"actionable":false,"reason":"no repro"}');
 
@@ -30,49 +174,65 @@ test("the catalog ticket workflow runs on a fresh install", async (t) => {
   assert.equal(await gateOf(box, "ticket-1"), "Not actionable: no repro");
   box.send("ticket-1", "ok");
   assert.equal((await box.waitForEnd("ticket-1"))["phase"], "done");
+
+  const labels = activities(box, "ticket-1").map((span) => span.label);
+  assert.deepEqual(labels, [await description("triage.ts")]);
 });
 
-function skillsNamedBy(file: string): string[] {
-  const source = fs.readFileSync(path.join(examples, file), "utf8");
-  return [...source.matchAll(/\.run\("([^"]+)"/g)].map((match) => match[1] ?? "").sort();
-}
-
-test("every skill the catalog workflows name ships with them", () => {
-  const files = fs
-    .readdirSync(examples)
-    .filter((name) => name.endsWith(".ts") && !name.endsWith(".d.ts"));
-  assert.deepEqual(files.sort(), ["fix.ts", "review.ts", "task.ts", "ticket.ts"]);
-
-  assert.deepEqual(skillsNamedBy("ticket.ts"), [
-    "wa-address-feedback",
-    "wa-implement",
-    "wa-plan",
-    "wa-review",
-    "wa-triage",
-  ]);
-
-  for (const file of files) {
-    const named = skillsNamedBy(file);
-    assert.ok(named.length > 0, `${file} names no skill`);
-    for (const skill of named) {
-      assert.ok(
-        fs.existsSync(path.join(examples, "skills", skill, "SKILL.md")),
-        `${skill} is missing`,
-      );
-    }
-  }
-});
-
-test("the catalog task workflow reaches its commit gate", async (t) => {
+test("the catalog implement workflow runs alone in the invoking repository", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"verdict":"approved","findings":"none"}');
 
-  const started = box.wa("run", path.join(examples, "task.ts"), "--task", "rename the flag", "--background");
-
+  const started = box.wa(
+    "run",
+    path.join(examples, "implement.ts"),
+    "--task",
+    "rename the flag",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
-  assert.equal(await gateOf(box, "task-1"), "Commit? (commit / leave)");
-  box.send("task-1", "leave");
-  assert.equal((await box.waitForEnd("task-1"))["phase"], "done");
+  const ended = await box.waitForEnd("implement-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { approved: true, findings: ["none"] });
+  assert.deepEqual(runNames(box), ["implement-1"]);
+
+  const spans = activities(box, "implement-1");
+  assert.deepEqual(
+    spans.map((span) => span.label),
+    ["round 1 of 3", await description("review.ts")],
+  );
+
+  const sessions = box.sessions();
+  assert.equal(sessions.length, 2);
+  assert.notEqual(sessions[0]?.session, sessions[1]?.session);
+  assert.deepEqual(
+    sessions.map((line) => line.cwd),
+    [box.project, box.project],
+  );
+});
+
+test("the catalog implement workflow stops after its round bound", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"verdict":"changes_needed","findings":"the flag is still there"}');
+
+  const started = box.wa(
+    "run",
+    path.join(examples, "implement.ts"),
+    "--task",
+    "rename the flag",
+    "--rounds",
+    "2",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+  const ended = await box.waitForEnd("implement-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  const result = ended["result"] as { approved: boolean; findings: string[] };
+  assert.equal(result.approved, false);
+  assert.equal(result.findings.length, 2);
+  assert.equal(box.sessions().length, 4);
 });
 
 test("the catalog fix workflow gates when the bug does not reproduce", async (t) => {
@@ -87,17 +247,75 @@ test("the catalog fix workflow gates when the bug does not reproduce", async (t)
   assert.equal((await box.waitForEnd("fix-1"))["phase"], "done");
 });
 
-test("the catalog review workflow gates when the diff command fails", async (t) => {
+test("the catalog fix workflow verifies the fix and opens the pull request", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"reproduced":true,"notes":"the list is empty","passing":true,"details":"3 tests pass"}',
+  );
+  outsideReady(box);
+
+  const started = box.wa("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "fix-1", "PR is up:", "done");
+  const ended = await box.waitForEnd("fix-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
+  assert.deepEqual(runNames(box), ["fix-1"]);
+
+  const labels = activities(box, "fix-1").map((span) => span.label);
+  assert.deepEqual(labels, [
+    "round 1 of 3",
+    await description("verify.ts"),
+    await description("pr.ts"),
+  ]);
+});
+
+test("the catalog review-pr workflow posts the findings it was told to post", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"verdict":"changes_needed","report":"findings.md"}');
+  outsideReady(box);
+
+  const started = box.wa("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "review-pr-1", "changes_needed, findings in", "post");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { verdict: "changes_needed", report: "findings.md" });
+});
+
+test("the catalog review-pr workflow gates when the diff command fails", async (t) => {
   const box = sandbox(t);
   catalogReady(box, "none");
 
-  const started = box.wa("run", path.join(examples, "review.ts"), "--pr", "42", "--background");
+  const started = box.wa("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
 
   assert.equal(started.code, 0, started.output);
-  const question = await gateOf(box, "review-1");
+  const question = await gateOf(box, "review-pr-1");
   assert.ok(question.startsWith("gh pr diff 42 failed:"), question);
-  box.send("review-1", "ok");
-  assert.equal((await box.waitForEnd("review-1"))["phase"], "done");
+  box.send("review-pr-1", "ok");
+  assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
+});
+
+function skillsNamedBy(file: string): string[] {
+  const source = fs.readFileSync(path.join(examples, file), "utf8");
+  return [...source.matchAll(/\.run\("([^"]+)"/g)].map((match) => match[1] ?? "").sort();
+}
+
+test("every skill the catalog ships is named by a catalog workflow", () => {
+  const named = new Set(workflowFiles.flatMap((file) => skillsNamedBy(file)));
+  assert.deepEqual([...named].sort(), fs.readdirSync(path.join(examples, "skills")).sort());
+
+  for (const skill of named) {
+    assert.ok(
+      fs.existsSync(path.join(examples, "skills", skill, "SKILL.md")),
+      `${skill} is missing`,
+    );
+  }
 });
 
 test("every catalog skill follows the SKILL.md format", () => {
