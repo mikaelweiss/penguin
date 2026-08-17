@@ -58,10 +58,28 @@ export default workflow({
     let notes: Note[] = said.comments;
 
     const ref = `pull/${pr.number}/head`;
-    const ws = await vcs.worktree.add(`review-pr-${pr.number}`, { ref });
-    if (!ws.ok) {
-      await gate(`The worktree failed: ${ws.reason}`);
-      return { rounds: 0, posted: 0 };
+    const name = `review-pr-${pr.number}`;
+    let ws = await vcs.worktree.add(name, { ref });
+    while (!ws.ok) {
+      if (!ws.exists) {
+        await gate(`The worktree failed: ${ws.reason}`);
+        return { rounds: 0, posted: 0 };
+      }
+      const choice = await gate(
+        `A worktree already sits at ${ws.path}. Type use to review in it, replace to delete it and cut a fresh one, or exit to stop.`,
+        z.enum(["use", "replace", "exit"]),
+      );
+      if (choice === "exit") return { rounds: 0, posted: 0 };
+      if (choice === "use") break;
+      const gone = await vcs.worktree.remove(ws.path, { force: true });
+      if (!gone.ok) {
+        view.event({
+          level: "warn",
+          message: `The worktree did not delete: ${gone.reason}`,
+        });
+        continue;
+      }
+      ws = await vcs.worktree.add(name, { ref });
     }
     view.artifact({ title: `PR #${pr.number}: ${pr.title}`, url: pr.url });
     view.watch({ elapsed: true });

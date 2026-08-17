@@ -33,8 +33,36 @@ export default adapter({
     commit: async () => ({ ok: true, reason: "" }),
     pull: async () => ({ ok: true, reason: "" }),
     worktree: {
-      add: async (name) => ({ ok: true, path: host.cwd + "/" + name, reason: "" }),
+      add: async (name) => ({ ok: true, path: host.cwd + "/" + name, exists: false, reason: "" }),
       remove: async () => ({ ok: true, reason: "" }),
+    },
+  }),
+});
+`;
+
+const takenVcs = `import fs from "node:fs";
+import { adapter } from "penguin";
+
+export default adapter({
+  role: "vcs",
+  name: "git",
+  description: "fake vcs whose worktree path is already taken",
+  build: (host) => ({
+    stageAll: async () => ({ ok: true, reason: "" }),
+    commit: async () => ({ ok: true, reason: "" }),
+    pull: async () => ({ ok: true, reason: "" }),
+    worktree: {
+      add: async (name) => {
+        const target = host.cwd + "/" + name;
+        if (fs.existsSync(host.cwd + "/removed.txt"))
+          return { ok: true, path: target, exists: false, reason: "" };
+        return { ok: false, path: target, exists: true, reason: target + " already exists" };
+      },
+      remove: async (target, options) => {
+        const how = options?.force === true ? "force " : "";
+        fs.appendFileSync(host.cwd + "/removed.txt", how + target + "\\n");
+        return { ok: true, reason: "" };
+      },
     },
   }),
 });
@@ -475,6 +503,58 @@ test("the catalog review-pr workflow gates on blockers and posts without approvi
     "none",
   ]);
   assert.ok(!box.exists("approved.txt"), "the PR was approved despite a blocker");
+});
+
+test("the catalog review-pr workflow reviews in the worktree that is already there", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"blockers":[],"nonBlockers":[]}');
+  outsideReady(box);
+  box.writeAdapter("git", takenVcs);
+
+  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "review-pr-1", "A worktree already sits at", "use");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.deepEqual(box.lines("removed.txt"), [path.join(box.project, "review-pr-42")]);
+});
+
+test("the catalog review-pr workflow replaces the worktree that is already there", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"blockers":[],"nonBlockers":[]}');
+  outsideReady(box);
+  box.writeAdapter("git", takenVcs);
+
+  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "review-pr-1", "A worktree already sits at", "replace");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  const worktree = path.join(box.project, "review-pr-42");
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.deepEqual(box.lines("removed.txt"), [`force ${worktree}`, worktree]);
+});
+
+test("the catalog review-pr workflow stops when the user exits the worktree gate", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"blockers":[],"nonBlockers":[]}');
+  outsideReady(box);
+  box.writeAdapter("git", takenVcs);
+
+  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "review-pr-1", "A worktree already sits at", "exit");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 0, posted: 0 });
+  assert.ok(!box.exists("removed.txt"), "the worktree was touched after the exit");
 });
 
 test("the catalog review-pr workflow gates when the PR does not read", async (t) => {
