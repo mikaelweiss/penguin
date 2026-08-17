@@ -1,71 +1,41 @@
-import { adapter } from "penguin";
+import { adapter, cut, markdown } from "penguin";
 import type { ViewEvent } from "penguin";
 
-function elapsed(millis: number): string {
-  const seconds = Math.floor(millis / 1000);
-  const minutes = Math.floor(seconds / 60);
-  if (minutes === 0) return `${seconds}s`;
-  const hours = Math.floor(minutes / 60);
-  if (hours === 0) return `${minutes}m${seconds % 60}s`;
-  return `${hours}h${minutes % 60}m`;
-}
+const WIDEST = 100;
 
 export default adapter({
   role: "view",
   name: "terminal",
-  description: "renders run events as terminal lines, with a live footer on a TTY",
-  build: (host) => {
+  description: "renders run events as terminal lines, with markdown read as markdown",
+  build: () => {
     const tty = process.stdout.isTTY === true;
-    const facts: Record<string, string | number | boolean> = {};
     const sessions = new Map<string, string>();
-    let watching: { elapsed?: boolean; diff?: string } | undefined;
-    let started = Date.now();
-    let diffStat = "";
-    let state = "";
-    let detail = "";
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let partial = "";
 
-    const footer = (): string => {
-      const parts: string[] = [];
-      if (state !== "") parts.push(detail === "" ? state : `${state}: ${detail}`);
-      if (watching?.elapsed === true) parts.push(elapsed(Date.now() - started));
-      if (diffStat !== "") parts.push(diffStat);
-      for (const [name, value] of Object.entries(facts)) parts.push(`${name} ${value}`);
-      return parts.join("  ");
-    };
-    const redraw = (): void => {
-      if (tty) process.stdout.write(`\r\x1b[2K${footer()}`);
-    };
+    const columns = (): number => Math.max(20, process.stdout.columns ?? 80);
+    const width = (): number => Math.min(WIDEST, columns());
     const print = (line: string): void => {
-      if (tty) process.stdout.write(`\r\x1b[2K${line}\n`);
-      else process.stdout.write(`${line}\n`);
-      redraw();
+      process.stdout.write(`${line}\n`);
     };
-    const sample = async (): Promise<void> => {
-      if (watching?.diff !== undefined) {
-        const done = await host.shell("git diff --shortstat", { cwd: watching.diff });
-        diffStat = done.code === 0 ? done.stdout.trim() : "";
+    const dim = (text: string): string => (tty ? `\x1b[2m${text}\x1b[22m` : text);
+    const bold = (text: string): string => (tty ? `\x1b[1m${text}\x1b[22m` : text);
+    /** Prose the model wrote: markdown on a terminal, the text itself anywhere else. */
+    const say = (text: string): void => {
+      if (!tty) {
+        print(text);
+        return;
       }
-      redraw();
+      for (const line of markdown(text, width())) print(line);
     };
-    const start = (): void => {
-      if (!tty || timer !== undefined) return;
-      timer = setInterval(() => {
-        void sample();
-      }, 1000);
-      timer.unref();
+    const rule = (label: string): string => {
+      const bar = "─".repeat(Math.max(0, width() - label.length - 4));
+      return dim(`── ${label} ${bar}`);
     };
-    const stop = (): void => {
-      if (timer !== undefined) clearInterval(timer);
-      timer = undefined;
-      if (tty) process.stdout.write("\r\x1b[2K");
+    const flush = (): void => {
+      if (partial === "") return;
+      print(partial);
+      partial = "";
     };
-    const cut = (line: string): string => {
-      const limit = (process.stdout.columns ?? 80) - 1;
-      if (!tty || line.length <= limit) return line;
-      return `${line.slice(0, limit - 3)}...`;
-    };
-    const dim = (text: string): string => (tty ? `\x1b[2m${text}\x1b[0m` : text);
     const speaker = (id: string): string => {
       const name = sessions.get(id);
       if (name === undefined || sessions.size < 2) return "";
@@ -76,12 +46,7 @@ export default adapter({
       render(event: ViewEvent): void {
         switch (event.type) {
           case "run":
-            if (event.phase !== "started") stop();
-            return;
-          case "state":
-            state = event.state;
-            detail = event.detail ?? "";
-            redraw();
+            if (event.phase !== "started") flush();
             return;
           case "session":
             sessions.set(event.id, event.name);
@@ -90,32 +55,24 @@ export default adapter({
             print(`> ${event.text}`);
             return;
           case "gate":
-            if (event.phase === "asked") {
-              print("");
-              print(`gate: ${event.question}`);
-            }
-            return;
-          case "watch":
-            watching = event;
-            started = Date.now();
-            start();
-            redraw();
+            if (event.phase !== "asked") return;
+            print("");
+            print(rule("gate"));
+            say(event.question);
+            print("");
             return;
           case "fact":
-            Object.assign(facts, event.values);
-            if (tty) redraw();
-            else {
-              const line = Object.entries(event.values)
+            print(
+              Object.entries(event.values)
                 .map(([name, value]) => `${name}: ${value}`)
-                .join("  ");
-              print(line);
-            }
+                .join("  "),
+            );
             return;
           case "step":
             if (event.phase === "start") print(`step ${event.id} ${event.label}`);
             return;
           case "activity":
-            if (event.phase === "start") print(event.label);
+            if (event.phase === "start") print(bold(event.label));
             return;
           case "event":
             print(event.level === "info" ? event.message : `${event.level}: ${event.message}`);
@@ -127,19 +84,24 @@ export default adapter({
           }
           case "agent":
             if (event.kind === "output") {
-              process.stdout.write(event.text);
+              partial += event.text;
+              const lines = partial.split("\n");
+              partial = lines.pop() ?? "";
+              for (const line of lines) print(line);
               return;
             }
             if (event.kind === "thinking") {
-              for (const line of event.text.split("\n")) print(line === "" ? "" : dim(`  ${line}`));
+              const lines = tty ? markdown(event.text, width() - 2, false) : event.text.split("\n");
+              for (const line of lines) print(line === "" ? "" : dim(`  ${line}`));
               return;
             }
             if (event.kind === "tool") {
               const detail = event.detail === undefined ? "" : ` ${event.detail}`;
-              print(cut(`${speaker(event.session)}[${event.text}]${detail}`));
+              print(cut(`${speaker(event.session)}[${event.text}]${detail}`, columns() - 1));
               return;
             }
-            print(`${speaker(event.session)}${event.text}`);
+            if (speaker(event.session) !== "") print(dim(speaker(event.session).trim()));
+            say(event.text);
             return;
           default:
             return;

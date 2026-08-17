@@ -6,7 +6,7 @@ The npm package carries an `examples/` directory, and install copies it into `~/
 - `examples/adapters/git.ts`: the `vcs` role on git: staging, commits, worktrees, and pulling a fetched ref into a working tree.
 - `examples/adapters/gh.ts`: the `github` role on the gh CLI: read an issue or a pull request and its comments, create, diff, comment on, and approve pull requests, and watch one pull request as a subscription of typed changes.
 - `examples/adapters/jira.ts`: the `jira` role on the Jira Cloud REST API: read an issue and its comments, and search, create, comment on, and transition issues, under a token penguin asks for once (`20-architecture.md`, credentials).
-- `examples/adapters/terminal.ts`: the `view` role: events as terminal lines, and a live footer on a TTY. A tool call is one line, the name and what it acts on, cut to the terminal width. Thinking is dim and indented.
+- `examples/adapters/terminal.ts`: the `view` role: events as terminal lines. What an agent wrote and what a gate asks read as markdown, wrapped to the width: a heading bold, a list under its marker, code colored. A tool call is one line, the name and what it acts on, cut to the width. Thinking is dim and indented.
 - `examples/ticket.ts`: a ticket to merged PR pipeline: it calls triage, then plan and implement per task, then pr, and holds the work in a worktree.
 - `examples/fix.ts`: a bug fix: reproduce, gate when the bug does not reproduce, then a fix loop that calls verify until the repository checks pass, then pr.
 - `examples/triage.ts`: the triage loop: is the ticket ready to work on, the deciding fact, and the tasks that build it. Questions gate to the user first, and a split into more than one task holds at an approve-or-revise gate.

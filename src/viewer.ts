@@ -9,6 +9,7 @@ import { Editor, Field, type Key } from "./editor.ts";
 import { messageOf, PenguinError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { alive, holder } from "./lock.ts";
+import { cut, plain } from "./markdown.ts";
 import { attachmentsDir, credentialFile, eventsPath, inboxPath, runDir } from "./paths.ts";
 import { control, entry, interactive } from "./prompt.ts";
 import { edit, runArgv, runCommand } from "./spawn.ts";
@@ -17,6 +18,8 @@ import { plainRenderer } from "./view.ts";
 
 const START_TIMEOUT = 10_000;
 const WATCH = 500;
+const SAMPLE = 1000;
+const DETAIL = 44;
 const HINT = "enter sends, esc clears, ctrl-v pastes an image";
 
 type Keys = { start(): void; stop(): void };
@@ -33,19 +36,56 @@ type Fix = "retry" | "reset" | "edit" | "stop";
 
 export type GateControl = { list: string[]; many: boolean } | { hint: string | undefined };
 
+export type Status = {
+  state: string;
+  detail?: string;
+  running?: number;
+  diff: string;
+  facts: Record<string, string | number | boolean>;
+};
+
+/** The one line under the input field: what the run is doing, and its live numbers. */
+export function statusLine(status: Status): string {
+  const parts: string[] = [];
+  if (status.state !== "") {
+    const detail = status.detail === undefined ? "" : brief(status.detail);
+    parts.push(detail === "" ? status.state : `${status.state}: ${detail}`);
+  }
+  if (status.running !== undefined) parts.push(elapsed(status.running));
+  if (status.diff !== "") parts.push(status.diff);
+  for (const [name, value] of Object.entries(status.facts)) parts.push(`${name} ${value}`);
+  return parts.join("  ");
+}
+
+/** A detail is a whole question at times. The line takes its first words. */
+function brief(detail: string): string {
+  const first = detail.split("\n").find((line) => line.trim() !== "") ?? "";
+  return cut(plain(first), DETAIL);
+}
+
+function elapsed(millis: number): string {
+  const seconds = Math.floor(millis / 1000);
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 0) return `${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes}m${seconds % 60}s`;
+  return `${hours}h${minutes % 60}m`;
+}
+
 export async function attach(name: string, pid?: number): Promise<number> {
   const dir = runDir(name);
   if (!fs.existsSync(dir)) throw new PenguinError(`no run named ${name}`);
   const record = readRun(dir);
   const found = await adapters.installed(record.cwd);
-  const viewer = new Viewer(name, dir, build(found, record.cwd), agentLine(found));
   if (pid !== undefined && !(await started(dir, pid))) {
     process.stderr.write(`pn: the run process for ${name} died before it started\n`);
     return 1;
   }
+  /** Whether this viewer ends up with a status line, decided before the history replays. */
+  const live = holder(dir) !== undefined;
+  const viewer = new Viewer(name, dir, build(found, record.cwd), agentLine(found), live && interactive());
   const tail = new Tail(eventsPath(dir), (line) => viewer.line(line));
   tail.read();
-  const live = holder(dir) !== undefined;
   if (!live) tail.read();
   const code = viewer.code();
   if (code !== undefined) return code;
@@ -121,6 +161,7 @@ class Viewer {
   private dir: string;
   private renderer: ViewAdapter;
   private agent: string;
+  private chrome: boolean;
   private tty = process.stdout.isTTY === true;
   private sessions = new Map<string, string>();
   private order: string[] = [];
@@ -135,12 +176,20 @@ class Viewer {
   private wanted: Asked | undefined;
   private refused: Rejected | undefined;
   private closed = false;
+  private state = "";
+  private detail: string | undefined;
+  private facts: Record<string, string | number | boolean> = {};
+  private watching: { elapsed?: boolean; diff?: string } | undefined;
+  private since = Date.now();
+  private diffStat = "";
+  private sampler: ReturnType<typeof setInterval> | undefined;
 
-  constructor(name: string, dir: string, renderer: ViewAdapter, agent: string) {
+  constructor(name: string, dir: string, renderer: ViewAdapter, agent: string, chrome: boolean) {
     this.name = name;
     this.dir = dir;
     this.renderer = renderer;
     this.agent = agent;
+    this.chrome = chrome;
   }
 
   line(text: string): void {
@@ -173,6 +222,8 @@ class Viewer {
     this.field = new Field(process.stdout, this.editor, HINT);
     keys.start();
     process.stdout.on("resize", this.redraw);
+    this.status();
+    if (this.watching !== undefined) this.sample();
     void this.open();
   }
 
@@ -192,8 +243,8 @@ class Viewer {
     const act = this.editor.key(text, key);
     if (act === "send") {
       const message = this.editor.take();
-      this.field?.erase();
       this.deliver(message);
+      this.field?.draw();
       this.flush();
       return;
     }
@@ -202,12 +253,8 @@ class Viewer {
       return;
     }
     if (act !== "changed") return;
-    if (this.editor.empty) {
-      this.field?.erase();
-      this.flush();
-    } else {
-      this.field?.draw();
-    }
+    this.field?.draw();
+    if (this.editor.empty) this.flush();
   }
 
   close(): void {
@@ -216,6 +263,9 @@ class Viewer {
     this.control = undefined;
     this.editor.take();
     this.field?.erase();
+    this.field = undefined;
+    if (this.sampler !== undefined) clearInterval(this.sampler);
+    this.sampler = undefined;
     process.stdout.off("resize", this.redraw);
     this.flush();
   }
@@ -252,6 +302,9 @@ class Viewer {
 
   private async open(): Promise<void> {
     if (this.keys === undefined || this.control !== undefined) return;
+    if (this.pending !== undefined || this.refused !== undefined || this.wanted !== undefined) {
+      this.field?.erase();
+    }
     const gate = this.pending;
     if (gate !== undefined) return this.openGate(gate);
     const refused = this.refused;
@@ -274,6 +327,7 @@ class Viewer {
     this.pending = undefined;
     if (this.closed) return;
     keys.start();
+    this.status();
     if (picked !== undefined && picked.length > 0) {
       this.deliver(picked.map((index) => gate.list[index] ?? "").join(", "));
     }
@@ -293,6 +347,7 @@ class Viewer {
     this.control = undefined;
     if (this.closed) return;
     keys.start();
+    this.status();
     if (taken !== undefined) {
       this.wanted = undefined;
       credentials.save(wanted.name, taken);
@@ -319,6 +374,7 @@ class Viewer {
     this.control = undefined;
     if (this.closed) return;
     keys.start();
+    this.status();
     this.refused = undefined;
     if (fix === "reset") {
       credentials.forget(refused.name);
@@ -372,6 +428,11 @@ class Viewer {
   }
 
   private show(event: ViewEvent): void {
+    this.noted(event);
+    if (this.chrome && (event.type === "state" || event.type === "fact" || event.type === "watch")) {
+      this.status();
+      return;
+    }
     if (event.type === "run" && event.phase === "started") {
       this.render({ type: "event", level: "info", message: `run ${this.name} started, ${this.agent}` });
       return;
@@ -407,12 +468,60 @@ class Viewer {
     return this.sessions.get(event.session) !== this.selected;
   }
 
+  /** What the status line says. The view adapter never sees the bottom of the screen. */
+  private noted(event: ViewEvent): void {
+    if (event.type === "state") {
+      this.state = event.state;
+      this.detail = event.detail;
+    }
+    if (event.type === "fact") Object.assign(this.facts, event.values);
+    if (event.type === "watch") {
+      this.watching = event;
+      this.since = Date.now();
+      this.diffStat = "";
+      this.sample();
+    }
+    if (event.type === "run" && event.phase !== "started") this.state = "";
+  }
+
+  private status(): void {
+    if (this.field === undefined) return;
+    this.field.status = statusLine({
+      state: this.state,
+      detail: this.detail,
+      running: this.watching?.elapsed === true ? Date.now() - this.since : undefined,
+      diff: this.diffStat,
+      facts: this.facts,
+    });
+    this.field.draw();
+  }
+
+  private sample(): void {
+    if (this.sampler !== undefined || this.field === undefined) return;
+    this.sampler = setInterval(() => void this.tick(), SAMPLE);
+    this.sampler.unref();
+  }
+
+  private tick = async (): Promise<void> => {
+    if (this.closed || this.control !== undefined) return;
+    const where = this.watching?.diff;
+    if (where !== undefined) {
+      const done = await runCommand("git diff --shortstat", where);
+      if (this.closed || this.control !== undefined) return;
+      this.diffStat = done.code === 0 ? done.stdout.trim() : "";
+    }
+    this.status();
+  };
+
+  /** The adapter writes the scroll, the field writes the bottom, and never at once. */
   private render(event: ViewEvent): void {
+    this.field?.erase();
     try {
       this.renderer.render(event);
     } catch (error) {
       process.stderr.write(`pn: the view adapter failed: ${messageOf(error)}\n`);
     }
+    this.status();
   }
 
   private flush(): void {
@@ -422,7 +531,7 @@ class Viewer {
   }
 
   private redraw = (): void => {
-    if (!this.editor.empty) this.field?.draw();
+    this.field?.draw();
   };
 
   private async attach(): Promise<void> {
@@ -438,7 +547,9 @@ class Viewer {
 
   private write(text: string): void {
     if (!this.tty && text.startsWith("\r")) return;
+    this.field?.erase();
     process.stdout.write(text);
+    this.status();
   }
 }
 

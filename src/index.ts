@@ -1,4 +1,5 @@
 export { adapter } from "./adapter.ts";
+export { cut, markdown, plain, wide } from "./markdown.ts";
 export { workflow } from "./workflow.ts";
 export type {
   Adapter,

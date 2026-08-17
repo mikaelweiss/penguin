@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { allocateRun, discardRun, finishRun, readRun } from "../src/create.ts";
 import { rows } from "../src/runs.ts";
 import { attach } from "../src/viewer.ts";
@@ -654,6 +655,79 @@ test("invariant 14: an unfinished run directory is invisible, and discard spares
   assert.deepEqual(readRun(again.dir).params, { count: 1 });
   discardRun(again.dir);
   assert.equal(fs.existsSync(again.dir), true, "a finished run survives discard");
+});
+
+const SENTINEL = "onlyonce";
+
+const watchingWorkflow = `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate, view }) {
+    view.watch({ elapsed: true });
+    view.fact({ round: 1 });
+    return await gate("### Blockers\\n\\n- the strip covers the controls, ${SENTINEL}\\n\\n### Non-blockers\\n\\n- the cursor lies");
+  },
+});
+`;
+
+function withTerminalAdapter(box: ReturnType<typeof sandbox>): void {
+  const source = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "examples", "adapters", "terminal.ts"),
+    "utf8",
+  );
+  box.writeAdapter("terminal", source);
+}
+
+function pause(millis: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, millis));
+}
+
+test("invariant 16: the status line holds one line, however long the question", async (t) => {
+  const box = sandbox(t);
+  withTerminalAdapter(box);
+  box.write("w.ts", watchingWorkflow);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const screen = terminal(t, box.home);
+  const watching = attach("w-1");
+  await waitFor(() => screen.text().includes(SENTINEL));
+  await pause(2100);
+  const shown = screen.text();
+  box.send("w-1", "ok");
+  await box.waitForEnd("w-1");
+  await watching;
+
+  assert.equal(shown.split(SENTINEL).length - 1, 1, "the question printed once, not once a second");
+  assert.match(shown, /blocked: Blockers/, "the status names the state and the first words");
+  assert.match(shown, /round 1/, "the status carries the facts");
+});
+
+test("invariant 16: nothing paints over the input field", async (t) => {
+  const box = sandbox(t);
+  withTerminalAdapter(box);
+  box.write("w.ts", watchingWorkflow);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const screen = terminal(t, box.home);
+  const watching = attach("w-1");
+  await waitFor(() => screen.text().includes(SENTINEL));
+  screen.input.write("hello");
+  await waitFor(() => screen.text().includes("> hello"));
+  await pause(2100);
+  const frames = screen.text().split("\x1b[J");
+  box.send("w-1", "ok");
+  await box.waitForEnd("w-1");
+  await watching;
+
+  const last = frames.at(-2) ?? "";
+  assert.match(last, /> hello/, "the last thing drawn is the input field");
+  assert.match(last, /blocked: Blockers/, "the same draw carries the status under it");
+  assert.doesNotMatch(frames.at(-1) ?? "", /blocked/, "and nothing wrote after it");
 });
 
 test("invariant 15: a paste sends as one message, newlines kept", async (t) => {

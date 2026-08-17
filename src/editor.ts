@@ -1,4 +1,5 @@
 import readline from "node:readline";
+import { cut } from "./markdown.ts";
 
 export type Key = {
   name?: string;
@@ -231,8 +232,13 @@ export function layout(text: string, cursor: number, width: number, prefix: stri
   return { rows, row, column };
 }
 
-/** The input area on a terminal: the buffer rows and one dim hint row below. */
+/**
+ * The input area on a terminal: the buffer rows and one dim row below. That last row
+ * carries the hint while the user types, and the run's status the rest of the time.
+ */
 export class Field {
+  /** The run's status, owned by the viewer. */
+  status = "";
   private out: NodeJS.WriteStream;
   private editor: Editor;
   private hint: string;
@@ -256,7 +262,7 @@ export class Field {
     const { text, cursor } = this.editor.shown;
     const head = this.title.flatMap((line) => layout(line, 0, width, "").rows);
     const laid = layout(text, cursor, width, "> ");
-    const rows = [...head, ...laid.rows, `\x1b[2m${this.hint.slice(0, width)}\x1b[22m`];
+    const rows = [...head, ...laid.rows, `\x1b[2m${cut(this.foot(text), width - 1)}\x1b[22m`];
     this.rise();
     this.out.write(`\r${rows.map((line) => `\x1b[2K${line}`).join("\n")}\n\x1b[J`);
     this.tall = rows.length;
@@ -278,6 +284,11 @@ export class Field {
     this.erase();
     this.out.write(`${text}\n`);
     if (was) this.draw();
+  }
+
+  private foot(text: string): string {
+    const parts = text !== "" || this.status === "" ? [this.hint, this.status] : [this.status];
+    return parts.filter((part) => part !== "").join("  ");
   }
 
   private rise(): void {
