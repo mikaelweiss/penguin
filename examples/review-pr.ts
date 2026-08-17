@@ -66,7 +66,7 @@ export default workflow({
     view.artifact({ title: `PR #${pr.number}: ${pr.title}`, url: pr.url });
     view.watch({ elapsed: true });
 
-    const changes = github.pr.changes(params.pr);
+    const changes = await github.pr.changes(params.pr);
     let inbound = changes.next();
     let previous: Findings | undefined;
     let inDraft = pr.isDraft;
