@@ -12,6 +12,7 @@ const examples = fileURLToPath(new URL("../examples", import.meta.url));
 const workflowFiles = [
   "fix.ts",
   "implement.ts",
+  "make-workflow.ts",
   "plan.ts",
   "pr.ts",
   "review-pr.ts",
@@ -299,6 +300,63 @@ test("the catalog review-pr workflow gates when the diff command fails", async (
   assert.ok(question.startsWith("gh pr diff 42 failed:"), question);
   box.send("review-pr-1", "ok");
   assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
+});
+
+test("the catalog make-workflow workflow designs, writes, and reviews the new workflow", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"path":"workflow-design.md","summary":"one summary","file":"new-thing.ts","name":"new-thing","verdict":"approved","findings":"none"}',
+  );
+
+  const started = box.wa(
+    "run",
+    path.join(examples, "make-workflow.ts"),
+    "--idea",
+    "a triage bot",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "make-workflow-1", "Approve the design?", "approve");
+  const ended = await box.waitForEnd("make-workflow-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { file: "new-thing.ts", run: "wa run new-thing" });
+
+  const labels = activities(box, "make-workflow-1").map((span) => span.label);
+  assert.deepEqual(labels, ["round 1 of 3"]);
+
+  const sessions = box.sessions();
+  assert.equal(sessions.length, 3);
+  assert.equal(sessions[0]?.session, sessions[1]?.session);
+  assert.notEqual(sessions[1]?.session, sessions[2]?.session);
+});
+
+test("the catalog make-workflow workflow stops after its round bound", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"path":"workflow-design.md","summary":"one summary","file":"new-thing.ts","name":"new-thing","verdict":"changes_needed","findings":"the loop has no bound"}',
+  );
+
+  const started = box.wa(
+    "run",
+    path.join(examples, "make-workflow.ts"),
+    "--idea",
+    "a triage bot",
+    "--rounds",
+    "2",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "make-workflow-1", "Approve the design?", "approve");
+  await answerGate(box, "make-workflow-1", "2 rounds and still findings", "ok");
+  const ended = await box.waitForEnd("make-workflow-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.equal(box.sessions().length, 5);
 });
 
 function skillsNamedBy(file: string): string[] {

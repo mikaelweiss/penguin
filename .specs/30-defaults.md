@@ -15,7 +15,8 @@ The npm package carries an `examples/` directory, and install copies it into `~/
 - `examples/verify.ts`: one verify turn: the checks of the repository, and what fails.
 - `examples/pr.ts`: the pull request, then a gate loop that runs address-feedback until the user answers done.
 - `examples/review-pr.ts`: a review of an open pull request: fetch the diff, review it into a findings file, then a gate that posts the file as a PR comment.
-- `examples/skills/`: the step skills, one directory each, in the Agent Skills format (`20-architecture.md`, skills): `wa-triage`, `wa-plan`, `wa-implement`, `wa-review`, `wa-review-diff`, `wa-reproduce`, `wa-verify`, `wa-address-feedback`. The `wa-` prefix keeps them clear of the skills `wa sync-skills` links in.
+- `examples/make-workflow.ts`: an idea to a new workflow: a design held at an approval gate, then a write-and-review loop with a `rounds` bound, into the home or the project.
+- `examples/skills/`: the step skills, one directory each, in the Agent Skills format (`20-architecture.md`, skills): `wa-triage`, `wa-plan`, `wa-implement`, `wa-review`, `wa-review-diff`, `wa-reproduce`, `wa-verify`, `wa-address-feedback`, `wa-design-workflow`, `wa-write-workflow`, `wa-review-workflow`. The `wa-` prefix keeps them clear of the skills `wa sync-skills` links in.
 - `examples/tsconfig.json`: maps `wa` and `zod` to the installed package for editor types, and includes the adapters and the generated `wa-env.d.ts`.
 - `examples/wa-env.d.ts`: the generated ctx types for the shipped adapters. wa rewrites it after install (`20-architecture.md`, storage).
 
