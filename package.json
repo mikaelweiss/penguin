@@ -1,5 +1,5 @@
 {
-  "name": "@mikaelweiss/penguin",
+  "name": "falcra",
   "version": "0.0.1",
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "license": "Apache-2.0",
@@ -28,7 +28,9 @@
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "check": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "release": "./scripts/publish.sh",
+    "reinstall": "./scripts/reinstall.sh"
   },
   "dependencies": {
     "zod": "^4.4.3"
