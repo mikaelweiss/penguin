@@ -184,14 +184,14 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","spec":"plan.md","acceptance":"acceptance.md","verdict":"approved","findings":"none"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","findings":"none"}',
   );
   outsideReady(box);
 
   const started = box.penguin("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "ticket-1", "Type approve", "approve");
+  await answerGate(box, "ticket-1", "pin the footer", "approve");
   await answerGate(box, "ticket-1", "PR is up:", "done");
   const ended = await box.waitForEnd("ticket-1");
 
@@ -217,9 +217,9 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
 
 test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"spec":"plan.md","acceptance":"acceptance.md"}');
+  catalogReady(box, '{"plan":"pin the footer","acceptance":"the footer stays"}');
   outsideReady(box);
-  box.setAgent('{"spec":"plan.md","acceptance":"acceptance.md"}', "prompts.txt");
+  box.setAgent('{"plan":"pin the footer","acceptance":"the footer stays"}', "prompts.txt");
 
   const started = box.penguin(
     "run",
@@ -229,7 +229,7 @@ test("the catalog plan workflow reads a jira key and its comments, given by posi
   );
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "plan-1", "Type approve", "approve");
+  await answerGate(box, "plan-1", "pin the footer", "approve");
   const ended = await box.waitForEnd("plan-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
@@ -243,9 +243,9 @@ test("the catalog plan workflow reads a jira key and its comments, given by posi
 
 test("the catalog plan workflow reads a github issue and its comments", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"spec":"plan.md","acceptance":"acceptance.md"}');
+  catalogReady(box, '{"plan":"pin the footer","acceptance":"the footer stays"}');
   outsideReady(box);
-  box.setAgent('{"spec":"plan.md","acceptance":"acceptance.md"}', "prompts.txt");
+  box.setAgent('{"plan":"pin the footer","acceptance":"the footer stays"}', "prompts.txt");
 
   const started = box.penguin(
     "run",
@@ -255,7 +255,7 @@ test("the catalog plan workflow reads a github issue and its comments", async (t
   );
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "plan-1", "Type approve", "approve");
+  await answerGate(box, "plan-1", "pin the footer", "approve");
   const ended = await box.waitForEnd("plan-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
@@ -267,7 +267,7 @@ test("the catalog plan workflow reads a github issue and its comments", async (t
 
 test("the catalog ticket workflow stops at the triage gate", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"actionable":false,"reason":"no repro"}');
+  catalogReady(box, '{"actionable":false,"reason":"no repro","tasks":[]}');
 
   const started = box.penguin("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
 
@@ -278,6 +278,24 @@ test("the catalog ticket workflow stops at the triage gate", async (t) => {
 
   const labels = activities(box, "ticket-1").map((span) => span.label);
   assert.deepEqual(labels, [await description("triage.ts")]);
+});
+
+test("the catalog triage workflow gates a split before returning it", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"actionable":true,"reason":"two seams","tasks":["first slice","second slice"]}');
+
+  const started = box.penguin("run", path.join(examples, "triage.ts"), "--ticket", "ABC-1", "--background");
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "triage-1", "The ticket splits into 2 tasks", "approve");
+  const ended = await box.waitForEnd("triage-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], {
+    actionable: true,
+    reason: "two seams",
+    tasks: ["first slice", "second slice"],
+  });
 });
 
 test("the catalog implement workflow runs alone in the invoking repository", async (t) => {

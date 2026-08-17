@@ -6,7 +6,7 @@ import pr from "./pr.ts";
 import triage from "./triage.ts";
 
 export default workflow({
-  description: "ticket to merged PR: triage, plan, implement, review, then the pull request",
+  description: "ticket to merged PR: triage splits the ticket, then plan, implement, review per task, then the pull request",
   params: z.object({ ticket: z.string() }),
 
   async run(ctx) {
@@ -24,14 +24,18 @@ export default workflow({
     }
     view.watch({ elapsed: true, diff: ws.path });
 
-    const planned = await plan(ctx, { ticket: params.ticket, dir: ws.path });
-
-    const built = await implement(ctx, {
-      task: planned.spec,
-      acceptance: planned.acceptance,
-      dir: ws.path,
-    });
-    if (!built.approved) await gate("The review did not approve the change. Take a look.");
+    const total = triaged.tasks.length;
+    for (const [index, task] of triaged.tasks.entries()) {
+      await view.activity(`task ${index + 1} of ${total}`, async () => {
+        const planned = await plan(ctx, { ticket: task, dir: ws.path });
+        const built = await implement(ctx, {
+          task: planned.plan,
+          acceptance: planned.acceptance,
+          dir: ws.path,
+        });
+        if (!built.approved) await gate("The review did not approve the change. Take a look.");
+      });
+    }
 
     return pr(ctx, { dir: ws.path });
   },

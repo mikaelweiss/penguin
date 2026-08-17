@@ -32,13 +32,13 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 Install fills `~/.penguin/` with nine workflows, their skills, five adapters, and a tsconfig for editor types. Two of them are pipelines:
 
-- `pn run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, a worktree, implement, then the pull request.
+- `pn run ticket --ticket ABC-123`: ticket to merged PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
 - `pn run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, then the pull request.
 
 The other seven are small workflows. Each one runs alone, and a pipeline calls all but `review-pr`:
 
-- `pn run triage --ticket ABC-123`: is the ticket ready to work on, and why.
-- `pn run plan --ticket ABC-123`: the plan and its acceptance checks, held at an approve-or-revise gate.
+- `pn run triage --ticket ABC-123`: is the ticket ready to work on, why, and the tasks that build it.
+- `pn run plan --ticket ABC-123`: the plan and its acceptance checks: questions gate first, then an approve-or-revise gate.
 - `pn run implement --task "..."`: implement in the current repository, review each round, up to `--rounds`.
 - `pn run review --acceptance acceptance.md`: one review of the working tree against the checks.
 - `pn run verify`: run the checks of your repository and report what fails.
@@ -57,7 +57,7 @@ Workflow files live in `~/.penguin/` for every repository, or in `<repo>/.pengui
 import { workflow } from "penguin";
 import { z } from "zod";
 
-const Triage = z.object({ actionable: z.boolean(), reason: z.string() });
+const Triage = z.object({ actionable: z.boolean(), reason: z.string(), tasks: z.array(z.string()) });
 
 export default workflow({
   description: "ticket to merged PR",
@@ -101,7 +101,8 @@ fix  --bug <text> [--rounds <number>]
   reproduce a bug, fix it against the repo checks, then the pull request
 
 ticket  --ticket <text>
-  ticket to merged PR: triage, plan, implement, review, then the pull request
+  ticket to merged PR: triage splits the ticket, then plan, implement, review per
+  task, then the pull request
 ```
 
 A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name <one|two>`. Brackets mark an optional param. A long description wraps to the width of the terminal.
@@ -109,7 +110,7 @@ A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name
 ## The ctx API
 
 - `ctx.params`: the validated params.
-- `ctx.agent({use, cwd, name})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A fresh handle is a fresh conversation. `turn.stop()` kills the agent process and keeps the partial work, and the next turn on the same handle continues the conversation.
+- `ctx.agent({use, cwd, name})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A `blocked` schema beside `result` makes the turn resolve to `{result}` or `{blocked}`: the agent fills exactly one, which is how an agent hands questions back for the workflow to gate. A fresh handle is a fresh conversation. `turn.stop()` kills the agent process and keeps the partial work, and the next turn on the same handle continues the conversation.
 - `ctx.vcs`, `ctx.github`, `ctx.jira`, and any role you add: the installed adapters, typed in your editor through the generated `penguin-env.d.ts`. Every method call is one step in the view.
 - `ctx.view`: typed output. `activity` wraps a span, `fact` sets what is true now, `event` appends to the scroll, `artifact` names a thing to open, `watch` declares live numbers the view samples.
 - `ctx.gate(question, shape?)`: ask a question and wait for the answer. The answer is the next message you send. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`) the gate returns that type, the terminal draws a list for it, and an answer that does not fit gets the question again.

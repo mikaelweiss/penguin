@@ -5,8 +5,9 @@ const JIRA = /^(?:.*\/browse\/)?([A-Z][A-Z0-9]*-\d+)(?:[/?#].*)?$/;
 const GITHUB =
   /^(?:https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/)?(\d+)(?:[/?#].*)?$/;
 
+const Blocked = z.object({ questions: z.array(z.string()) });
 const Plan = z.object({
-  spec: z.string().describe("path to the markdown file that holds the plan"),
+  plan: z.string().describe("the finished plan, in markdown"),
   acceptance: z.string().describe("the acceptance criteria, one per line"),
 });
 
@@ -22,8 +23,13 @@ function withNotes(body: string, notes: Note[]): string {
   return `${body}\n\n# Comments\n\n${written.join("\n\n")}`;
 }
 
-function revision(ticket: string, answer: string): string {
-  return `${ticket}\n\n# The revision the user asks for\n\n${answer}`;
+async function answered(
+  questions: string[],
+  gate: (question: string) => Promise<string>,
+): Promise<string> {
+  const answers: string[] = [];
+  for (const question of questions) answers.push(`${question}\n${await gate(question)}`);
+  return `# Answers\n\n${answers.join("\n\n")}`;
 }
 
 export default workflow({
@@ -62,14 +68,19 @@ export default workflow({
     const planner = agent({ cwd: params.dir });
     let input = ticket;
     for (;;) {
-      const plan = (await planner.run("penguin-plan", {
+      const out = (await planner.run("penguin-plan", {
         input,
         result: Plan,
+        blocked: Blocked,
       }))!;
-      view.artifact({ title: "Plan", path: plan.spec });
-      const answer = await gate("Type approve, or type what to change.");
+      if (out.blocked !== undefined) {
+        input = await answered(out.blocked.questions, gate);
+        continue;
+      }
+      const plan = out.result;
+      const answer = await gate(`${plan.plan}\n\nType approve, or type what to change.`);
       if (answer === "approve") return plan;
-      input = revision(ticket, answer);
+      input = `# The revision the user asks for\n\n${answer}`;
     }
   },
 });

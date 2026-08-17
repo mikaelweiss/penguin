@@ -64,7 +64,7 @@ The store is one file per credential, `~/.penguin/credentials/<name>.json`, mode
 
 ## Agent sessions
 
-Opening a session generates a session id. The transcript of a session is one file under `transcripts/`, named by the session id: the engine appends each prompt, and the adapter's agent events append as they stream. Each session carries a name for the viewer and for message addressing. A schema mismatch goes back into the same conversation as a correction turn, once, then gates. A stopped turn keeps its partial work in the conversation, and the next turn continues it. The agent CLI keeps its own session state outside `~/.penguin`, so deleting a run directory deletes penguin's record of the conversation, not the CLI's.
+Opening a session generates a session id. The transcript of a session is one file under `transcripts/`, named by the session id: the engine appends each prompt, and the adapter's agent events append as they stream. Each session carries a name for the viewer and for message addressing. A schema mismatch goes back into the same conversation as a correction turn, once, then gates. A turn with a blocked schema sends the adapter one JSON schema that accepts either envelope, and validation says which one came back. A stopped turn keeps its partial work in the conversation, and the next turn continues it. The agent CLI keeps its own session state outside `~/.penguin`, so deleting a run directory deletes penguin's record of the conversation, not the CLI's.
 
 ## Run lifecycle
 
@@ -133,3 +133,4 @@ Each one line, each pinned by a test:
 10. A skill name resolves from the project roots before the home roots, and from the preferred link before the other. A skill path resolves against the workflow file. An adapter resolves from the project before the home.
 11. A gate with a shape validates the answer against it, and asks the same question again until an answer fits.
 12. penguin never writes a credential value to `events.jsonl`, `inbox.jsonl`, or the screen. A viewer writes it to the store, and the run reads it from there.
+13. A turn with a blocked schema resolves to exactly one envelope: a value that fills both, or neither, is a mismatch, corrected once, then gated.

@@ -54,7 +54,12 @@ export default adapter({
       }
       if (result === "none") return { ok: true, value: null };
       if (result === "invalid") return { ok: true, value: { wrong: true } };
-      return { ok: true, value: JSON.parse(result) };
+      let value = JSON.parse(result);
+      const envelopes = turn.schema !== undefined && Array.isArray(turn.schema.anyOf);
+      if (envelopes && value.result === undefined && value.blocked === undefined) {
+        value = { result: value };
+      }
+      return { ok: true, value };
     },
   }),
 });

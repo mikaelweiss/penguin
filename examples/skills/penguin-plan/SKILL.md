@@ -41,7 +41,7 @@ Write the chosen invariant for each as one sentence in the plan (for example: "a
 
 ## 5. Decisions
 
-Genuine product or scope choices go to the user as a numbered list of questions in chat, before the plan is finalized. Do not bury decisions inside the plan as assumptions.
+A genuine product or scope choice the repository cannot settle goes back to the user: return `blocked` with the questions and no plan. The answers arrive in the next turn. Ask only what discovery could not answer. Never bury a decision inside the plan as an assumption, and never present a plan with an open question. The plan is a roadmap the implementer executes without research, exploration, or question answering.
 
 ## 6. The artifact
 
@@ -50,8 +50,7 @@ Genuine product or scope choices go to the user as a numbered list of questions 
 - **Invariants**: the one-sentence outcomes of step 4.
 - **Out of scope**: including any deliberately skipped gate.
 - **Verification**: the exact commands and checklist references.
-- **Open questions**: anything from step 5 still unresolved.
 
 Keep it lean: decisions and invariants, not prose. Each invariant should be implementable in a few lines and pinned by a test. Prefer one decision plus one test over defensive sprawl.
 
-Write the plan to one markdown file in the working directory. Return that path as `spec`. Print the whole plan in your final message, so the reader sees it without opening the file.
+Return the whole plan as `plan`, in markdown, and the acceptance criteria as `acceptance`, one per line.

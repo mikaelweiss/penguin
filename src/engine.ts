@@ -94,6 +94,7 @@ type TurnCall = {
   skill: string;
   input: string | undefined;
   result: z.ZodObject | undefined;
+  blocked: z.ZodObject | undefined;
   first: () => boolean;
   bump: () => void;
 };
@@ -275,8 +276,14 @@ class Execution {
     this.bus.emit({ type: "session", id, name: label, use: picked.found.name });
     const api = this.build(picked.found, this.agentHost()) as AgentAdapter;
     let attempts = 0;
-    const run = (skill: string, runOptions?: AgentRunOptions & { result?: z.ZodObject }) =>
-      this.turn({
+    const run = (
+      skill: string,
+      runOptions?: AgentRunOptions & { result?: z.ZodObject; blocked?: z.ZodObject },
+    ) => {
+      if (runOptions?.blocked !== undefined && runOptions.result === undefined) {
+        throw new PenguinError("a turn with a blocked schema needs a result schema too");
+      }
+      return this.turn({
         session: id,
         api,
         cwd: this.resolveCwd(cwd),
@@ -284,11 +291,13 @@ class Execution {
         skill,
         input: runOptions?.input,
         result: runOptions?.result,
+        blocked: runOptions?.blocked,
         first: () => attempts === 0,
         bump: () => {
           attempts += 1;
         },
       });
+    };
     return { run } as AgentSession;
   }
 
@@ -330,7 +339,8 @@ class Execution {
       throw new PenguinError(`no skill ${call.skill}. Looked in ${found.searched.join(", ")}`);
     }
     const skillText = fs.readFileSync(found.file, "utf8");
-    const schema = call.result === undefined ? undefined : jsonSchema(call.result);
+    const envelope = envelopeOf(call);
+    const schema = envelope === undefined ? undefined : jsonSchema(envelope);
     const label = `agent ${call.skill}`;
     const activity = this.als.getStore()?.id;
     this.bus.emit({ type: "step", phase: "start", id, label, activity });
@@ -361,8 +371,8 @@ class Execution {
           }
           if (stopped()) return this.endStep(id, label, activity, false, undefined);
           if (outcome.ok) {
-            if (call.result === undefined) return this.endStep(id, label, activity, true, null);
-            const checked = call.result.safeParse(outcome.value);
+            if (envelope === undefined) return this.endStep(id, label, activity, true, null);
+            const checked = envelope.safeParse(outcome.value);
             if (checked.success) {
               return this.endStep(id, label, activity, true, checked.data);
             }
@@ -690,6 +700,15 @@ function composePrompt(skillText: string, input: string | undefined, failure: st
     parts.push(`# Correction\n\nThe last attempt failed: ${failure}\nDo the step again and fix that.`);
   }
   return `${parts.join("\n\n")}\n`;
+}
+
+function envelopeOf(call: TurnCall): z.ZodType | undefined {
+  if (call.result === undefined) return undefined;
+  if (call.blocked === undefined) return call.result;
+  return z.union([
+    z.strictObject({ result: call.result }),
+    z.strictObject({ blocked: call.blocked }),
+  ]);
 }
 
 function jsonSchema(shape: z.ZodType): Record<string, unknown> {

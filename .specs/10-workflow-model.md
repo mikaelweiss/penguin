@@ -49,7 +49,9 @@ for (let round = 1; round <= 3; round++) {
 
 Options: `use` names the agent adapter implementation when more than one is installed, `cwd` sets the session's working directory, `name` labels the session (a viewer shows it, and a message targets it; the default is the implementation name plus a counter), and any other field passes through to the adapter (the claude adapter reads `model`).
 
-`session.run(skill, {input, result})` returns a **turn**. `skill` is a skill name or a path to a markdown file (skills below). `result` is a plain `z.object` schema. Await the turn for the result: on a schema mismatch the engine sends the validation error back into the same conversation and retries once, then gates to a human. A turn with no `result` resolves to null.
+`session.run(skill, {input, result, blocked})` returns a **turn**. `skill` is a skill name or a path to a markdown file (skills below). `result` is a plain `z.object` schema. Await the turn for the result: on a schema mismatch the engine sends the validation error back into the same conversation and retries once, then gates to a human. A turn with no `result` resolves to null.
+
+`blocked` is a second plain `z.object` schema, for a turn that may end needing the user. With both schemas the turn resolves to `{result}` or `{blocked}`, and the agent fills exactly one: a value that fills both, or neither, is a schema mismatch like any other. An agent has no channel to the user, so this envelope is how a question travels: the workflow reads which envelope came back, gates what blocks, and the next `session.run` on the same handle carries the answers into the same conversation. `blocked` without `result` fails the run.
 
 `turn.stop()` ends the turn early: the engine kills the agent process, and the turn resolves to `undefined`. A turn's type is therefore `R | undefined`: a caller that never stops the turn asserts the result with `!`. The conversation keeps the partial work, and the next `session.run` on the same handle continues it. Stop then continue is how a workflow interrupts an agent with new information. A fresh `ctx.agent()` is how it starts over.
 
@@ -101,7 +103,7 @@ The call validates the arguments against the callee's params schema, runs the ca
 
 ## Results and documents
 
-Agent turns return a small typed envelope (zod-validated): verdicts, numbers, short strings, file paths. A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. Params and results use the same zod vocabulary. How the envelope travels back is the agent adapter's concern, never the workflow's. Documents (a spec, a design note) are markdown files the agent writes where the workflow directs (a session `cwd`, a path passed in `input`) and references by path in the result. Models write documents best as plain markdown, so prose never lives inside JSON strings. Larger outcomes leave the run as a file, an artifact, or one adapter call (a GitHub comment, a PR).
+Agent turns return a typed envelope (zod-validated): verdicts, numbers, file paths, and the text the workflow passes onward (a plan, a task list, a findings report). A result schema is a plain `z.object` with fields like `z.boolean()` and `z.enum([...])`. Params and results use the same zod vocabulary. How the envelope travels back is the agent adapter's concern, never the workflow's. A document only a human opens, or one that must outlive the run, is a markdown file the agent writes where the workflow directs (a session `cwd`, a path passed in `input`) and references by path in the result. Larger outcomes leave the run as a file, an artifact, or one adapter call (a GitHub comment, a PR).
 
 ## Worktrees
 
@@ -128,8 +130,9 @@ A run's name is `<workflow file stem>-<n>`, unique across all runs. The name is 
 import { workflow } from "penguin";
 import { z } from "zod";
 
-const Triage = z.object({ actionable: z.boolean(), reason: z.string() });
-const Plan = z.object({ spec: z.string(), acceptance: z.string() });
+const Blocked = z.object({ questions: z.array(z.string()) });
+const Triage = z.object({ actionable: z.boolean(), reason: z.string(), tasks: z.array(z.string()) });
+const Plan = z.object({ plan: z.string(), acceptance: z.string() });
 const Review = z.object({ verdict: z.enum(["approved", "changes_needed"]), findings: z.string() });
 
 export default workflow({
@@ -137,35 +140,44 @@ export default workflow({
   params: z.object({ ticket: z.string() }),
 
   async run({ params, agent, vcs, github, view, gate }) {
-    const t = (await agent().run("penguin-triage", { input: params.ticket, result: Triage }))!;
+    const triager = agent();
+    let out = (await triager.run("penguin-triage", { input: params.ticket, result: Triage, blocked: Blocked }))!;
+    while (out.blocked !== undefined) {
+      const answers: string[] = [];
+      for (const question of out.blocked.questions) answers.push(`${question}\n${await gate(question)}`);
+      out = (await triager.run("penguin-triage", { input: answers.join("\n\n"), result: Triage, blocked: Blocked }))!;
+    }
+    const t = out.result;
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
     }
 
-    const planner = agent();
-    let plan;
-    do {
-      plan = (await planner.run("penguin-plan", { input: params.ticket, result: Plan }))!;
-    } while ((await gate("Approve the plan? (approve / revise)")) !== "approve");
-
     const ws = await vcs.worktree.add(`penguin-${params.ticket}`);
     view.watch({ elapsed: true, diff: ws.path });
 
-    const implementer = agent({ cwd: ws.path });
-    const findings: string[] = [];
-    let approved = false;
-    for (let round = 1; round <= 3 && !approved; round++) {
-      approved = await view.activity(`round ${round} of 3`, async () => {
-        view.fact({ round: `${round}/3` });
-        await implementer.run("penguin-implement", { input: plan.spec });
-        const reviewer = agent({ cwd: ws.path });
-        const review = (await reviewer.run("penguin-review", { input: plan.acceptance, result: Review }))!;
-        findings.push(review.findings);
-        return review.verdict === "approved";
-      });
+    for (const task of t.tasks) {
+      const planner = agent();
+      let plan;
+      do {
+        plan = (await planner.run("penguin-plan", { input: task, result: Plan }))!;
+      } while ((await gate(`${plan.plan}\n\nApprove the plan? (approve / revise)`)) !== "approve");
+
+      const implementer = agent({ cwd: ws.path });
+      const findings: string[] = [];
+      let approved = false;
+      for (let round = 1; round <= 3 && !approved; round++) {
+        approved = await view.activity(`round ${round} of 3`, async () => {
+          view.fact({ round: `${round}/3` });
+          await implementer.run("penguin-implement", { input: plan.plan });
+          const reviewer = agent({ cwd: ws.path });
+          const review = (await reviewer.run("penguin-review", { input: plan.acceptance, result: Review }))!;
+          findings.push(review.findings);
+          return review.verdict === "approved";
+        });
+      }
+      if (!approved) await gate("Three review rounds. Take a look.");
     }
-    if (!approved) await gate("Three review rounds. Take a look.");
 
     const pr = await github.pr.create({ cwd: ws.path });
     view.artifact({ title: "Pull request", url: pr.url });

@@ -87,6 +87,10 @@ export type AgentRunOptions = {
 export type Turn<R> = Promise<R | undefined> & { stop(): Promise<void> };
 
 export interface AgentSession {
+  run<R extends z.ZodObject, B extends z.ZodObject>(
+    skill: string,
+    options: AgentRunOptions & { result: R; blocked: B },
+  ): Turn<{ result: z.infer<R>; blocked?: never } | { blocked: z.infer<B>; result?: never }>;
   run<R extends z.ZodObject>(skill: string, options: AgentRunOptions & { result: R }): Turn<z.infer<R>>;
   run(skill: string, options?: AgentRunOptions): Turn<null>;
 }

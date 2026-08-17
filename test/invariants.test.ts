@@ -582,6 +582,40 @@ export default workflow({
   );
 });
 
+test("invariant 13: a blocked turn resolves exactly one envelope, and both is a mismatch", async (t) => {
+  const box = sandbox(t);
+  box.setAgent('{"result":{"go":true},"blocked":{"questions":["which?"]}}', "prompts.txt");
+  box.write("skill.md", "decide\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skill.md", {
+      result: z.object({ go: z.boolean() }),
+      blocked: z.object({ questions: z.array(z.string()) }),
+    });
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const prompts = box.invocations("prompts.txt");
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1] ?? "", /# Correction/);
+  assert.match(String(box.lastState("w-1")?.["detail"]), /failed twice/);
+
+  process.kill(box.holder("w-1") as number, "SIGTERM");
+  assert.equal((await box.waitForEnd("w-1"))["phase"], "stopped");
+});
+
 function asks(events: Event[]): Event[] {
   return events.filter((event) => event["phase"] === "asked");
 }

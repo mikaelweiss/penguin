@@ -115,6 +115,75 @@ export default workflow({
   assert.equal((await box.waitForEnd("w-1"))["phase"], "stopped");
 });
 
+test("a turn with a blocked schema resolves to the envelope the agent filled", async (t) => {
+  const box = sandbox(t);
+  const prompts = path.join(box.project, "prompts.txt");
+  const schemas = path.join(box.project, "schemas.txt");
+  box.writeAdapter(
+    "fake",
+    `import fs from "node:fs";
+import { adapter } from "penguin";
+
+export default adapter({
+  role: "agent",
+  name: "fake",
+  description: "fake test agent",
+  build: () => ({
+    async turn(turn) {
+      fs.appendFileSync(${JSON.stringify(prompts)}, turn.prompt + "\\n---END---\\n");
+      fs.appendFileSync(${JSON.stringify(schemas)}, JSON.stringify(turn.schema) + "\\n");
+      if (turn.first) return { ok: true, value: { blocked: { questions: ["which database?"] } } };
+      return { ok: true, value: { result: { plan: "use sqlite" } } };
+    },
+  }),
+});
+`,
+  );
+  box.write("skill.md", "plan the change\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent, gate }) {
+    const planner = agent();
+    let input = "the ticket";
+    for (;;) {
+      const out = (await planner.run("./skill.md", {
+        input,
+        result: z.object({ plan: z.string() }),
+        blocked: z.object({ questions: z.array(z.string()) }),
+      }))!;
+      if (out.blocked !== undefined) {
+        input = "answer: " + (await gate(out.blocked.questions[0] ?? ""));
+        continue;
+      }
+      return out.result.plan;
+    }
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  assert.equal(box.lastState("w-1")?.["detail"], "which database?");
+
+  box.send("w-1", "postgres");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.equal(ended["result"], "use sqlite");
+  const asked = box.invocations("prompts.txt");
+  assert.equal(asked.length, 2);
+  assert.match(asked[1] ?? "", /answer: postgres/);
+  const schema = JSON.parse(box.lines("schemas.txt")[0] ?? "null") as { anyOf?: unknown[] };
+  assert.equal(schema.anyOf?.length, 2, "the adapter got one schema that accepts either envelope");
+});
+
 test("a session use option picks the named agent adapter over the default", (t) => {
   const box = sandbox(t);
   box.setAgent("none", "first.txt", "fake");
