@@ -140,7 +140,7 @@ const creds = await host.credential({
 
 The first time a workflow reaches that call, the run blocks and your terminal shows the link that makes the key, then takes one field at a time. A secret field echoes stars. The terminal writes the values to `~/.penguin/credentials/jira.json`, mode 0600, and tells the run only that the file now holds them, so nothing lands in `events.jsonl` or `inbox.jsonl`. Every run after that finds them and asks nothing.
 
-An environment variable wins over the stored file, which is how a server or a cron job supplies the same values. `refresh: true` throws the stored record away and asks again: the `jira` adapter does that once when your site answers 401, so a rotated token is one paste away.
+An environment variable wins over the stored file, which is how a server or a cron job supplies the same values. `rejected: "<why>"` says the provider refused what penguin had: your terminal shows the reason and four fixes, try again, type every value again, open the file in your editor, or stop the run, and the adapter calls again with whatever you leave behind. The `jira` adapter does that whenever your site answers 401, 403, or 404.
 
 Workflow code writes none of this. `ctx.jira.issue.get("ABC-123")` is the whole story.
 

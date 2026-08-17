@@ -12,6 +12,7 @@ type Style = {
   plain?: boolean;
   keys?: string;
   empty?: boolean;
+  notes?: string[];
   interrupt?: () => void;
 };
 
@@ -40,9 +41,14 @@ export async function choose(
 export function control(
   question: string,
   choices: Choice[],
-  style: { many: boolean; interrupt: () => void },
+  style: { many: boolean; interrupt: () => void; notes?: string[] },
 ): Control {
-  return drive(question, choices, { many: style.many, empty: true, interrupt: style.interrupt });
+  return drive(question, choices, {
+    many: style.many,
+    empty: true,
+    notes: style.notes,
+    interrupt: style.interrupt,
+  });
 }
 
 export type Field = { name: string; label: string; secret: boolean };
@@ -173,6 +179,7 @@ function drive(question: string, choices: Choice[], style: Style): Control {
       style.keys ?? (many ? "arrows move, space toggles, enter confirms" : "arrows move, enter confirms");
     const lines = [
       question,
+      ...(style.notes ?? []).map((note) => `  ${note}`),
       ...choices.map((choice, index) => {
         const here = index === cursor ? ">" : " ";
         const box = many ? (marked(index) ? "[x]" : "[ ]") : marked(index) ? "(o)" : "( )";

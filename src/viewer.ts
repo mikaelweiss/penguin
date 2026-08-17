@@ -7,9 +7,9 @@ import * as credentials from "./credentials.ts";
 import { messageOf, PenguinError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { alive, holder } from "./lock.ts";
-import { eventsPath, inboxPath, runDir } from "./paths.ts";
+import { credentialFile, eventsPath, inboxPath, runDir } from "./paths.ts";
 import { control, entry, interactive } from "./prompt.ts";
-import { runArgv, runCommand } from "./spawn.ts";
+import { edit, runArgv, runCommand } from "./spawn.ts";
 import type { Host, ViewAdapter, ViewEvent } from "./types.ts";
 import { plainRenderer } from "./view.ts";
 
@@ -23,6 +23,10 @@ type GateEvent = Extract<ViewEvent, { type: "gate" }>;
 type CredentialEvent = Extract<ViewEvent, { type: "credential" }>;
 
 type Asked = Extract<CredentialEvent, { phase: "asked" }>;
+
+type Rejected = Extract<CredentialEvent, { phase: "rejected" }>;
+
+type Fix = "retry" | "reset" | "edit" | "stop";
 
 export type GateControl = { list: string[]; many: boolean } | { hint: string | undefined };
 
@@ -133,6 +137,7 @@ class Viewer {
   private control: { cancel(): void } | undefined;
   private pending: { question: string; list: string[]; many: boolean } | undefined;
   private wanted: Asked | undefined;
+  private refused: Rejected | undefined;
   private closed = false;
 
   constructor(name: string, dir: string, renderer: ViewAdapter, agent: string) {
@@ -251,6 +256,8 @@ class Viewer {
     if (this.keys === undefined || this.control !== undefined) return;
     const gate = this.pending;
     if (gate !== undefined) return this.openGate(gate);
+    const refused = this.refused;
+    if (refused !== undefined) return this.openFix(refused);
     const wanted = this.wanted;
     if (wanted !== undefined) return this.openEntry(wanted);
   }
@@ -297,6 +304,52 @@ class Viewer {
     void this.open();
   }
 
+  /** The provider said no. The user picks the fix, and the run hears only that it is done. */
+  private async openFix(refused: Rejected): Promise<void> {
+    const keys = this.keys as Keys;
+    keys.stop();
+    const list = fixes(refused.name);
+    const running = control(`${refused.label} refused the credential. What now?`, list, {
+      many: false,
+      interrupt: () => this.stopRun(),
+      notes: why(refused),
+    });
+    this.control = running;
+    const picked = await running.picked;
+    const fix = picked === undefined ? undefined : list[picked[0] ?? 0]?.fix;
+    if (fix === "edit") await this.editStore(refused);
+    this.control = undefined;
+    if (this.closed) return;
+    keys.start();
+    this.refused = undefined;
+    if (fix === "reset") {
+      credentials.forget(refused.name);
+      this.wanted = {
+        type: "credential",
+        phase: "asked",
+        name: refused.name,
+        label: refused.label,
+        url: refused.url,
+        hint: refused.hint,
+        fields: refused.fields,
+      };
+    } else if (fix === "stop") {
+      this.stopRun();
+    } else if (fix !== undefined) {
+      this.provide(refused.name);
+    }
+    this.flush();
+    void this.open();
+  }
+
+  private async editStore(refused: Rejected): Promise<void> {
+    credentials.seed(
+      refused.name,
+      refused.fields.map((field) => field.name),
+    );
+    await edit(credentialFile(refused.name));
+  }
+
   private gated(event: GateEvent): void {
     this.pending = undefined;
     if (event.phase !== "asked" || event.schema === undefined) return;
@@ -312,9 +365,11 @@ class Viewer {
   private credentialed(event: CredentialEvent): void {
     if (event.phase === "ready") {
       this.wanted = undefined;
+      this.refused = undefined;
       return;
     }
-    this.wanted = event;
+    if (event.phase === "rejected") this.refused = event;
+    else this.wanted = event;
     void this.open();
   }
 
@@ -380,6 +435,21 @@ class Viewer {
     if (!this.tty && text.startsWith("\r")) return;
     process.stdout.write(text);
   }
+}
+
+export function fixes(name: string): { label: string; note?: string; fix: Fix }[] {
+  return [
+    { label: "try again", note: "use the values penguin has", fix: "retry" },
+    { label: "enter it again", note: "type each value again", fix: "reset" },
+    { label: "edit the file", note: `open ${credentials.where(name)}`, fix: "edit" },
+    { label: "stop the run", fix: "stop" },
+  ];
+}
+
+export function why(refused: Rejected): string[] {
+  const lines = [refused.reason];
+  if (refused.where !== "") lines.push(`penguin read it from ${refused.where}`);
+  return lines;
 }
 
 export function notes(asked: Asked): string[] {

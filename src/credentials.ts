@@ -37,6 +37,14 @@ export function save(name: string, values: Record<string, string>): string {
   return short(file);
 }
 
+/** Write the file with every field name, so a user who opens it sees the shape. */
+export function seed(name: string, fields: string[]): void {
+  const kept = read(name);
+  const values: Record<string, string> = {};
+  for (const field of fields) values[field] = kept[field] ?? "";
+  save(name, values);
+}
+
 export function forget(name: string): void {
   fs.rmSync(credentialFile(checked(name)), { force: true });
 }

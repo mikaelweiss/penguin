@@ -3,6 +3,9 @@ import { adapter } from "penguin";
 const TOKENS = "https://id.atlassian.com/manage-profile/security/api-tokens";
 const FIELDS = ["summary", "description", "status", "issuetype", "assignee"];
 
+/** Jira answers a wrong site, login, or token with one of these, and 404 hides a missing right. */
+const REFUSED = new Set([401, 403, 404]);
+
 type Creds = { site: string; email: string; token: string };
 
 type Issue = {
@@ -103,14 +106,13 @@ export default adapter({
   build: (host) => {
     let held: Creds | undefined;
 
-    async function creds(refresh: boolean): Promise<Creds> {
-      if (refresh) held = undefined;
-      held ??= await host.credential({
+    function ask(rejected?: string): Promise<Creds> {
+      return host.credential({
         name: "jira",
         label: "Jira",
         url: TOKENS,
         hint: "the token is a password: penguin sends it to your site over https and nowhere else",
-        refresh,
+        rejected,
         fields: [
           { name: "site", label: "Your Jira site, like acme.atlassian.net", env: "JIRA_SITE" },
           { name: "email", label: "The email you sign in to Atlassian with", env: "JIRA_EMAIL" },
@@ -122,7 +124,6 @@ export default adapter({
           },
         ],
       });
-      return held;
     }
 
     async function once(method: string, route: string, creds: Creds, body?: unknown): Promise<Reply> {
@@ -158,11 +159,14 @@ export default adapter({
       }
     }
 
-    /** A rejected token is asked for again, once. Everything else is the caller's news. */
+    /** A refused call goes back to the user: the site, the login, or the token may be wrong. */
     async function call(method: string, route: string, body?: unknown): Promise<Reply> {
-      const first = await once(method, route, await creds(false), body);
-      if (first.status !== 401) return first;
-      return once(method, route, await creds(true), body);
+      held ??= await ask();
+      for (;;) {
+        const reply = await once(method, route, held, body);
+        if (!REFUSED.has(reply.status)) return reply;
+        held = await ask(reply.reason);
+      }
     }
 
     return {

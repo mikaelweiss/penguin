@@ -52,13 +52,15 @@ A message is one line sent into a run: `{text, session?}`. A viewer's input fiel
 
 ## Credentials
 
-Some adapters need a key the user has to make: a Jira API token, and anything like it. The adapter asks for it with `host.credential({name, label, url, hint, fields, refresh})`, and the engine finds it. A workflow writes nothing, so control flow never mentions a key.
+Some adapters need a key the user has to make: a Jira API token, and anything like it. The adapter asks for it with `host.credential({name, label, url, hint, fields, rejected})`, and the engine finds it. A workflow writes nothing, so control flow never mentions a key.
 
 One field is one value. `name` is the key it is stored under and the key on the returned object, `label` is the line the human reads, `env` names an environment variable that supplies it instead, and `secret` marks a value that must never be shown. The engine takes each field from its environment variable first, then from the stored record. Whatever is still missing becomes one credential asked event carrying the label, the link, the hint, and only the missing fields. The run shows blocked with the label until it has them.
 
 A viewer answers it. On a terminal it takes one field at a time, echoes a secret field as stars, and shows the link that makes the key. It writes the values to the store itself, then appends one notice to `inbox.jsonl`, `{"credential": "<name>"}`. The value is never a message, so it never reaches `events.jsonl`. The run reads the store again and goes on, and emits a credential ready event naming only where the values came from. With no terminal the ask prints the link and the environment variable names, and the run waits for a viewer that can ask.
 
-The store is one file per credential, `~/.penguin/credentials/<name>.json`, mode 0600 inside a 0700 directory: the user reads it and nobody else does. A name is lowercase letters, digits, and dashes. An environment variable is never written to the store. `refresh: true` forgets the stored record and asks again, which is how an adapter answers a key the provider rejects.
+The store is one file per credential, `~/.penguin/credentials/<name>.json`, mode 0600 inside a 0700 directory: the user reads it and nobody else does. A name is lowercase letters, digits, and dashes. An environment variable is never written to the store.
+
+`rejected: "<why>"` is how an adapter answers a provider that refuses the values. It becomes one credential rejected event carrying the reason and where penguin read the values, and the run shows blocked until a viewer answers. On a terminal the viewer offers four fixes, and picks none itself: try again with the same values, type every value again, open the file in `$VISUAL` or `$EDITOR`, or stop the run. Each of the first three ends in the same notice the ask ends in, and the run reads the store again: whatever is missing after that becomes an ordinary ask. The adapter calls again with whatever comes back, so the user fixes it as many times as they want, and stopping is always one choice away.
 
 ## Agent sessions
 

@@ -473,7 +473,8 @@ class Execution {
    * viewer writes it to the credential store and says only that the store now holds it.
    */
   private async credential(request: CredentialRequest): Promise<Record<string, string>> {
-    if (request.refresh === true) credentials.forget(request.name);
+    const rejected = request.rejected;
+    if (rejected !== undefined) await this.paused(() => this.refused(request, rejected));
     for (;;) {
       const taken = this.take(request);
       if (taken.missing.length === 0) {
@@ -519,15 +520,30 @@ class Execution {
       label: request.label,
       url: request.url,
       hint: request.hint,
-      fields: missing.map((field) => ({
-        name: field.name,
-        label: field.label,
-        secret: field.secret === true,
-        env: field.env,
-      })),
+      fields: missing.map(shownField),
     });
+    return this.wanted(request.name, `${request.label} needs a credential`);
+  }
+
+  /** The provider refused what penguin had. A viewer offers the fixes and picks none itself. */
+  private refused(request: CredentialRequest, reason: string): Promise<void> {
+    this.bus.emit({
+      type: "credential",
+      phase: "rejected",
+      name: request.name,
+      label: request.label,
+      reason,
+      where: this.take(request).where,
+      url: request.url,
+      hint: request.hint,
+      fields: request.fields.map(shownField),
+    });
+    return this.wanted(request.name, `${request.label} refused the credential`);
+  }
+
+  private wanted(name: string, label: string): Promise<void> {
     return new Promise<void>((resolve) => {
-      this.wants.push({ name: request.name, label: `${request.label} needs a credential`, resolve });
+      this.wants.push({ name, label, resolve });
       this.refresh();
     });
   }
@@ -644,6 +660,15 @@ class Execution {
     this.counter += 1;
     return id;
   }
+}
+
+function shownField(field: CredentialField): {
+  name: string;
+  label: string;
+  secret: boolean;
+  env?: string;
+} {
+  return { name: field.name, label: field.label, secret: field.secret === true, env: field.env };
 }
 
 function composePrompt(skillText: string, input: string | undefined, failure: string | undefined): string {

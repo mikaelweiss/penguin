@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadAdapter } from "../src/adapters.ts";
 import * as credentials from "../src/credentials.ts";
 import type { CredentialRequest, Host } from "../src/types.ts";
 import { attach } from "../src/viewer.ts";
-import { type Event, type Sandbox, sandbox, terminal, waitFor } from "./helpers.ts";
+import { type Event, type Sandbox, sandbox, type Screen, terminal, waitFor } from "./helpers.ts";
 
 const jiraFile = fileURLToPath(new URL("../examples/adapters/jira.ts", import.meta.url));
 
@@ -25,7 +25,7 @@ function stubHost(credential: Host["credential"]): Host {
 }
 
 /** An adapter that needs a site and a token, the way the jira adapter does. */
-function needsSource(refresh = false): string {
+function needsSource(rejected?: string): string {
   return `import { adapter } from "penguin";
 
 export default adapter({
@@ -39,7 +39,7 @@ export default adapter({
         label: "Tracker",
         url: "https://tracker.test/tokens",
         hint: "make a read token",
-        refresh: ${refresh},
+        rejected: ${rejected === undefined ? "undefined" : JSON.stringify(rejected)},
         fields: [
           { name: "site", label: "Your tracker site", env: "TRACKER_SITE" },
           { name: "token", label: "A tracker API token", env: "TRACKER_TOKEN", secret: true },
@@ -77,6 +77,40 @@ function asked(box: Sandbox, run: string): Event[] {
   return box
     .events(run)
     .filter((event) => event["type"] === "credential" && event["phase"] === "asked");
+}
+
+function keep(box: Sandbox, values: Record<string, string>): void {
+  fs.mkdirSync(path.join(box.home, "credentials"), { recursive: true });
+  fs.writeFileSync(path.join(box.home, "credentials", "tracker.json"), JSON.stringify(values));
+}
+
+/** A blocked run whose adapter says the site refused the stored values, with a viewer on it. */
+async function refusedRun(
+  t: TestContext,
+  box: Sandbox,
+): Promise<{ screen: Screen; watching: Promise<number> }> {
+  box.writeAdapter("tracker", needsSource("the site said no"));
+  box.write("w.ts", callWorkflow);
+  keep(box, { site: "kept.tracker.test", token: TOKEN });
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const screen = terminal(t, box.home);
+  const watching = attach("w-1");
+  await waitFor(() => screen.text().includes("What now?"));
+  return { screen, watching };
+}
+
+function useEditor(t: TestContext, command: string): void {
+  const prior = { visual: process.env["VISUAL"], editor: process.env["EDITOR"] };
+  delete process.env["VISUAL"];
+  process.env["EDITOR"] = command;
+  t.after(() => {
+    if (prior.visual === undefined) delete process.env["VISUAL"];
+    else process.env["VISUAL"] = prior.visual;
+    if (prior.editor === undefined) delete process.env["EDITOR"];
+    else process.env["EDITOR"] = prior.editor;
+  });
 }
 
 function store(box: Sandbox, name: string): Record<string, string> {
@@ -174,27 +208,16 @@ test("a credential the environment supplies is never asked for", async (t) => {
   assert.equal(ready?.["where"], "the environment");
 });
 
-test("a stored credential runs without a question, and refresh asks again", async (t) => {
+test("a stored credential runs without a question", async (t) => {
   const box = sandbox(t);
   box.writeAdapter("tracker", needsSource());
   box.write("w.ts", callWorkflow);
-  fs.mkdirSync(path.join(box.home, "credentials"), { recursive: true });
-  fs.writeFileSync(
-    path.join(box.home, "credentials", "tracker.json"),
-    JSON.stringify({ site: "kept.tracker.test", token: TOKEN }),
-  );
+  keep(box, { site: "kept.tracker.test", token: TOKEN });
 
   const done = box.penguin("run", "./w.ts");
   assert.equal(done.code, 0, done.output);
   assert.equal(box.ended("w-1")?.["result"], "kept.tracker.test matched");
   assert.equal(asked(box, "w-1").length, 0);
-
-  box.writeAdapter("tracker", needsSource(true));
-  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
-  await box.waitForState("w-2", "blocked");
-
-  assert.equal(asked(box, "w-2").length, 1, "refresh threw the stored record away");
-  assert.deepEqual(store(box, "tracker"), {}, "the store is empty while penguin asks");
 });
 
 test("the entry prompt leaves the cursor where the user types", async (t) => {
@@ -223,6 +246,95 @@ test("the entry prompt leaves the cursor where the user types", async (t) => {
 
   assert.equal(code, 0);
   assert.equal(ended["result"], "abc.tracker.test matched");
+});
+
+const DOWN = "\x1b[B";
+
+test("a refused credential offers to try again with what penguin has", async (t) => {
+  const box = sandbox(t);
+  const { screen, watching } = await refusedRun(t, box);
+
+  screen.input.write("\r");
+  const ended = await box.waitForEnd("w-1");
+  const code = await watching;
+  const shown = screen.stop();
+
+  assert.equal(code, 0);
+  assert.equal(ended["result"], "kept.tracker.test matched");
+  assert.ok(shown.includes("Tracker refused the credential"), "the label names who said no");
+  assert.ok(shown.includes("the site said no"), "the reason shows");
+  assert.equal(shown.includes(TOKEN), false, "no secret on the screen");
+  assert.deepEqual(store(box, "tracker"), { site: "kept.tracker.test", token: TOKEN });
+  assert.equal(asked(box, "w-1").length, 0, "trying again asks for nothing");
+});
+
+test("a refused credential takes every value again", async (t) => {
+  const box = sandbox(t);
+  const { screen, watching } = await refusedRun(t, box);
+
+  screen.input.write(`${DOWN}\r`);
+  await waitFor(() => screen.text().includes("Your tracker site"));
+  screen.input.write("new.tracker.test\r");
+  await waitFor(() => screen.text().includes("A tracker API token"));
+  screen.input.write(`${TOKEN}\r`);
+  const ended = await box.waitForEnd("w-1");
+  const code = await watching;
+  const shown = screen.stop();
+
+  assert.equal(code, 0);
+  assert.equal(ended["result"], "new.tracker.test matched");
+  assert.deepEqual(store(box, "tracker"), { site: "new.tracker.test", token: TOKEN });
+  assert.equal(shown.includes(TOKEN), false, "the retyped secret echoes stars");
+  assert.deepEqual(
+    box
+      .events("w-1")
+      .filter((event) => event["type"] === "credential")
+      .map((event) => event["phase"]),
+    ["rejected", "ready"],
+    "the run heard that it was refused, then that the store holds the values",
+  );
+});
+
+test("a refused credential opens its file in the editor", async (t) => {
+  const box = sandbox(t);
+  const script = box.write(
+    "editor.mjs",
+    `import fs from "node:fs";
+const file = process.argv[2];
+const values = JSON.parse(fs.readFileSync(file, "utf8"));
+values.site = "edited.tracker.test";
+fs.writeFileSync(file, JSON.stringify(values));
+`,
+  );
+  useEditor(t, `${process.execPath} ${script}`);
+  const { screen, watching } = await refusedRun(t, box);
+
+  screen.input.write(`${DOWN}${DOWN}\r`);
+  const ended = await box.waitForEnd("w-1");
+  const code = await watching;
+  screen.stop();
+
+  assert.equal(code, 0);
+  assert.equal(ended["result"], "edited.tracker.test matched");
+  assert.deepEqual(store(box, "tracker"), { site: "edited.tracker.test", token: TOKEN });
+});
+
+test("a refused credential stops the run when the user picks that", async (t) => {
+  const box = sandbox(t);
+  const { screen, watching } = await refusedRun(t, box);
+
+  screen.input.write(`${DOWN}${DOWN}${DOWN}\r`);
+  const ended = await box.waitForEnd("w-1");
+  const code = await watching;
+  screen.stop();
+
+  assert.equal(ended["phase"], "stopped");
+  assert.equal(code, 130);
+  assert.deepEqual(
+    store(box, "tracker"),
+    { site: "kept.tracker.test", token: TOKEN },
+    "stopping keeps the stored values",
+  );
 });
 
 test("without a terminal the ask names the link and the environment variables", async (t) => {
@@ -333,22 +445,29 @@ test("the jira adapter asks for the site, the email, and the token, with the tok
   }
 });
 
-test("the jira adapter asks again once when the site rejects the token", async () => {
+test("the jira adapter hands a refused call back to the user, with the reason", async () => {
   const definition = await loadAdapter(jiraFile);
-  const asks: boolean[] = [];
+  const asks: (string | undefined)[] = [];
   const host = stubHost((async (asking: CredentialRequest) => {
-    asks.push(asking.refresh === true);
+    asks.push(asking.rejected);
     return { site: "acme", email: "me@acme.test", token: TOKEN };
   }) as Host["credential"]);
 
+  const refusals = [
+    new Response(JSON.stringify({ errorMessages: ["Client must be authenticated"] }), {
+      status: 401,
+      statusText: "Unauthorized",
+    }),
+    new Response(JSON.stringify({ errorMessages: ["Issue does not exist or you lack permission"] }), {
+      status: 404,
+      statusText: "Not Found",
+    }),
+  ];
   const real = globalThis.fetch;
   let tries = 0;
   globalThis.fetch = (async () => {
     tries += 1;
-    return new Response(JSON.stringify({ errorMessages: ["Client must be authenticated"] }), {
-      status: 401,
-      statusText: "Unauthorized",
-    });
+    return refusals.shift() ?? new Response(JSON.stringify({ key: "ABC-1", fields: {} }), { status: 200 });
   }) as typeof fetch;
 
   try {
@@ -357,10 +476,11 @@ test("the jira adapter asks again once when the site rejects the token", async (
     };
     const got = await api.issue.get("ABC-1");
 
-    assert.equal(got.ok, false);
-    assert.match(got.reason, /401 Unauthorized: Client must be authenticated/);
-    assert.equal(tries, 2, "one retry, not a loop");
-    assert.deepEqual(asks, [false, true], "the second ask forgets the rejected token");
+    assert.equal(got.ok, true, "the call runs again after the user fixes the credential");
+    assert.equal(tries, 3);
+    assert.equal(asks[0], undefined, "the first ask is not a refusal");
+    assert.match(String(asks[1]), /401 Unauthorized: Client must be authenticated/);
+    assert.match(String(asks[2]), /404 Not Found: Issue does not exist or you lack permission/);
   } finally {
     globalThis.fetch = real;
   }

@@ -49,9 +49,11 @@ function lineOf(event: ViewEvent): string | undefined {
     case "gate":
       return event.phase === "asked" ? `gate: ${event.question}` : undefined;
     case "credential":
-      return event.phase === "asked"
-        ? askedFor(event)
-        : `credential ${event.name} ready, from ${event.where}`;
+      if (event.phase === "asked") return askedFor(event);
+      if (event.phase === "rejected") {
+        return `credential: ${event.label} refused it: ${event.reason}`;
+      }
+      return `credential ${event.name} ready, from ${event.where}`;
     case "message":
       return `> ${event.text}`;
     default:

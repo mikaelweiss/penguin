@@ -47,6 +47,17 @@ export type ViewEvent =
       hint?: string;
       fields: { name: string; label: string; secret: boolean; env?: string }[];
     }
+  | {
+      type: "credential";
+      phase: "rejected";
+      name: string;
+      label: string;
+      reason: string;
+      where: string;
+      url?: string;
+      hint?: string;
+      fields: { name: string; label: string; secret: boolean; env?: string }[];
+    }
   | { type: "credential"; phase: "ready"; name: string; where: string };
 
 export type View = {
@@ -134,8 +145,11 @@ export type CredentialRequest = {
   /** One line of extra instruction. */
   hint?: string;
   fields: readonly CredentialField[];
-  /** Forget the stored values and ask again. Use it after the provider rejects them. */
-  refresh?: boolean;
+  /**
+   * Why the provider refused the values. penguin asks the user to try again, type them
+   * again, edit the file, or stop the run, then returns whatever the store holds after.
+   */
+  rejected?: string;
 };
 
 export type Host = {
