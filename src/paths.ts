@@ -59,8 +59,12 @@ export function eventsPath(dir: string): string {
   return path.join(dir, "events.jsonl");
 }
 
-export function pinnedWorkflow(dir: string): string {
-  return path.join(dir, "workflow.ts");
+export function inboxPath(dir: string): string {
+  return path.join(dir, "inbox.jsonl");
+}
+
+export function runJsonPath(dir: string): string {
+  return path.join(dir, "run.json");
 }
 
 export function transcriptsDir(dir: string): string {

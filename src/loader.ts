@@ -7,6 +7,10 @@ import type { Workflow } from "./types.ts";
 let registered = false;
 const workflowFiles = new Set<string>();
 
+function isTypeScript(url: string): boolean {
+  return url.startsWith("file:") && (url.endsWith(".ts") || url.endsWith(".mts"));
+}
+
 export function register(): void {
   if (registered) return;
   registered = true;
@@ -17,7 +21,12 @@ export function register(): void {
       if (specifier === "zod" || specifier.startsWith("zod/")) {
         return nextResolve(specifier, { ...context, parentURL: import.meta.url });
       }
-      return nextResolve(specifier, context);
+      const resolved = nextResolve(specifier, context);
+      const parent = context.parentURL;
+      if (parent !== undefined && workflowFiles.has(parent) && isTypeScript(resolved.url)) {
+        workflowFiles.add(resolved.url);
+      }
+      return resolved;
     },
     load(url, context, nextLoad) {
       if (!workflowFiles.has(url)) return nextLoad(url, context);
@@ -33,7 +42,7 @@ export function register(): void {
 export async function importDefault(file: string): Promise<unknown> {
   register();
   const url = pathToFileURL(file).href;
-  if (url.endsWith(".ts") || url.endsWith(".mts")) workflowFiles.add(url);
+  if (isTypeScript(url)) workflowFiles.add(url);
   const loaded = (await import(url)) as {
     default?: unknown;
   };
@@ -44,7 +53,7 @@ export async function load(file: string): Promise<Workflow> {
   const definition = (await importDefault(file)) as Workflow | undefined;
   if (
     definition === undefined ||
-    typeof definition !== "object" ||
+    typeof definition !== "function" ||
     typeof definition.run !== "function" ||
     typeof definition.params?.parse !== "function"
   ) {

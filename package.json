@@ -1,7 +1,7 @@
 {
   "name": "wa",
   "version": "1.0.0",
-  "description": "Run one workflow file as a foreground process, with any coding agent CLI.",
+  "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "type": "module",
   "bin": {
     "wa": "./dist/cli.js"

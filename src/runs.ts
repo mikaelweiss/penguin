@@ -1,14 +1,15 @@
 import fs from "node:fs";
-import * as journal from "./journal.ts";
+import { readRun } from "./create.ts";
 import { table } from "./layout.ts";
 import { holder } from "./lock.ts";
-import { runDir, runsRoot, short } from "./paths.ts";
+import { eventsPath, runDir, runJsonPath, runsRoot, short } from "./paths.ts";
+import type { ViewEvent } from "./types.ts";
 
 export type Row = {
   run: string;
   workflow: string;
   state: string;
-  step: string;
+  detail: string;
   age: string;
   dir: string;
 };
@@ -20,64 +21,59 @@ export function rows(now: number): Row[] {
     .readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .filter((name) => fs.existsSync(journal.journalPath(runDir(name))));
+    .filter((name) => fs.existsSync(runJsonPath(runDir(name))))
+    .filter((name) => holder(runDir(name)) !== undefined);
   const collected = names.map((name) => row(name, now));
   collected.sort((left, right) => left.run.localeCompare(right.run));
   return collected;
 }
 
 export function render(list: Row[]): string {
-  const columns: (keyof Row)[] = ["run", "workflow", "state", "step", "age", "dir"];
-  const header = ["RUN", "WORKFLOW", "STATE", "STEP", "AGE", "DIRECTORY"];
+  const columns: (keyof Row)[] = ["run", "workflow", "state", "detail", "age", "dir"];
+  const header = ["RUN", "WORKFLOW", "STATE", "DETAIL", "AGE", "DIRECTORY"];
   return table([header, ...list.map((entry) => columns.map((column) => entry[column]))]);
 }
 
 function row(name: string, now: number): Row {
   const dir = runDir(name);
-  const entries = journal.read(dir);
-  const start = journal.startOf(entries);
-  const done = journal.isDone(entries);
-  const pid = holder(dir);
-  const state = pid !== undefined ? `running (${pid})` : done ? "done" : "parked";
+  const record = readRun(dir);
+  const live = summary(dir);
   return {
     run: name,
-    workflow: short(start.workflow),
-    state,
-    step: done ? "-" : detail(entries),
-    age: age(now - Date.parse(start.createdAt)),
+    workflow: short(record.workflow),
+    state: live.state,
+    detail: cut(live.detail),
+    age: age(now - Date.parse(record.createdAt)),
     dir: short(dir),
   };
 }
 
-function detail(entries: journal.Entry[]): string {
-  const gate = journal.pendingGate(entries);
-  if (gate !== undefined) return cut(`gate: ${gate.question}`);
-  const park = journal.lastPark(entries);
-  if (park !== undefined) return cut(park.reason);
-  const call = journal.lastCall(entries);
-  if (call !== undefined) return cut(`${call.kind} ${target(call.key)}`);
-  return "-";
-}
-
-function target(key: string): string {
-  const parsed = JSON.parse(key) as {
-    role?: string;
-    method?: string;
-    skill?: string;
-    question?: string;
-    use?: string;
-  };
-  if (parsed.skill !== undefined) return parsed.skill;
-  if (parsed.role !== undefined && parsed.method !== undefined) {
-    return `${parsed.role}.${parsed.method}`;
+function summary(dir: string): { state: string; detail: string } {
+  let state = "running";
+  let detail = "";
+  let step = "";
+  const file = eventsPath(dir);
+  if (!fs.existsSync(file)) return { state, detail };
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let event: ViewEvent;
+    try {
+      event = JSON.parse(line) as ViewEvent;
+    } catch {
+      continue;
+    }
+    if (event.type === "state") {
+      state = event.state;
+      detail = event.detail ?? "";
+    }
+    if (event.type === "step" && event.phase === "start") step = event.label;
   }
-  if (parsed.question !== undefined) return parsed.question;
-  if (parsed.use !== undefined) return parsed.use;
-  return key;
+  return { state, detail: detail === "" && state === "running" ? step : detail };
 }
 
 function cut(text: string): string {
   const flat = text.replaceAll("\n", " ");
+  if (flat === "") return "-";
   return flat.length > 60 ? `${flat.slice(0, 57)}...` : flat;
 }
 

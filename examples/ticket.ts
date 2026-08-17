@@ -19,7 +19,7 @@ export default workflow({
 
   async run({ params, agent, vcs, github, view, gate }) {
     const triager = agent();
-    const t = await triager.run("wa-triage", { input: params.ticket, result: Triage });
+    const t = (await triager.run("wa-triage", { input: params.ticket, result: Triage }))!;
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
@@ -28,7 +28,7 @@ export default workflow({
     const planner = agent();
     let plan;
     do {
-      plan = await planner.run("wa-plan", { input: params.ticket, result: Plan });
+      plan = (await planner.run("wa-plan", { input: params.ticket, result: Plan }))!;
     } while ((await gate("Approve the plan? (approve / revise)")) !== "approve");
 
     const ws = await vcs.worktree.add(`wa-${params.ticket}`);
@@ -48,10 +48,10 @@ export default workflow({
           input: findings.length === 0 ? plan.spec : checklist(plan.spec, findings.slice(-1)),
         });
         const reviewer = agent({ cwd: ws.path });
-        const review = await reviewer.run("wa-review", {
+        const review = (await reviewer.run("wa-review", {
           input: checklist(plan.acceptance, findings),
           result: Review,
-        });
+        }))!;
         findings.push(review.findings);
         view.fact({ verdict: review.verdict });
         return review.verdict === "approved";

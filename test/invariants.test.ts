@@ -1,179 +1,209 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
-import type { CallEntry, GateEntry, ParkEntry } from "../src/journal.ts";
-import { exited, sandbox, waitFor } from "./helpers.ts";
+import { attach } from "../src/viewer.ts";
+import { sandbox, waitFor } from "./helpers.ts";
 
-const gateThenCommand = `import { workflow } from "wa";
+const gateWorkflow = `import { workflow } from "wa";
 import { z } from "zod";
 
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ shell, gate }) {
-    await shell.run("sh -c 'echo before >> out.txt'");
-    await gate("continue?");
-    await shell.run("sh -c 'echo pinned >> out.txt'");
+  async run({ gate }) {
+    return await gate("keep going?");
   },
 });
 `;
 
-test("invariant 1: replay executes the pinned copy, not the edited definition", (t) => {
+test("invariant 1: at most one process executes a run", async (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", gateWorkflow);
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  const holder = box.holder("w-1");
+  assert.ok(holder !== undefined, "the live run holds the lock");
+
+  const second = box.wa("_run", "w-1");
+
+  assert.equal(second.code, 1);
+  assert.match(second.stderr, new RegExp(`run w-1 is already executing \\(pid ${holder}\\)`));
+  assert.equal(box.holder("w-1"), holder, "the refused process left the lock alone");
+  box.send("w-1", "yes");
+  assert.equal((await box.waitForEnd("w-1"))["phase"], "done");
+});
+
+test("invariant 2: a viewer that joins late renders the same story", (t) => {
   const box = sandbox(t);
   box.withShell();
-  box.write("w.ts", gateThenCommand);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ shell, view }) {
+    view.event({ message: "starting" });
+    await view.activity("round 1", async () => {
+      await shell.run("sh -c 'echo hi'");
+      view.fact({ round: "1/1" });
+    });
+    view.artifact({ title: "the note", path: "note.md" });
+    return "finished";
+  },
+});
+`,
+  );
+
+  const live = box.wa("run", "./w.ts");
+  const late = box.wa("attach", "w-1");
+
+  assert.equal(live.code, 0, live.output);
+  assert.equal(late.code, 0, late.output);
+  assert.equal(late.stdout, live.stdout);
+  assert.match(live.stdout, /run w-1 started/);
+  assert.match(live.stdout, /^round 1$/m);
+  assert.match(live.stdout, /^step 0 shell\.run$/m);
+  assert.match(live.stdout, /^round: 1\/1$/m);
+  assert.match(live.stdout, /^artifact: the note \(note\.md\)$/m);
+  assert.match(live.stdout, /^finished$/m);
+  const types = box.events("w-1").map((event) => event["type"]);
+  assert.deepEqual(types, [
+    "run",
+    "event",
+    "activity",
+    "step",
+    "state",
+    "step",
+    "fact",
+    "activity",
+    "artifact",
+    "run",
+  ]);
+});
+
+test("invariant 3: q detaches and the run continues", async (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", gateWorkflow);
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  const holder = box.holder("w-1");
+
+  const screen = terminal(t, box.home);
+  const watching = attach("w-1");
+  await waitFor(() => screen.input.listenerCount("keypress") > 0);
+  screen.input.write("q");
+  const code = await watching;
+  const shown = screen.stop();
+
+  assert.equal(code, 0);
+  assert.match(shown, /gate: keep going\?/);
+  assert.equal(box.holder("w-1"), holder, "the run kept the lock");
+  assert.equal(box.lastState("w-1")?.["state"], "blocked");
+  box.send("w-1", "yes");
+  assert.equal((await box.waitForEnd("w-1"))["phase"], "done");
+});
+
+test("invariant 3: Ctrl-C stops the run, and the stop is recorded", async (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", gateWorkflow);
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  const holder = box.holder("w-1") as number;
+
+  process.kill(holder, "SIGTERM");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["phase"], "stopped");
+  await waitFor(() => box.holder("w-1") === undefined);
+  assert.equal(fs.existsSync(path.join(box.runDir("w-1"), "lock")), false);
+});
+
+test("invariant 4: done is final, and attach to a done run is read-only", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ view }) {
+    view.event({ message: "the only step" });
+  },
+});
+`,
+  );
   assert.equal(box.wa("run", "./w.ts").code, 0);
+  const file = path.join(box.runDir("w-1"), "events.jsonl");
+  const story = fs.readFileSync(file, "utf8");
 
-  box.write("w.ts", gateThenCommand.replace("echo pinned", "echo edited"));
-  const resumed = box.wa("resume", "w-1", "go");
+  const attached = box.wa("attach", "w-1");
 
-  assert.equal(resumed.code, 0);
-  assert.deepEqual(box.lines("out.txt"), ["before", "pinned"]);
-});
-
-test("invariant 2: the journal is append-only and replay re-executes nothing", (t) => {
-  const box = sandbox(t);
-  box.withShell();
-  box.write("w.ts", gateThenCommand);
-  box.wa("run", "./w.ts");
-
-  const file = path.join(box.runDir("w-1"), "journal.jsonl");
-  const parked = fs.readFileSync(file, "utf8");
-  box.wa("resume", "w-1", "go");
-  const resumed = fs.readFileSync(file, "utf8");
-
-  assert.ok(resumed.startsWith(parked), "the parked journal stayed byte-for-byte the prefix");
-  assert.deepEqual(box.lines("out.txt"), ["before", "pinned"]);
-});
-
-test("invariant 3: a second process on the same run fails with the holder pid", (t) => {
-  const box = sandbox(t);
-  box.withShell();
-  box.write("w.ts", gateThenCommand);
-  box.wa("run", "./w.ts");
-
-  fs.writeFileSync(path.join(box.runDir("w-1"), "lock"), String(process.pid));
-  const blocked = box.wa("resume", "w-1", "go");
-
-  assert.equal(blocked.code, 1);
-  assert.match(blocked.stderr, new RegExp(`already executing \\(pid ${process.pid}\\)`));
-});
-
-test("invariant 4: a run interrupted mid-step resumes from the step boundary", async (t) => {
-  const box = sandbox(t);
-  box.withShell();
-  box.write(
-    "w.ts",
-    `import { workflow } from "wa";
-import { z } from "zod";
-
-export default workflow({
-  description: "test",
-  params: z.object({}),
-  async run({ shell }) {
-    await shell.run("sh -c 'echo one >> out.txt'");
-    await shell.run("sh -c 'sleep 2'");
-    await shell.run("sh -c 'echo three >> out.txt'");
-  },
-});
-`,
-  );
-
-  const child = box.start("run", "./w.ts");
-  const journal = path.join(box.runDir("w-1"), "journal.jsonl");
-  await waitFor(() => fs.existsSync(journal) && countCalls(box, "w-1") === 1);
-  child.kill("SIGINT");
-  assert.equal(await exited(child), 130);
-
-  const parked = box.journal("w-1");
-  const last = parked[parked.length - 1] as ParkEntry;
-  assert.equal(last.type, "park");
-  assert.match(last.reason, /interrupted by SIGINT/);
-  assert.deepEqual(box.lines("out.txt"), ["one"]);
-
-  const resumed = box.wa("resume", "w-1");
-  assert.equal(resumed.code, 0);
-  assert.deepEqual(box.lines("out.txt"), ["one", "three"]);
-});
-
-test("invariant 5: a gate consumes exactly one answer, and the answer is journaled", (t) => {
-  const box = sandbox(t);
-  box.withShell();
-  box.write(
-    "w.ts",
-    `import { workflow } from "wa";
-import { z } from "zod";
-
-export default workflow({
-  description: "test",
-  params: z.object({}),
-  async run({ shell, gate }) {
-    const first = await gate("first?");
-    await shell.run(\`sh -c 'echo \${first} >> out.txt'\`);
-    const second = await gate("second?");
-    await shell.run(\`sh -c 'echo \${second} >> out.txt'\`);
-  },
-});
-`,
-  );
-
-  box.wa("run", "./w.ts");
-  const answered = box.wa("resume", "w-1", "alpha");
-  assert.equal(answered.code, 0);
-  assert.deepEqual(box.lines("out.txt"), ["alpha"]);
-
-  const midway = box.journal("w-1");
-  const gateAnswers = midway.filter(
-    (entry): entry is CallEntry => entry.type === "call" && entry.kind === "gate",
-  );
-  assert.deepEqual(
-    gateAnswers.map((entry) => [entry.id, entry.result]),
-    [["0", "alpha"]],
-  );
-  const pending = midway.filter((entry): entry is GateEntry => entry.type === "gate");
-  assert.equal(pending[pending.length - 1]?.question, "second?");
-
-  assert.equal(box.wa("resume", "w-1", "beta").code, 0);
-  assert.deepEqual(box.lines("out.txt"), ["alpha", "beta"]);
-  const finished = box.journal("w-1");
-  assert.equal(finished[finished.length - 1]?.type, "done");
-  assert.equal(
-    finished.filter((entry) => entry.type === "call" && entry.kind === "gate").length,
-    2,
-  );
-});
-
-test("invariant 6: a call that does not match the journal parks before any side effect", (t) => {
-  const box = sandbox(t);
-  box.withShell();
-  box.write("w.ts", gateThenCommand);
-  box.wa("run", "./w.ts");
-
-  const pinned = path.join(box.runDir("w-1"), "workflow.ts");
-  fs.writeFileSync(
-    pinned,
-    fs.readFileSync(pinned, "utf8").replace("echo before", "echo changed"),
-  );
-  const diverged = box.wa("resume", "w-1", "go");
-
-  assert.equal(diverged.code, 1);
-  assert.match(diverged.stdout, /divergence at step 0/);
-  assert.deepEqual(box.lines("out.txt"), ["before"]);
-  const entries = box.journal("w-1");
-  const park = entries[entries.length - 1] as ParkEntry;
-  assert.equal(park.type, "park");
-  assert.match(park.reason, /divergence at step 0/);
-});
-
-test("invariant 7: the engine needs no adapter and no definition in an empty home", (t) => {
-  const box = sandbox(t);
-  assert.deepEqual(fs.readdirSync(box.home), []);
+  assert.equal(attached.code, 0, attached.output);
+  assert.match(attached.stdout, /the only step/);
+  assert.equal(fs.readFileSync(file, "utf8"), story, "attach added no event");
+  assert.equal(fs.readFileSync(path.join(box.runDir("w-1"), "inbox.jsonl"), "utf8"), "");
+  assert.equal(box.holder("w-1"), undefined);
 
   const listed = box.wa("ps");
   assert.equal(listed.code, 0);
-  assert.match(listed.stdout, /^RUN\s+WORKFLOW\s+STATE\s+STEP\s+AGE\s+DIRECTORY$/m);
+  assert.doesNotMatch(listed.stdout, /^w-1\b/m, "a done run never lists");
 
+  const revived = box.wa("resume", "w-1", "go");
+  assert.equal(revived.code, 1);
+  assert.match(revived.stderr, /unknown command resume/);
+});
+
+test("invariant 5: each message at most once, in order, and a gate consumes one", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate, messages }) {
+    const answer = await gate("first?");
+    const second = await messages.next();
+    const third = await messages.next();
+    return [answer, second.text, third.text].join("|");
+  },
+});
+`,
+  );
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  box.send("w-1", "one");
+  box.send("w-1", "two");
+  box.send("w-1", "three");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["result"], "one|two|three");
+  const events = box.events("w-1");
+  assert.deepEqual(
+    events.filter((event) => event["type"] === "message").map((event) => event["text"]),
+    ["one", "two", "three"],
+  );
+  const answered = events.filter((event) => event["phase"] === "answered");
+  assert.deepEqual(
+    answered.map((event) => [event["question"], event["answer"]]),
+    [["first?", "one"]],
+    "the gate consumed exactly one message",
+  );
+});
+
+test("invariant 6: turn.stop kills the agent process, and the next turn continues", async (t) => {
+  const box = sandbox(t);
+  box.setAgent("none", "prompts.txt");
   box.write("skill.md", "do the thing\n");
   box.write(
     "w.ts",
@@ -183,21 +213,146 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ agent }) {
-    await agent().run("./skill.md");
+  async run({ agent, messages }) {
+    const worker = agent({ name: "worker" });
+    const turn = worker.run("./skill.md", { input: "<slow>" });
+    await messages.next();
+    await turn.stop();
+    await worker.run("./skill.md", { input: "carry on" });
+    return "continued";
   },
 });
 `,
   );
-  const parked = box.wa("run", "./w.ts");
 
-  assert.equal(parked.code, 1);
-  assert.match(parked.stdout, /no agent adapter is installed/);
-  assert.match(parked.stdout, /wa list adapters/);
-  const entries = box.journal("w-1");
-  const park = entries[entries.length - 1] as ParkEntry;
-  assert.equal(park.type, "park");
-  assert.match(park.reason, /no agent adapter is installed/);
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await waitFor(() => box.exists("slow.pid"));
+  const child = Number(box.read("slow.pid").trim());
+  assert.equal(alive(child), true, "the agent process is running");
+
+  box.send("w-1", "stop that");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["result"], "continued");
+  assert.equal(alive(child), false, "the stop killed the agent process");
+  assert.equal(box.exists("late.txt"), false, "the killed process never finished its work");
+  const turns = box.sessions();
+  assert.equal(turns.length, 2);
+  assert.deepEqual(
+    turns.map((turn) => turn.first),
+    [true, false],
+    "the next turn continued the same conversation",
+  );
+  assert.equal(turns[0]?.session, turns[1]?.session);
+});
+
+test("invariant 7: a call validates the callee params before the callee runs", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "double.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "double a number",
+  params: z.object({ n: z.number() }),
+  async run({ params, view }) {
+    view.event({ message: "the child ran" });
+    return params.n * 2;
+  },
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+import double from "./double.ts";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run(ctx) {
+    return await double(ctx, { n: "twenty one" });
+  },
+});
+`,
+  );
+
+  const failed = box.wa("run", "./w.ts");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stdout, /invalid params for the workflow "double a number"/);
+  assert.match(failed.stdout, /n: /);
+  const events = box.events("w-1");
+  assert.equal(
+    events.some((event) => event["message"] === "the child ran"),
+    false,
+    "the callee never started",
+  );
+  assert.equal(
+    events.some((event) => event["type"] === "activity"),
+    false,
+    "the call failed before the callee's activity",
+  );
+});
+
+test("invariant 7: a composed call creates no run", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "ask.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "ask the human",
+  params: z.object({}),
+  async run({ gate }) {
+    return await gate("go on?");
+  },
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+import ask from "./ask.ts";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run(ctx) {
+    const answer = await ask(ctx, {});
+    return \`the child said \${answer}\`;
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")), ["w-1"]);
+  const listed = box.wa("ps");
+  const rows = listed.stdout.split("\n").filter((line) => line.trim() !== "");
+  assert.equal(rows.length, 2, listed.stdout);
+  assert.match(rows[1] ?? "", /^w-1\s/);
+
+  box.send("w-1", "yes");
+  const ended = await box.waitForEnd("w-1");
+  assert.equal(ended["result"], "the child said yes");
+  const activity = box.events("w-1").find((event) => event["type"] === "activity");
+  assert.equal(activity?.["label"], "ask the human");
+});
+
+test("invariant 8: the engine depends on no adapter and no definition", (t) => {
+  const box = sandbox(t);
+  assert.deepEqual(fs.readdirSync(box.home), []);
+
+  const listed = box.wa("ps");
+  assert.equal(listed.code, 0);
+  assert.match(listed.stdout, /^RUN\s+WORKFLOW\s+STATE\s+DETAIL\s+AGE\s+DIRECTORY$/m);
 
   box.write(
     "role.ts",
@@ -216,9 +371,32 @@ export default workflow({
   const missing = box.wa("run", "./role.ts");
   assert.equal(missing.code, 1);
   assert.match(missing.stdout, /nothing provides ctx\.shell/);
+  assert.match(missing.stdout, /Installed adapter roles: agent, view/);
+  assert.match(String(box.ended("role-1")?.["reason"]), /nothing provides ctx\.shell/);
+
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skill.md");
+  },
+});
+`,
+  );
+  const agentless = box.wa("run", "./w.ts");
+  assert.equal(agentless.code, 1);
+  assert.match(agentless.stdout, /no agent adapter is installed/);
+  assert.match(agentless.stdout, /wa list adapters/);
+  assert.match(String(box.ended("w-1")?.["reason"]), /no agent adapter is installed/);
 });
 
-test("invariant 8: the first wa command installs, and a sync keeps what you wrote", (t) => {
+test("invariant 9: the first wa command installs, and sync keeps a skill you wrote", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
   const claude = path.join(box.userHome, ".claude", "skills");
@@ -240,15 +418,16 @@ test("invariant 8: the first wa command installs, and a sync keeps what you wrot
   assert.equal(box.wa("sync-skills", "--global").code, 0);
 
   const kept = fs.readdirSync(path.join(box.home, "skills"));
-  assert.equal(kept.includes("claude"), false);
+  assert.equal(kept.includes("claude"), false, "a link to a directory that is gone disappears");
   assert.equal(
     fs.readFileSync(path.join(box.home, "skills", "house-style", "SKILL.md"), "utf8"),
     "our style\n",
   );
 });
 
-test("invariant 9: a skill name resolves from the project before the home", (t) => {
+test("invariant 10: a skill name resolves from the project before the home", (t) => {
   const box = sandbox(t);
+  box.setAgent("none", "prompts.txt");
   box.write(
     "w.ts",
     `import { workflow } from "wa";
@@ -263,21 +442,69 @@ export default workflow({
 });
 `,
   );
-  box.writeSkill(path.join(box.home, "skills"), "wa-review", "the home craft\n");
-  box.setAgent("none", "prompts.txt");
+  box.writeSkill(path.join(box.userHome, ".claude", "skills"), "wa-review", "the claude craft\n");
+  box.writeSkill(path.join(box.userHome, ".agents", "skills"), "wa-review", "the agents craft\n");
+  assert.equal(box.wa("sync-skills", "--global").code, 0);
+
   assert.equal(box.wa("run", "./w.ts").code, 0);
-  assert.match(box.invocations("prompts.txt")[0] ?? "", /the home craft/);
+  assert.match(box.invocations("prompts.txt")[0] ?? "", /the claude craft/);
+
+  fs.writeFileSync(path.join(box.home, "skills", ".order"), "agents\nclaude\n");
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.match(box.invocations("prompts.txt")[1] ?? "", /the agents craft/);
+
+  box.writeSkill(path.join(box.home, "skills"), "wa-review", "the home craft\n");
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.match(box.invocations("prompts.txt")[2] ?? "", /the home craft/);
 
   box.writeSkill(path.join(box.project, ".wa", "skills"), "wa-review", "the project craft\n");
   assert.equal(box.wa("run", "./w.ts").code, 0);
-
-  assert.match(box.invocations("prompts.txt")[1] ?? "", /the project craft/);
+  assert.match(box.invocations("prompts.txt")[3] ?? "", /the project craft/);
 });
 
-test("invariant 10: a session keeps its identity across park and resume", (t) => {
+test("invariant 10: a skill path resolves against the workflow file", (t) => {
   const box = sandbox(t);
-  box.setAgent("none");
-  box.write("skill.md", "do the thing\n");
+  box.setAgent("none", "prompts.txt");
+  box.write("flows/skills/wa-review.md", "the craft next to the workflow\n");
+  box.writeSkill(path.join(box.home, "skills"), "wa-review", "the home craft\n");
+  box.write(
+    "flows/w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skills/wa-review.md");
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./flows/w.ts").code, 0);
+
+  assert.match(box.invocations("prompts.txt")[0] ?? "", /the craft next to the workflow/);
+});
+
+test("invariant 10: an adapter resolves from the project before the home", (t) => {
+  const box = sandbox(t);
+  box.withShell();
+  box.writeAdapter(
+    "shell",
+    `import { adapter } from "wa";
+
+export default adapter({
+  role: "shell",
+  name: "shell",
+  description: "project shell",
+  build: () => ({
+    run: () => ({ code: 0, stdout: "the project shell", stderr: "" }),
+  }),
+});
+`,
+    "project",
+  );
   box.write(
     "w.ts",
     `import { workflow } from "wa";
@@ -286,65 +513,58 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ agent, gate }) {
-    const one = agent();
-    await one.run("./skill.md");
-    await gate("mid?");
-    await one.run("./skill.md", { input: "again" });
-    const two = agent();
-    await two.run("./skill.md");
+  async run({ shell }) {
+    const done = await shell.run("anything");
+    return done.stdout;
   },
 });
 `,
   );
 
   assert.equal(box.wa("run", "./w.ts").code, 0);
-  assert.equal(box.wa("resume", "w-1", "go").code, 0);
 
-  const turns = box.sessions();
-  assert.equal(turns.length, 3);
-  assert.deepEqual(
-    turns.map((turn) => turn.first),
-    [true, false, true],
-  );
-  assert.equal(turns[0]?.session, turns[1]?.session, "the handle kept one conversation");
-  assert.notEqual(turns[1]?.session, turns[2]?.session, "a new handle opened a new conversation");
+  assert.equal(box.ended("w-1")?.["result"], "the project shell");
 });
 
-test("invariant 11: view calls never enter the journal and replay never re-emits them", (t) => {
-  const box = sandbox(t);
-  box.write(
-    "w.ts",
-    `import { workflow } from "wa";
-import { z } from "zod";
+type Screen = { input: PassThrough; stop(): string };
 
-export default workflow({
-  description: "test",
-  params: z.object({}),
-  async run({ view, gate }) {
-    view.event({ message: "hello once" });
-    await gate("go?");
-    view.event({ message: "after" });
-  },
-});
-`,
-  );
+function terminal(t: { after(fn: () => void): void }, home: string): Screen {
+  const input = new PassThrough() as PassThrough & { isTTY: boolean; setRawMode(on: boolean): void };
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  const stdin = Object.getOwnPropertyDescriptor(process, "stdin");
+  const isTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const write = process.stdout.write.bind(process.stdout);
+  const waHome = process.env["WA_HOME"];
+  const chunks: string[] = [];
+  let stopped = false;
+  const restore = (): string => {
+    if (stopped) return chunks.join("");
+    stopped = true;
+    process.stdout.write = write;
+    if (stdin !== undefined) Object.defineProperty(process, "stdin", stdin);
+    if (isTTY === undefined) delete (process.stdout as { isTTY?: boolean }).isTTY;
+    else Object.defineProperty(process.stdout, "isTTY", isTTY);
+    if (waHome === undefined) delete process.env["WA_HOME"];
+    else process.env["WA_HOME"] = waHome;
+    return chunks.join("");
+  };
+  Object.defineProperty(process, "stdin", { value: input, configurable: true });
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    chunks.push(chunk.toString());
+    return true;
+  }) as typeof process.stdout.write;
+  process.env["WA_HOME"] = home;
+  t.after(restore);
+  return { input, stop: restore };
+}
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
-  assert.equal(box.wa("resume", "w-1", "yes").code, 0);
-
-  const kinds = box
-    .journal("w-1")
-    .map((entry) => (entry.type === "call" ? entry.kind : entry.type));
-  assert.deepEqual([...new Set(kinds)].sort(), ["done", "gate", "start"]);
-
-  const messages = box
-    .events("w-1")
-    .filter((event) => event["type"] === "event")
-    .map((event) => event["message"]);
-  assert.deepEqual(messages, ["hello once", "after"]);
-});
-
-function countCalls(box: ReturnType<typeof sandbox>, run: string): number {
-  return box.journal(run).filter((entry) => entry.type === "call").length;
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -4,11 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { Entry } from "../src/journal.ts";
 
 export const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
 export type Result = { code: number; stdout: string; stderr: string; output: string };
+
+export type Event = Record<string, unknown>;
 
 export type SessionLine = {
   session: string;
@@ -47,6 +48,9 @@ export default adapter({
       };
       fs.appendFileSync(log, JSON.stringify(line) + "\\n");
       host.emit({ type: "agent", session: turn.session, kind: "output", text: "agent ran\\n" });
+      if (turn.prompt.includes("<slow>")) {
+        await host.shell("echo $$ > slow.pid; sleep 5 >/dev/null 2>&1; echo late > late.txt");
+      }
       if (result === "none") return { ok: true, value: null };
       if (result === "invalid") return { ok: true, value: { wrong: true } };
       return { ok: true, value: JSON.parse(result) };
@@ -86,8 +90,13 @@ export type Sandbox = {
   setDefaults(text: string): void;
   sessions(): SessionLine[];
   runDir(run: string): string;
-  journal(run: string): Entry[];
-  events(run: string): Record<string, unknown>[];
+  events(run: string): Event[];
+  send(run: string, text: string, session?: string): void;
+  holder(run: string): number | undefined;
+  lastState(run: string): Event | undefined;
+  ended(run: string): Event | undefined;
+  waitForState(run: string, state: string, timeoutMs?: number): Promise<void>;
+  waitForEnd(run: string, timeoutMs?: number): Promise<Event>;
 };
 
 export function sandbox(t: TestContext): Sandbox {
@@ -99,7 +108,10 @@ export function sandbox(t: TestContext): Sandbox {
   fs.mkdirSync(userHome);
   fs.mkdirSync(project);
   const sessionLog = path.join(root, "agent-log.jsonl");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => {
+    stopRuns(path.join(home, "runs"));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 
   const env = { ...process.env, WA_HOME: home, HOME: userHome };
   const box: Sandbox = {
@@ -180,13 +192,6 @@ export function sandbox(t: TestContext): Sandbox {
     runDir(run) {
       return path.join(home, "runs", run);
     },
-    journal(run) {
-      return fs
-        .readFileSync(path.join(box.runDir(run), "journal.jsonl"), "utf8")
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as Entry);
-    },
     events(run) {
       const file = path.join(box.runDir(run), "events.jsonl");
       if (!fs.existsSync(file)) return [];
@@ -194,10 +199,61 @@ export function sandbox(t: TestContext): Sandbox {
         .readFileSync(file, "utf8")
         .split("\n")
         .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as Record<string, unknown>);
+        .map((line) => JSON.parse(line) as Event);
+    },
+    send(run, text, session) {
+      const line = { at: new Date().toISOString(), text, session };
+      fs.appendFileSync(path.join(box.runDir(run), "inbox.jsonl"), `${JSON.stringify(line)}\n`);
+    },
+    holder(run) {
+      return pidOf(path.join(box.runDir(run), "lock"));
+    },
+    lastState(run) {
+      return box
+        .events(run)
+        .filter((event) => event["type"] === "state")
+        .at(-1);
+    },
+    ended(run) {
+      return box
+        .events(run)
+        .find((event) => event["type"] === "run" && event["phase"] !== "started");
+    },
+    waitForState(run, state, timeoutMs) {
+      return waitFor(() => box.lastState(run)?.["state"] === state, timeoutMs);
+    },
+    async waitForEnd(run, timeoutMs) {
+      await waitFor(() => box.ended(run) !== undefined, timeoutMs);
+      return box.ended(run) as Event;
     },
   };
   return box;
+}
+
+function pidOf(lock: string): number | undefined {
+  if (!fs.existsSync(lock)) return undefined;
+  const pid = Number(fs.readFileSync(lock, "utf8").trim());
+  if (!Number.isInteger(pid) || pid <= 0) return undefined;
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM" ? pid : undefined;
+  }
+}
+
+function stopRuns(runs: string): void {
+  if (!fs.existsSync(runs)) return;
+  for (const entry of fs.readdirSync(runs, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const pid = pidOf(path.join(runs, entry.name, "lock"));
+    if (pid === undefined) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      continue;
+    }
+  }
 }
 
 export function waitFor(check: () => boolean, timeoutMs = 10_000): Promise<void> {

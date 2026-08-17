@@ -2,17 +2,28 @@ import readline from "node:readline";
 
 export type Choice = { label: string; note?: string };
 
+type Style = { many?: boolean; cancel?: boolean; plain?: boolean; keys?: string };
+
 export function interactive(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
 export async function pick(question: string, choices: Choice[]): Promise<number> {
-  const picked = await drive(question, choices, false);
+  const picked = await drive(question, choices, {});
   return picked[0] ?? 0;
 }
 
 export function pickMany(question: string, choices: Choice[]): Promise<number[]> {
-  return drive(question, choices, true);
+  return drive(question, choices, { many: true });
+}
+
+export async function choose(
+  question: string,
+  choices: Choice[],
+  keys: string,
+): Promise<number | undefined> {
+  const picked = await drive(question, choices, { cancel: true, plain: true, keys });
+  return picked[0];
 }
 
 function rowsOf(line: string): number {
@@ -21,8 +32,9 @@ function rowsOf(line: string): number {
   return Math.max(1, Math.ceil(line.length / width));
 }
 
-function drive(question: string, choices: Choice[], many: boolean): Promise<number[]> {
+function drive(question: string, choices: Choice[], style: Style): Promise<number[]> {
   if (choices.length === 0) return Promise.resolve([]);
+  const many = style.many === true;
   const input = process.stdin;
   const out = process.stdout;
   out.write("\n");
@@ -33,14 +45,16 @@ function drive(question: string, choices: Choice[], many: boolean): Promise<numb
   const marked = (index: number): boolean => (many ? chosen.has(index) : index === cursor);
 
   const draw = (): void => {
-    const keys = many ? "arrows move, space toggles, enter confirms" : "arrows move, enter confirms";
+    const keys =
+      style.keys ?? (many ? "arrows move, space toggles, enter confirms" : "arrows move, enter confirms");
     const lines = [
       question,
       ...choices.map((choice, index) => {
         const here = index === cursor ? ">" : " ";
-        const mark = many ? (marked(index) ? "[x]" : "[ ]") : marked(index) ? "(o)" : "( )";
+        const box = many ? (marked(index) ? "[x]" : "[ ]") : marked(index) ? "(o)" : "( )";
+        const mark = style.plain === true ? "" : `${box} `;
         const note = choice.note === undefined ? "" : `  ${choice.note}`;
-        return `${here} ${mark} ${choice.label}${note}`;
+        return `${here} ${mark}${choice.label}${note}`;
       }),
       `  ${keys}`,
     ];
@@ -54,6 +68,14 @@ function drive(question: string, choices: Choice[], many: boolean): Promise<numb
     input.setRawMode(true);
     input.resume();
 
+    const leave = (picked: number[]): void => {
+      out.write(`\x1b[${tall + 1}A\x1b[J`);
+      input.off("keypress", onKey);
+      input.setRawMode(false);
+      input.pause();
+      resolve(picked);
+    };
+
     const onKey = (text: string, key: { name?: string; ctrl?: boolean }): void => {
       if (key.ctrl === true && key.name === "c") {
         out.write("\n");
@@ -61,19 +83,18 @@ function drive(question: string, choices: Choice[], many: boolean): Promise<numb
       }
       const named = (...names: string[]): boolean =>
         key.name !== undefined && names.includes(key.name);
-      if (named("up", "k")) {
+      if (named("up", "k", "h")) {
         cursor = (cursor + choices.length - 1) % choices.length;
-      } else if (named("down", "j")) {
+      } else if (named("down", "j", "l")) {
         cursor = (cursor + 1) % choices.length;
       } else if ((named("space") || text === " ") && many) {
         if (chosen.has(cursor)) chosen.delete(cursor);
         else chosen.add(cursor);
+      } else if (style.cancel === true && named("q", "escape")) {
+        leave([]);
+        return;
       } else if (named("return", "enter") || text === "\r" || text === "\n") {
-        out.write(`\x1b[${tall + 1}A\x1b[J`);
-        input.off("keypress", onKey);
-        input.setRawMode(false);
-        input.pause();
-        resolve(many ? [...chosen].sort((left, right) => left - right) : [cursor]);
+        leave(many ? [...chosen].sort((left, right) => left - right) : [cursor]);
         return;
       }
       draw();

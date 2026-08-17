@@ -4,7 +4,6 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { installed, renderEnv } from "../src/adapters.ts";
-import type { GateEntry } from "../src/journal.ts";
 import { type Sandbox, sandbox } from "./helpers.ts";
 
 const examples = fileURLToPath(new URL("../examples", import.meta.url));
@@ -16,15 +15,21 @@ function catalogReady(box: Sandbox, result: string): void {
   box.setDefaults("agent fake");
 }
 
-test("the catalog ticket workflow runs on a fresh install", (t) => {
+async function gateOf(box: Sandbox, run: string): Promise<string> {
+  await box.waitForState(run, "blocked");
+  return String(box.lastState(run)?.["detail"]);
+}
+
+test("the catalog ticket workflow runs on a fresh install", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"actionable":false,"reason":"no repro"}');
 
-  const parked = box.wa("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1");
+  const started = box.wa("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
 
-  assert.equal(parked.code, 0, parked.output);
-  const gate = box.journal("ticket-1").find((entry): entry is GateEntry => entry.type === "gate");
-  assert.equal(gate?.question, "Not actionable: no repro");
+  assert.equal(started.code, 0, started.output);
+  assert.equal(await gateOf(box, "ticket-1"), "Not actionable: no repro");
+  box.send("ticket-1", "ok");
+  assert.equal((await box.waitForEnd("ticket-1"))["phase"], "done");
 });
 
 function skillsNamedBy(file: string): string[] {
@@ -58,37 +63,41 @@ test("every skill the catalog workflows name ships with them", () => {
   }
 });
 
-test("the catalog task workflow reaches its commit gate", (t) => {
+test("the catalog task workflow reaches its commit gate", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"verdict":"approved","findings":"none"}');
 
-  const parked = box.wa("run", path.join(examples, "task.ts"), "--task", "rename the flag");
+  const started = box.wa("run", path.join(examples, "task.ts"), "--task", "rename the flag", "--background");
 
-  assert.equal(parked.code, 0, parked.output);
-  const gate = box.journal("task-1").find((entry): entry is GateEntry => entry.type === "gate");
-  assert.equal(gate?.question, "Commit? (commit / leave)");
+  assert.equal(started.code, 0, started.output);
+  assert.equal(await gateOf(box, "task-1"), "Commit? (commit / leave)");
+  box.send("task-1", "leave");
+  assert.equal((await box.waitForEnd("task-1"))["phase"], "done");
 });
 
-test("the catalog fix workflow parks when the bug does not reproduce", (t) => {
+test("the catalog fix workflow gates when the bug does not reproduce", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"reproduced":false,"notes":"the page loads"}');
 
-  const parked = box.wa("run", path.join(examples, "fix.ts"), "--bug", "BUG-2");
+  const started = box.wa("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
 
-  assert.equal(parked.code, 0, parked.output);
-  const gate = box.journal("fix-1").find((entry): entry is GateEntry => entry.type === "gate");
-  assert.equal(gate?.question, "Not reproduced: the page loads");
+  assert.equal(started.code, 0, started.output);
+  assert.equal(await gateOf(box, "fix-1"), "Not reproduced: the page loads");
+  box.send("fix-1", "ok");
+  assert.equal((await box.waitForEnd("fix-1"))["phase"], "done");
 });
 
-test("the catalog review workflow parks when the diff command fails", (t) => {
+test("the catalog review workflow gates when the diff command fails", async (t) => {
   const box = sandbox(t);
   catalogReady(box, "none");
 
-  const parked = box.wa("run", path.join(examples, "review.ts"), "--pr", "42");
+  const started = box.wa("run", path.join(examples, "review.ts"), "--pr", "42", "--background");
 
-  assert.equal(parked.code, 0, parked.output);
-  const gate = box.journal("review-1").find((entry): entry is GateEntry => entry.type === "gate");
-  assert.ok(gate?.question.startsWith("gh pr diff 42 failed:"), gate?.question);
+  assert.equal(started.code, 0, started.output);
+  const question = await gateOf(box, "review-1");
+  assert.ok(question.startsWith("gh pr diff 42 failed:"), question);
+  box.send("review-1", "ok");
+  assert.equal((await box.waitForEnd("review-1"))["phase"], "done");
 });
 
 test("every catalog skill follows the SKILL.md format", () => {

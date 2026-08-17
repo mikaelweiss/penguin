@@ -129,18 +129,18 @@ test("a skill path still resolves against the workflow file", (t) => {
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the local craft/);
 });
 
-test("a skill nobody holds parks the run with the places wa looked", (t) => {
+test("a skill nobody holds ends the run with the places wa looked", (t) => {
   const box = sandbox(t);
   box.writeSkill(path.join(box.userHome, ".claude", "skills"), "review", "review it\n");
   box.wa("sync-skills", "--global");
   box.write("w.ts", agentWorkflow);
   box.setAgent("none");
 
-  const parked = box.wa("run", "./w.ts", "--skill", "wa-triage");
+  const failed = box.wa("run", "./w.ts", "--skill", "wa-triage");
 
-  assert.equal(parked.code, 1);
-  assert.match(parked.stdout, /no skill wa-triage/);
-  assert.match(parked.stdout, new RegExp(path.join(box.home, "skills", "claude")));
+  assert.equal(failed.code, 1);
+  assert.match(failed.stdout, /run w-1 failed: no skill wa-triage/);
+  assert.match(failed.stdout, new RegExp(path.join(box.home, "skills", "claude")));
 });
 
 test("sync-skills says when there is no skill directory to link", (t) => {

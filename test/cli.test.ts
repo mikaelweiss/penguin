@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { sandbox } from "./helpers.ts";
+import { exited, sandbox } from "./helpers.ts";
 
 const paramsWorkflow = `import { workflow } from "wa";
 import { z } from "zod";
@@ -16,6 +16,18 @@ export default workflow({
 });
 `;
 
+const quickWorkflow = `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ view }) {
+    view.event({ message: "nothing to do" });
+  },
+});
+`;
+
 const gateWorkflow = `import { workflow } from "wa";
 import { z } from "zod";
 
@@ -23,7 +35,7 @@ export default workflow({
   description: "test",
   params: z.object({}),
   async run({ gate }) {
-    await gate("keep going?");
+    return await gate("keep going?");
   },
 });
 `;
@@ -75,91 +87,121 @@ test("a param that needs a number rejects text", (t) => {
 
 test("run names count up per workflow file", (t) => {
   const box = sandbox(t);
-  box.write("w.ts", gateWorkflow);
-  box.write("other.ts", gateWorkflow);
+  box.write("w.ts", quickWorkflow);
+  box.write("other.ts", quickWorkflow);
 
-  assert.match(box.wa("run", "./w.ts").stdout, /^run w-1 started,/m);
-  assert.match(box.wa("run", "./w.ts").stdout, /^run w-2 started,/m);
-  assert.match(box.wa("run", "./other.ts").stdout, /^run other-1 started,/m);
-  assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")).sort(), [
-    "other-1",
-    "w-1",
-    "w-2",
-  ]);
+  assert.match(box.wa("run", "./w.ts", "--background").stdout, /^run w-1 started,/m);
+  assert.match(box.wa("run", "./w.ts", "--background").stdout, /^run w-2 started,/m);
+  assert.match(box.wa("run", "./other.ts", "--background").stdout, /^run other-1 started,/m);
+
+  assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")).sort(), ["other-1", "w-1", "w-2"]);
 });
 
-test("run starts by naming the run and the agent adapter", (t) => {
+test("a run starts by naming the run and the agent adapter", (t) => {
   const box = sandbox(t);
-  box.write("w.ts", gateWorkflow);
+  box.write("w.ts", quickWorkflow);
 
   const bare = box.wa("run", "./w.ts");
   assert.equal(bare.code, 0, bare.output);
   assert.match(bare.stdout, /^run w-1 started, no agent adapter is installed$/m);
 
   box.setAgent("none");
-  const configured = box.wa("run", "./w.ts");
-  assert.match(configured.stdout, /^run w-2 started, agent fake$/m);
+  const watched = box.wa("run", "./w.ts");
+  assert.match(watched.stdout, /^run w-2 started, agent fake$/m);
+
+  const background = box.wa("run", "./w.ts", "--background");
+  assert.equal(background.code, 0, background.output);
+  assert.equal(background.stdout, "run w-3 started, agent fake\n");
 });
 
-test("ps shows the state and the pending gate question", (t) => {
+test("ps lists the live runs as a table, and never a done one", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
-  box.wa("run", "./w.ts");
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
 
-  const parked = box.wa("ps");
-  assert.equal(parked.code, 0);
-  assert.match(parked.stdout, /w-1\s+\S+w\.ts\s+parked\s+gate: keep going\?/);
+  const live = box.wa("ps");
 
-  fs.writeFileSync(path.join(box.home, "runs", "w-1", "lock"), String(process.pid));
-  const running = box.wa("ps");
-  assert.match(running.stdout, new RegExp(`w-1\\s+\\S+w\\.ts\\s+running \\(${process.pid}\\)`));
-  fs.rmSync(path.join(box.home, "runs", "w-1", "lock"));
+  assert.equal(live.code, 0, live.output);
+  const rows = live.stdout.split("\n").filter((line) => line.trim() !== "");
+  assert.equal(rows.length, 2, live.stdout);
+  assert.match(rows[0] ?? "", /^RUN\s+WORKFLOW\s+STATE\s+DETAIL\s+AGE\s+DIRECTORY$/);
+  assert.match(rows[1] ?? "", /^w-1\s+\S+w\.ts\s+blocked\s+keep going\?\s+\d+s\s+\S+runs\/w-1$/);
 
-  box.wa("resume", "w-1", "yes");
+  box.send("w-1", "yes");
+  await box.waitForEnd("w-1");
+
   const finished = box.wa("ps");
-  assert.match(finished.stdout, /w-1\s+\S+w\.ts\s+done\s+-/);
-  assert.match(finished.stdout, new RegExp(path.join(box.home, "runs", "w-1")));
+  assert.equal(finished.stdout.split("\n").filter((line) => line.trim() !== "").length, 1);
+  assert.doesNotMatch(finished.stdout, /w-1/);
 });
 
-test("resume reports the runs it cannot continue", (t) => {
+test("ps with no live run prints the header alone", (t) => {
+  const box = sandbox(t);
+
+  const empty = box.wa("ps");
+
+  assert.equal(empty.code, 0);
+  assert.equal(empty.stdout, "RUN  WORKFLOW  STATE  DETAIL  AGE  DIRECTORY\n");
+});
+
+test("attach follows a live run and leaves when the run ends", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
 
-  const missing = box.wa("resume", "nothing-1");
+  const viewer = box.start("attach", "w-1");
+  let shown = "";
+  viewer.stdout?.on("data", (chunk: Buffer) => {
+    shown += chunk.toString();
+  });
+  box.send("w-1", "yes");
+  const code = await exited(viewer);
+
+  assert.equal(code, 0);
+  assert.match(shown, /gate: keep going\?/);
+  assert.match(shown, /^> yes$/m);
+  assert.match(shown, /^yes$/m);
+  assert.equal((await box.waitForEnd("w-1"))["phase"], "done");
+});
+
+test("attach names the runs it cannot open", (t) => {
+  const box = sandbox(t);
+
+  const bare = box.wa("attach");
+  assert.equal(bare.code, 1);
+  assert.match(bare.stderr, /wa attach needs a run name/);
+
+  const missing = box.wa("attach", "nothing-1");
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /no run named nothing-1/);
-
-  box.wa("run", "./w.ts");
-  box.wa("resume", "w-1", "yes");
-  const done = box.wa("resume", "w-1", "again");
-  assert.equal(done.code, 1);
-  assert.match(done.stderr, /the run is done/);
 });
 
-test("a reply with no pending gate is refused", (t) => {
+test("wa help prints the usage", (t) => {
   const box = sandbox(t);
-  box.withShell();
-  box.write(
-    "w.ts",
-    `import { workflow } from "wa";
-import { z } from "zod";
 
-export default workflow({
-  description: "test",
-  params: z.object({}),
-  async run({ shell }) {
-    await shell.run("sh -c 'exit 3'");
-    throw new Error("stop here");
-  },
+  const help = box.wa("help");
+
+  assert.equal(help.code, 0);
+  assert.match(help.stdout, /wa list workflows\|skills\|adapters \[--verbose\]/);
+  assert.match(help.stdout, /wa run <workflow> \[--param value \.\.\.\]/);
+  assert.match(help.stdout, /wa run <workflow> --background/);
+  assert.match(help.stdout, /wa ps/);
+  assert.match(help.stdout, /wa attach <run>/);
+  assert.match(help.stdout, /wa sync-skills/);
+  assert.match(help.stdout, /q detaches, Ctrl-C stops the run/);
+  assert.doesNotMatch(help.stdout, /resume/);
 });
-`,
-  );
-  box.wa("run", "./w.ts");
 
-  const refused = box.wa("resume", "w-1", "an answer");
+test("an unknown command names it and prints the usage", (t) => {
+  const box = sandbox(t);
 
-  assert.equal(refused.code, 1);
-  assert.match(refused.stderr, /no pending gate/);
+  const failed = box.wa("continue", "w-1");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /unknown command continue/);
+  assert.match(failed.stderr, /usage:/);
 });
 
 test("a workflow with no description fails to load", (t) => {
@@ -191,19 +233,6 @@ test("a file that exports no workflow is refused", (t) => {
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /does not default-export a workflow/);
   assert.equal(fs.existsSync(path.join(box.home, "runs")), false);
-});
-
-test("wa help prints the usage", (t) => {
-  const box = sandbox(t);
-
-  const help = box.wa("help");
-
-  assert.equal(help.code, 0);
-  assert.match(help.stdout, /wa list workflows\|skills\|adapters \[--verbose\]/);
-  assert.match(help.stdout, /wa run <workflow>/);
-  assert.match(help.stdout, /wa ps/);
-  assert.match(help.stdout, /wa resume <run>/);
-  assert.match(help.stdout, /wa sync-skills/);
 });
 
 test("list adapters shows role, name, and description", (t) => {

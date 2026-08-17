@@ -18,7 +18,7 @@ export default workflow({
     }
 
     const reviewer = agent();
-    const review = await reviewer.run("wa-review-diff", { input: diff.diff, result: Findings });
+    const review = (await reviewer.run("wa-review-diff", { input: diff.diff, result: Findings }))!;
     view.artifact({ title: "Review findings", path: review.report });
     const answer = await gate(
       `${review.verdict}, findings in ${review.report}. Post the findings to the PR? (post / skip)`,

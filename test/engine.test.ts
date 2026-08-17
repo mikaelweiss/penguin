@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import type { CallEntry, GateEntry } from "../src/journal.ts";
-import { sandbox } from "./helpers.ts";
+import { sandbox, waitFor } from "./helpers.ts";
 
 test("an agent turn returns the validated result and hands the adapter the schema", (t) => {
   const box = sandbox(t);
@@ -20,10 +19,10 @@ export default workflow({
   params: z.object({ ticket: z.string() }),
   async run({ params, agent, shell }) {
     const reviewer = agent();
-    const review = await reviewer.run("./skill.md", {
+    const review = (await reviewer.run("./skill.md", {
       input: params.ticket,
       result: z.object({ verdict: z.enum(["approved", "changes_needed"]), score: z.number() }),
-    });
+    }))!;
     await shell.run(\`sh -c 'echo \${review.verdict}:\${review.score} >> out.txt'\`);
   },
 });
@@ -43,7 +42,7 @@ export default workflow({
   assert.ok(schema.properties?.["verdict"] !== undefined, "the adapter got the JSON schema");
 });
 
-test("an agent turn with no result schema records null", (t) => {
+test("an agent turn with no result schema resolves null", (t) => {
   const box = sandbox(t);
   box.setAgent("none", "prompts.txt");
   box.write("skill.md", "implement the plan\n");
@@ -56,7 +55,7 @@ export default workflow({
   description: "test",
   params: z.object({}),
   async run({ agent }) {
-    await agent().run("./skill.md");
+    return await agent().run("./skill.md");
   },
 });
 `,
@@ -67,13 +66,13 @@ export default workflow({
   assert.equal(done.code, 0, done.output);
   assert.equal(box.invocations("prompts.txt").length, 1);
   assert.equal(box.sessions()[0]?.schema, null);
-  const entries = box.journal("w-1");
-  assert.equal(entries[entries.length - 1]?.type, "done");
+  const ended = box.ended("w-1");
+  assert.equal(ended?.["phase"], "done");
+  assert.equal(ended?.["result"], null);
 });
 
-test("an invalid result is retried once with the error, then gates to a human", (t) => {
+test("an invalid result is retried once with the correction, then gates", async (t) => {
   const box = sandbox(t);
-  box.withShell();
   box.setAgent("invalid", "prompts.txt");
   box.write("skill.md", "triage the ticket\n");
   box.write(
@@ -84,17 +83,16 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ agent, shell }) {
-    const triage = await agent().run("./skill.md", { result: z.object({ actionable: z.boolean() }) });
-    await shell.run(\`sh -c 'echo \${triage.actionable} >> out.txt'\`);
+  async run({ agent }) {
+    await agent().run("./skill.md", { result: z.object({ actionable: z.boolean() }) });
   },
 });
 `,
   );
 
-  const parked = box.wa("run", "./w.ts");
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
 
-  assert.equal(parked.code, 0);
   const prompts = box.invocations("prompts.txt");
   assert.equal(prompts.length, 2);
   assert.doesNotMatch(prompts[0] ?? "", /# Correction/);
@@ -105,17 +103,16 @@ export default workflow({
     [true, false],
     "the correction went to the same conversation",
   );
-  const gate = box.journal("w-1").find((entry): entry is GateEntry => entry.type === "gate");
-  assert.equal(gate?.id, "1/gate/0");
-  assert.match(gate?.question ?? "", /failed twice/);
-  assert.equal(box.exists("out.txt"), false);
+  assert.match(String(box.lastState("w-1")?.["detail"]), /failed twice/);
 
-  box.setAgent('{"actionable":true}', "prompts.txt");
-  const resumed = box.wa("resume", "w-1", "go");
+  box.send("w-1", "go");
+  await waitFor(() => box.invocations("prompts.txt").length === 4);
+  await box.waitForState("w-1", "blocked");
+  const asked = box.events("w-1").filter((event) => event["phase"] === "asked");
+  assert.equal(asked.length, 2, "the reply ran the step again, and it gated again");
 
-  assert.equal(resumed.code, 0);
-  assert.equal(box.invocations("prompts.txt").length, 3);
-  assert.deepEqual(box.lines("out.txt"), ["true"]);
+  process.kill(box.holder("w-1") as number, "SIGTERM");
+  assert.equal((await box.waitForEnd("w-1"))["phase"], "stopped");
 });
 
 test("a session use option picks the named agent adapter over the default", (t) => {
@@ -147,7 +144,7 @@ export default workflow({
   assert.equal(box.invocations("second.txt").length, 1);
 });
 
-test("two agent adapters with no default park the run with the fix", (t) => {
+test("two agent adapters with no default end the run with the fix", (t) => {
   const box = sandbox(t);
   box.setAgent("none", undefined, "fake");
   box.setAgent("none", undefined, "other");
@@ -167,11 +164,12 @@ export default workflow({
 `,
   );
 
-  const parked = box.wa("run", "./w.ts");
+  const failed = box.wa("run", "./w.ts");
 
-  assert.equal(parked.code, 1);
-  assert.match(parked.stdout, /2 agent adapters are installed/);
-  assert.match(parked.stdout, /"agent <name>"/);
+  assert.equal(failed.code, 1);
+  assert.match(failed.stdout, /2 agent adapters are installed/);
+  assert.match(failed.stdout, /"agent <name>"/);
+  assert.match(String(box.ended("w-1")?.["reason"]), /2 agent adapters are installed/);
 });
 
 test("a project adapter shadows the home adapter of the same role and name", (t) => {
@@ -201,7 +199,8 @@ export default workflow({
   description: "test",
   params: z.object({}),
   async run({ shell }) {
-    await shell.run("anything");
+    const done = await shell.run("anything");
+    return done.stdout;
   },
 });
 `,
@@ -209,10 +208,54 @@ export default workflow({
 
   assert.equal(box.wa("run", "./w.ts").code, 0);
 
-  const call = box
-    .journal("w-1")
-    .find((entry): entry is CallEntry => entry.type === "call" && entry.kind === "adapter");
-  assert.deepEqual(call?.result, { code: 0, stdout: "local", stderr: "" });
+  assert.equal(box.ended("w-1")?.["result"], "local");
+});
+
+test("an adapter method is one step, nested methods included", (t) => {
+  const box = sandbox(t);
+  box.writeAdapter(
+    "git",
+    `import { adapter } from "wa";
+
+export default adapter({
+  role: "vcs",
+  name: "git",
+  description: "test vcs",
+  build: () => ({
+    worktree: {
+      add: (name) => ({ path: "/work/" + name }),
+    },
+  }),
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ vcs }) {
+    const ws = await vcs.worktree.add("branch");
+    return ws.path;
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+
+  const steps = box.events("w-1").filter((event) => event["type"] === "step");
+  assert.deepEqual(
+    steps.map((event) => [event["phase"], event["label"]]),
+    [
+      ["start", "vcs.worktree.add"],
+      ["end", "vcs.worktree.add"],
+    ],
+  );
+  assert.equal(box.ended("w-1")?.["result"], "/work/branch");
 });
 
 test("a session cwd resolves from the invoking folder", (t) => {
@@ -264,7 +307,7 @@ export default workflow({
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the craft/);
 });
 
-test("Promise.all journals completion order and replays by invocation order", (t) => {
+test("Promise.all runs the steps together", (t) => {
   const box = sandbox(t);
   box.withShell();
   box.write(
@@ -275,65 +318,34 @@ import { z } from "zod";
 export default workflow({
   description: "test",
   params: z.object({}),
-  async run({ shell, gate }) {
+  async run({ shell }) {
     const [slow, fast] = await Promise.all([
       shell.run("sh -c 'sleep 0.4; echo slow'"),
       shell.run("sh -c 'echo fast'"),
     ]);
-    await gate("continue?");
-    await shell.run(\`sh -c 'echo \${slow.stdout.trim()}-\${fast.stdout.trim()} >> out.txt'\`);
+    return \`\${slow.stdout.trim()}-\${fast.stdout.trim()}\`;
   },
 });
 `,
   );
 
   assert.equal(box.wa("run", "./w.ts").code, 0);
-  const calls = box.journal("w-1").filter((entry): entry is CallEntry => entry.type === "call");
+
+  const steps = box.events("w-1").filter((event) => event["type"] === "step");
   assert.deepEqual(
-    calls.map((entry) => entry.id),
-    ["1", "0"],
+    steps.map((event) => [event["phase"], event["id"]]),
+    [
+      ["start", "0"],
+      ["start", "1"],
+      ["end", "1"],
+      ["end", "0"],
+    ],
+    "the fast step ended while the slow one was still running",
   );
-
-  assert.equal(box.wa("resume", "w-1", "go").code, 0);
-  assert.deepEqual(box.lines("out.txt"), ["slow-fast"]);
+  assert.equal(box.ended("w-1")?.["result"], "slow-fast");
 });
 
-test("a park stops the steps still in flight and journals nothing after it", (t) => {
-  const box = sandbox(t);
-  box.withShell();
-  box.write(
-    "w.ts",
-    `import { workflow } from "wa";
-import { z } from "zod";
-
-export default workflow({
-  description: "test",
-  params: z.object({}),
-  async run({ shell, gate }) {
-    await Promise.all([
-      shell.run("sh -c 'sleep 3; echo late >> out.txt'"),
-      gate("answer now?"),
-    ]);
-  },
-});
-`,
-  );
-
-  const started = Date.now();
-  const parked = box.wa("run", "./w.ts");
-
-  assert.equal(parked.code, 0);
-  assert.ok(Date.now() - started < 3000, "the parked run did not wait for the killed step");
-  assert.equal(box.exists("out.txt"), false);
-  const entries = box.journal("w-1");
-  assert.equal(entries[entries.length - 1]?.type, "gate");
-
-  const resumed = box.wa("resume", "w-1", "go");
-  assert.equal(resumed.code, 0);
-  assert.deepEqual(box.lines("out.txt"), ["late"]);
-});
-
-test("an uncaught error parks the run with the reason", (t) => {
+test("an uncaught error ends the run with the reason", (t) => {
   const box = sandbox(t);
   box.withShell();
   box.write(
@@ -355,13 +367,14 @@ export default workflow({
   const failed = box.wa("run", "./w.ts");
 
   assert.equal(failed.code, 1);
-  assert.match(failed.stdout, /parked: the workflow gave up/);
-  const entries = box.journal("w-1");
-  assert.equal(entries[entries.length - 1]?.type, "park");
+  assert.match(failed.stdout, /run w-1 failed: the workflow gave up/);
+  const ended = box.ended("w-1");
+  assert.equal(ended?.["phase"], "error");
+  assert.equal(ended?.["reason"], "the workflow gave up");
   assert.deepEqual(box.lines("out.txt"), ["one"]);
 });
 
-test("a transcript holds the session conversation across attempts", (t) => {
+test("a transcript holds the session conversation across attempts", async (t) => {
   const box = sandbox(t);
   box.setAgent("invalid");
   box.write("skill.md", "triage\n");
@@ -380,7 +393,8 @@ export default workflow({
 `,
   );
 
-  box.wa("run", "./w.ts");
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
 
   const dir = path.join(box.runDir("w-1"), "transcripts");
   const files = fs.readdirSync(dir);
@@ -388,6 +402,9 @@ export default workflow({
   const text = fs.readFileSync(path.join(dir, files[0] ?? ""), "utf8");
   assert.match(text, /triage[\s\S]*agent ran/);
   assert.match(text, /# Correction/);
+
+  process.kill(box.holder("w-1") as number, "SIGTERM");
+  await box.waitForEnd("w-1");
 });
 
 test("the events file holds the run lifecycle and the activity spans", (t) => {
@@ -405,6 +422,7 @@ export default workflow({
     await view.activity("round 1", async () => {
       await shell.run("true");
       view.fact({ round: "1/1" });
+      view.artifact({ title: "the note", path: "note.md" });
     });
   },
 });
@@ -414,13 +432,17 @@ export default workflow({
   assert.equal(box.wa("run", "./w.ts").code, 0);
 
   const events = box.events("w-1");
-  const types = events.map((event) => `${event["type"]}${event["phase"] === undefined ? "" : `:${event["phase"]}`}`);
+  const types = events.map(
+    (event) => `${event["type"]}${event["phase"] === undefined ? "" : `:${event["phase"]}`}`,
+  );
   assert.deepEqual(types, [
     "run:started",
     "activity:start",
     "step:start",
+    "state",
     "step:end",
     "fact",
+    "artifact",
     "activity:end",
     "run:done",
   ]);
@@ -429,4 +451,223 @@ export default workflow({
   const step = events[2] as { label?: string; activity?: string };
   assert.equal(step.label, "shell.run");
   assert.equal(step.activity, span.id);
+});
+
+test("a session event names each session, by default and by option", (t) => {
+  const box = sandbox(t);
+  box.setAgent("none");
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skill.md");
+    await agent().run("./skill.md");
+    await agent({ name: "reviewer" }).run("./skill.md");
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+
+  const sessions = box.events("w-1").filter((event) => event["type"] === "session");
+  assert.deepEqual(
+    sessions.map((event) => event["name"]),
+    ["fake-1", "fake-2", "reviewer"],
+  );
+  assert.deepEqual(
+    [...new Set(sessions.map((event) => event["use"]))],
+    ["fake"],
+  );
+  assert.deepEqual(
+    sessions.map((event) => event["id"]),
+    box.sessions().map((turn) => turn.session),
+  );
+});
+
+test("a gate posts blocked with the question, then running when the answer lands", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate }) {
+    return await gate("keep going?");
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  assert.equal(box.lastState("w-1")?.["detail"], "keep going?");
+
+  box.send("w-1", "yes");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["phase"], "done");
+  assert.equal(ended["result"], "yes");
+  assert.deepEqual(
+    box.events("w-1")
+      .filter((event) => event["type"] === "state")
+      .map((event) => event["state"]),
+    ["blocked", "running"],
+  );
+});
+
+test("ctx.messages delivers the text and the session it was addressed to", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ messages }) {
+    const message = await messages.next();
+    return \`\${message.session}:\${message.text}\`;
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  box.send("w-1", "look at the diff", "worker");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["result"], "worker:look at the diff");
+  const message = box.events("w-1").find((event) => event["type"] === "message");
+  assert.equal(message?.["session"], "worker");
+});
+
+test("host.wait shows the run idle with the label", async (t) => {
+  const box = sandbox(t);
+  box.writeAdapter(
+    "clock",
+    `import fs from "node:fs";
+import { adapter } from "wa";
+
+export default adapter({
+  role: "clock",
+  name: "clock",
+  description: "test clock",
+  build: (host) => ({
+    until: (file) =>
+      host.wait("new commits", () =>
+        new Promise((resolve) => {
+          const tick = () => (fs.existsSync(file) ? resolve(file) : setTimeout(tick, 20));
+          tick();
+        }),
+      ),
+  }),
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({ file: z.string() }),
+  async run({ params, clock }) {
+    await clock.until(params.file);
+    return "arrived";
+  },
+});
+`,
+  );
+
+  const file = path.join(box.project, "commit.txt");
+  assert.equal(box.wa("run", "./w.ts", "--file", file, "--background").code, 0);
+  await box.waitForState("w-1", "idle");
+  assert.equal(box.lastState("w-1")?.["detail"], "new commits");
+
+  fs.writeFileSync(file, "");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["result"], "arrived");
+});
+
+test("a composed call is one activity and returns its value to the caller", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "double.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "double a number",
+  params: z.object({ n: z.number() }),
+  async run({ params, view }) {
+    view.event({ message: \`the child saw \${params.n}\` });
+    return params.n * 2;
+  },
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+import double from "./double.ts";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run(ctx) {
+    const doubled = await double(ctx, { n: 21 });
+    return { doubled };
+  },
+});
+`,
+  );
+
+  assert.equal(box.wa("run", "./w.ts").code, 0);
+
+  const events = box.events("w-1");
+  const activity = events.find((event) => event["type"] === "activity");
+  assert.equal(activity?.["label"], "double a number");
+  const inside = events.find((event) => event["type"] === "event");
+  assert.equal(inside?.["message"], "the child saw 21");
+  assert.equal(inside?.["activity"], activity?.["id"]);
+  assert.deepEqual(box.ended("w-1")?.["result"], { doubled: 42 });
+});
+
+test("the done event carries what the run function returned", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "wa";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run() {
+    return { verdict: "approved", rounds: 2 };
+  },
+});
+`,
+  );
+
+  const done = box.wa("run", "./w.ts");
+
+  assert.equal(done.code, 0, done.output);
+  assert.match(done.stdout, /\{"verdict":"approved","rounds":2\}/);
+  assert.deepEqual(box.ended("w-1")?.["result"], { verdict: "approved", rounds: 2 });
 });

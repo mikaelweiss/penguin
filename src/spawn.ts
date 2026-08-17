@@ -1,10 +1,36 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { type ChildProcess, spawn } from "node:child_process";
 import type { CommandResult, ExecOptions, ShellOptions } from "./types.ts";
 
-const active = new Set<ChildProcess>();
+export type Children = Set<ChildProcess>;
+
+const active: Children = new Set();
+const scope = new AsyncLocalStorage<Children>();
 
 export function killActive(): void {
   for (const child of active) child.kill("SIGTERM");
+}
+
+export function children(): Children {
+  return new Set();
+}
+
+export function inScope<T>(set: Children, body: () => Promise<T>): Promise<T> {
+  return scope.run(set, body);
+}
+
+export function kill(set: Children): void {
+  for (const child of set) child.kill("SIGTERM");
+}
+
+function track(child: ChildProcess): () => void {
+  const set = scope.getStore();
+  active.add(child);
+  set?.add(child);
+  return () => {
+    active.delete(child);
+    set?.delete(child);
+  };
 }
 
 export function runCommand(
@@ -18,7 +44,7 @@ export function runCommand(
       cwd,
       stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
-    active.add(child);
+    const done = track(child);
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -32,11 +58,11 @@ export function runCommand(
       child.stdin?.end(options.stdin);
     }
     child.on("error", (error) => {
-      active.delete(child);
+      done();
       reject(error);
     });
     child.on("close", (code) => {
-      active.delete(child);
+      done();
       resolve({ code: code ?? 1, stdout, stderr });
     });
   });
@@ -50,7 +76,7 @@ export function runArgv(argv: string[], cwd: string, options?: ExecOptions): Pro
       cwd,
       stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
-    active.add(child);
+    const done = track(child);
     const forward = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
       options?.onOutput?.(chunk.toString(), stream);
     };
@@ -61,11 +87,11 @@ export function runArgv(argv: string[], cwd: string, options?: ExecOptions): Pro
       child.stdin?.end(options.stdin);
     }
     child.on("error", (error) => {
-      active.delete(child);
+      done();
       reject(error);
     });
     child.on("close", (code) => {
-      active.delete(child);
+      done();
       resolve(code ?? 1);
     });
   });

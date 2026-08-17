@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import * as journal from "./journal.ts";
-import { pinnedWorkflow, runDir, runsRoot, transcriptsDir } from "./paths.ts";
+import { WaError } from "./errors.ts";
+import { inboxPath, runDir, runJsonPath, runsRoot, transcriptsDir } from "./paths.ts";
+
+export type RunRecord = {
+  workflow: string;
+  cwd: string;
+  params: unknown;
+  createdAt: string;
+};
 
 export function createRun(file: string, params: unknown): string {
   const stem = path.basename(file).replace(/\.[^.]+$/, "");
@@ -16,14 +23,20 @@ export function createRun(file: string, params: unknown): string {
       throw error;
     }
     fs.mkdirSync(transcriptsDir(dir));
-    fs.copyFileSync(file, pinnedWorkflow(dir));
-    journal.append(dir, {
-      type: "start",
+    const record: RunRecord = {
       workflow: file,
       cwd: process.cwd(),
       params,
       createdAt: new Date().toISOString(),
-    });
+    };
+    fs.writeFileSync(runJsonPath(dir), `${JSON.stringify(record, null, 2)}\n`);
+    fs.writeFileSync(inboxPath(dir), "");
     return name;
   }
+}
+
+export function readRun(dir: string): RunRecord {
+  const file = runJsonPath(dir);
+  if (!fs.existsSync(file)) throw new WaError(`no run at ${dir}`);
+  return JSON.parse(fs.readFileSync(file, "utf8")) as RunRecord;
 }

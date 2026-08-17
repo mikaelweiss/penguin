@@ -10,7 +10,7 @@ export default workflow({
 
   async run({ params, agent, github, view, gate }) {
     const investigator = agent();
-    const repro = await investigator.run("wa-reproduce", { input: params.bug, result: Reproduce });
+    const repro = (await investigator.run("wa-reproduce", { input: params.bug, result: Reproduce }))!;
     if (!repro.reproduced) {
       await gate(`Not reproduced: ${repro.notes}`);
       return;
@@ -23,7 +23,7 @@ export default workflow({
       view.fact({ round: `${round}/3` });
       await implementer.run("wa-implement", { input: `${params.bug}\n\n${repro.notes}` });
       const verifier = agent();
-      const checks = await verifier.run("wa-verify", { result: Verify });
+      const checks = (await verifier.run("wa-verify", { result: Verify }))!;
       passing = checks.passing;
     }
     if (!passing) await gate("Three fix rounds. The checks still fail. Take a look.");

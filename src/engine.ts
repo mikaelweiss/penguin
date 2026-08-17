@@ -4,132 +4,126 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import * as adapters from "./adapters.ts";
-import { ask } from "./ask.ts";
-import { messageOf, Parked, WaError } from "./errors.ts";
-import * as journal from "./journal.ts";
+import { readRun, type RunRecord } from "./create.ts";
+import { messageOf, WaError } from "./errors.ts";
+import { Tail } from "./follow.ts";
 import { acquire } from "./lock.ts";
 import { load } from "./loader.ts";
-import { pinnedWorkflow, runDir, transcriptsDir } from "./paths.ts";
+import { inboxPath, runDir, transcriptsDir } from "./paths.ts";
 import { resolve as resolveSkill } from "./skills.ts";
-import { killActive, runArgv, runCommand } from "./spawn.ts";
-import type {
-  AgentAdapter,
-  AgentOptions,
-  AgentRunOptions,
-  AgentSession,
-  Ctx,
-  Host,
-  View,
-  ViewAdapter,
-  ViewEvent,
+import { type Children, children, inScope, kill, killActive, runArgv, runCommand } from "./spawn.ts";
+import {
+  type AgentAdapter,
+  type AgentOptions,
+  type AgentRunOptions,
+  type AgentSession,
+  type AgentTurnResult,
+  COMPOSE,
+  type Ctx,
+  type Host,
+  type Message,
+  type Turn,
+  type View,
+  type ViewEvent,
+  type Workflow,
 } from "./types.ts";
-import { Bus, plainRenderer } from "./view.ts";
+import { Bus } from "./view.ts";
 
-export type Outcome = "done" | "parked" | "failed";
-
-export async function execute(name: string, reply?: string): Promise<Outcome> {
+export async function execute(name: string): Promise<number> {
   const dir = runDir(name);
-  if (!fs.existsSync(journal.journalPath(dir))) throw new WaError(`no run named ${name}`);
+  const record = readRun(dir);
   const release = acquire(dir);
-  const onSignal = (signal: NodeJS.Signals): void => {
+  const bus = new Bus(dir);
+  let execution: Execution | undefined;
+  let ending = false;
+  const onSignal = (): void => {
+    if (ending) return;
+    ending = true;
+    execution?.close();
     killActive();
-    journal.append(dir, { type: "park", reason: `interrupted by ${signal}` });
+    bus.emit({ type: "run", phase: "stopped", run: name });
     release();
-    process.stdout.write(`\nparked: interrupted by ${signal}\n`);
     process.exit(130);
   };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+  bus.emit({ type: "run", phase: "started", run: name });
   try {
-    if (reply !== undefined) answerPendingGate(dir, reply);
-    return await drive(dir);
+    const definition = await load(record.workflow);
+    const params = definition.params.parse(record.params);
+    const found = await adapters.installed(record.cwd);
+    execution = new Execution(dir, record, found, bus);
+    execution.open();
+    const result = await runner(definition)(execution.ctx(params));
+    execution.close();
+    bus.emit({ type: "run", phase: "done", run: name, result });
+    return 0;
+  } catch (error) {
+    execution?.close();
+    bus.emit({ type: "run", phase: "error", run: name, reason: messageOf(error) });
+    return 1;
   } finally {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
     release();
   }
 }
 
-function answerPendingGate(dir: string, reply: string): void {
-  const entries = journal.read(dir);
-  if (journal.isDone(entries)) throw new WaError("the run is done");
-  const pending = journal.pendingGate(entries);
-  if (pending === undefined) throw new WaError("the run has no pending gate to answer");
-  journal.append(dir, {
-    type: "call",
-    id: pending.id,
-    kind: "gate",
-    key: pending.key,
-    result: reply,
-  });
-}
-
-async function drive(dir: string): Promise<Outcome> {
-  const entries = journal.read(dir);
-  if (journal.isDone(entries)) throw new WaError("the run is done");
-  const start = journal.startOf(entries);
-  const definition = await load(pinnedWorkflow(dir));
-  const params = definition.params.parse(start.params);
-  const found = await adapters.installed(start.cwd);
-  const answers = journal.answersOf(entries);
-  const fresh = answers.size === 0;
-  const execution = new Execution(dir, start, answers, found, fresh);
-  execution.emitAlways({ type: "run", phase: fresh ? "started" : "resumed", run: path.basename(dir) });
-  try {
-    await definition.run(execution.ctx(params));
-  } catch (error) {
-    if (error instanceof Parked) {
-      execution.close();
-      execution.emitAlways({
-        type: "run",
-        phase: "parked",
-        run: path.basename(dir),
-        reason: error.message,
-      });
-      say(`parked: ${error.message}`);
-      return error.fatal ? "failed" : "parked";
-    }
-    execution.close();
-    const reason = messageOf(error);
-    journal.append(dir, { type: "park", reason });
-    execution.emitAlways({ type: "run", phase: "parked", run: path.basename(dir), reason });
-    say(`parked: ${reason}`);
-    return "failed";
-  }
-  execution.close();
-  journal.append(dir, { type: "done" });
-  execution.emitAlways({ type: "run", phase: "done", run: path.basename(dir) });
-  say("done");
-  return "done";
+function runner(definition: Workflow): (ctx: Ctx<unknown>) => Promise<unknown> {
+  return definition.run as (ctx: Ctx<unknown>) => Promise<unknown>;
 }
 
 type ActivityStore = { id: string };
 
+type Reader = { question: string | undefined; resolve(message: Message): void };
+
+type Wait = { label: string };
+
+type State = { state: "running" | "blocked" | "idle"; detail: string | undefined };
+
+type TurnCall = {
+  session: string;
+  api: AgentAdapter;
+  cwd: string;
+  options: Record<string, unknown>;
+  skill: string;
+  input: string | undefined;
+  result: z.ZodObject | undefined;
+  first: () => boolean;
+  bump: () => void;
+};
+
 class Execution {
   private dir: string;
-  private start: journal.StartEntry;
-  private answers: Map<string, journal.CallEntry>;
+  private record: RunRecord;
   private found: adapters.Found[];
   private bus: Bus;
   private als = new AsyncLocalStorage<ActivityStore>();
   private built = new Map<string, unknown>();
   private counter = 0;
   private activityCounter = 0;
-  private replayed = 0;
-  private closed = false;
+  private named = new Map<string, number>();
+  private steps = 0;
+  private waits: Wait[] = [];
+  private readers: Reader[] = [];
+  private queued: Message[] = [];
+  private inbox: Tail | undefined;
+  private state = "";
 
-  constructor(
-    dir: string,
-    start: journal.StartEntry,
-    answers: Map<string, journal.CallEntry>,
-    found: adapters.Found[],
-    live: boolean,
-  ) {
+  constructor(dir: string, record: RunRecord, found: adapters.Found[], bus: Bus) {
     this.dir = dir;
-    this.start = start;
-    this.answers = answers;
+    this.record = record;
     this.found = found;
-    this.bus = new Bus(dir, this.renderer(), live);
+    this.bus = bus;
+  }
+
+  open(): void {
+    this.inbox = new Tail(inboxPath(this.dir), (line) => this.ingest(line));
+    this.inbox.follow();
+  }
+
+  close(): void {
+    this.inbox?.stop();
+    this.inbox = undefined;
+    killActive();
   }
 
   ctx<Params>(params: Params): Ctx<Params> {
@@ -139,6 +133,7 @@ class Execution {
     const base: Record<string, unknown> = {
       params,
       gate: (question: string) => this.gate(question),
+      messages: { next: () => this.read().message },
       view: this.view(),
       agent: (options?: AgentOptions) => this.session(options ?? {}),
     };
@@ -146,6 +141,9 @@ class Execution {
     const target = base as unknown as Ctx<Params>;
     return new Proxy(target, {
       get: (_, prop) => {
+        if (prop === COMPOSE) {
+          return (definition: Workflow, args: unknown) => this.compose(definition, args);
+        }
         if (typeof prop !== "string") return undefined;
         if (prop in base) return base[prop];
         if (roles.has(prop)) {
@@ -155,54 +153,26 @@ class Execution {
           cached.set(prop, built);
           return built;
         }
-        throw this.parkError(
-          `nothing provides ctx.${prop}. Installed adapter roles: ${[...roles, "agent", "view"].sort().join(", ")}. Adapters are files in ${adapters.searched(this.start.cwd).join(" and ")}.`,
-          true,
+        throw new WaError(
+          `nothing provides ctx.${prop}. Installed adapter roles: ${[...roles, "agent", "view"].sort().join(", ")}. Adapters are files in ${adapters.searched(this.record.cwd).join(" and ")}.`,
         );
       },
     });
   }
 
-  async gate(question: string): Promise<string> {
-    return this.gateAt(this.nextId(), question);
-  }
-
-  emitAlways(event: ViewEvent): void {
-    this.bus.emit(event, true);
-  }
-
-  close(): void {
-    this.closed = true;
-    killActive();
-  }
-
-  private renderer(): ViewAdapter {
-    const picked = adapters.pick(this.found, "view");
-    if (!("found" in picked)) return plainRenderer();
-    try {
-      const host = this.host();
-      return picked.found.definition.build({ ...host, emit: () => {} }) as ViewAdapter;
-    } catch (error) {
-      process.stderr.write(`wa: the view adapter failed to build: ${messageOf(error)}\n`);
-      return plainRenderer();
+  private async compose(definition: Workflow, args: unknown): Promise<unknown> {
+    const checked = definition.params.safeParse(args);
+    if (!checked.success) {
+      throw new WaError(
+        `invalid params for the workflow "${definition.description}": ${issues(checked.error)}`,
+      );
     }
+    return this.activity(definition.description, () => runner(definition)(this.ctx(checked.data)));
   }
 
   private view(): View {
     return {
-      activity: async <T>(label: string, body: () => Promise<T>): Promise<T> => {
-        const id = `a${this.activityCounter++}`;
-        const parent = this.als.getStore()?.id;
-        this.bus.openActivity(id, parent, label);
-        try {
-          const value = await this.als.run({ id }, body);
-          this.bus.closeActivity(id, "ok");
-          return value;
-        } catch (error) {
-          this.bus.closeActivity(id, error instanceof Parked ? "parked" : "failed");
-          throw error;
-        }
-      },
+      activity: <T>(label: string, body: () => Promise<T>): Promise<T> => this.activity(label, body),
       fact: (values) => this.bus.emit({ type: "fact", values }),
       event: (entry) =>
         this.bus.emit({
@@ -217,10 +187,24 @@ class Execution {
     };
   }
 
+  private async activity<T>(label: string, body: () => Promise<T>): Promise<T> {
+    const id = `a${this.activityCounter++}`;
+    const parent = this.als.getStore()?.id;
+    this.bus.emit({ type: "activity", phase: "start", id, parent, label });
+    try {
+      const value = await this.als.run({ id }, body);
+      this.bus.emit({ type: "activity", phase: "end", id, outcome: "ok" });
+      return value;
+    } catch (error) {
+      this.bus.emit({ type: "activity", phase: "end", id, outcome: "failed" });
+      throw error;
+    }
+  }
+
   private role(role: string): unknown {
     const picked = adapters.pick(this.found, role);
-    if ("missing" in picked) throw this.parkError(picked.missing, true);
-    if ("conflict" in picked) throw this.parkError(picked.conflict, true);
+    if ("missing" in picked) throw new WaError(picked.missing);
+    if ("conflict" in picked) throw new WaError(picked.conflict);
     return this.wrap(role, this.build(picked.found, this.host()));
   }
 
@@ -257,48 +241,35 @@ class Execution {
     args: unknown[],
   ): Promise<unknown> {
     const id = this.nextId();
-    const key = JSON.stringify({ role, method, args });
-    const recorded = this.lookup(id, "adapter", key);
-    if (recorded !== undefined) return recorded.result;
     const label = `${role}.${method}`;
     const activity = this.als.getStore()?.id;
     this.bus.emit({ type: "step", phase: "start", id, label, activity });
-    let value: unknown;
+    this.begin();
     try {
-      value = (await fn(...args)) ?? null;
+      const value = (await fn(...args)) ?? null;
+      this.bus.emit({ type: "step", phase: "end", id, label, ok: true, activity });
+      return value;
     } catch (error) {
       this.bus.emit({ type: "step", phase: "end", id, label, ok: false, activity });
       throw error;
+    } finally {
+      this.end();
     }
-    this.record({ type: "call", id, kind: "adapter", key, result: value });
-    this.bus.emit({ type: "step", phase: "end", id, label, ok: true, activity });
-    return value;
   }
 
   private session(options: AgentOptions): AgentSession {
-    const { use, cwd, ...rest } = options;
+    const { use, cwd, name, ...rest } = options;
     const picked = adapters.pick(this.found, "agent", use);
-    if ("missing" in picked) throw this.parkError(picked.missing, true);
-    if ("conflict" in picked) throw this.parkError(picked.conflict, true);
-    const id = this.nextId();
-    const key = JSON.stringify({
-      use: picked.found.name,
-      cwd: cwd ?? null,
-      options: rest,
-    });
-    const recorded = this.lookup(id, "session", key);
-    let session: string;
-    if (recorded !== undefined) {
-      session = String(recorded.result);
-    } else {
-      session = crypto.randomUUID();
-      this.record({ type: "call", id, kind: "session", key, result: session });
-    }
+    if ("missing" in picked) throw new WaError(picked.missing);
+    if ("conflict" in picked) throw new WaError(picked.conflict);
+    const id = crypto.randomUUID();
+    const label = name === undefined || name === "" ? this.sessionName(picked.found.name) : name;
+    this.bus.emit({ type: "session", id, name: label, use: picked.found.name });
     const api = this.build(picked.found, this.agentHost()) as AgentAdapter;
     let attempts = 0;
-    const turn = (skill: string, runOptions?: AgentRunOptions & { result?: z.ZodObject }) =>
-      this.agentTurn({
-        session,
+    const run = (skill: string, runOptions?: AgentRunOptions & { result?: z.ZodObject }) =>
+      this.turn({
+        session: id,
         api,
         cwd: this.resolveCwd(cwd),
         options: rest,
@@ -310,35 +281,45 @@ class Execution {
           attempts += 1;
         },
       });
-    return { run: turn } as AgentSession;
+    return { run } as AgentSession;
   }
 
-  private async agentTurn(call: {
-    session: string;
-    api: AgentAdapter;
-    cwd: string;
-    options: Record<string, unknown>;
-    skill: string;
-    input: string | undefined;
-    result: z.ZodObject | undefined;
-    first: () => boolean;
-    bump: () => void;
-  }): Promise<unknown> {
-    const id = this.nextId();
-    const key = JSON.stringify({
-      session: call.session,
-      skill: call.skill,
-      input: call.input ?? null,
-    });
-    const recorded = this.lookup(id, "agent", key);
-    if (recorded !== undefined) {
-      call.bump();
-      return recorded.result;
-    }
+  private sessionName(use: string): string {
+    const n = (this.named.get(use) ?? 0) + 1;
+    this.named.set(use, n);
+    return `${use}-${n}`;
+  }
 
-    const found = resolveSkill(call.skill, this.start.workflow, this.start.cwd);
+  private turn(call: TurnCall): Turn<unknown> {
+    const set = children();
+    let stopped = false;
+    let halt = (): void => {};
+    const halted = new Promise<void>((resolve) => {
+      halt = resolve;
+    });
+    const dispatched = this.dispatch(call, set, () => stopped, halted);
+    const stop = async (): Promise<void> => {
+      stopped = true;
+      halt();
+      kill(set);
+      await dispatched.then(
+        () => {},
+        () => {},
+      );
+    };
+    return Object.assign(dispatched, { stop });
+  }
+
+  private async dispatch(
+    call: TurnCall,
+    set: Children,
+    stopped: () => boolean,
+    halted: Promise<void>,
+  ): Promise<unknown> {
+    const id = this.nextId();
+    const found = resolveSkill(call.skill, this.record.workflow, this.record.cwd);
     if (found.file === undefined) {
-      throw this.parkError(`no skill ${call.skill}. Looked in ${found.searched.join(", ")}`, true);
+      throw new WaError(`no skill ${call.skill}. Looked in ${found.searched.join(", ")}`);
     }
     const skillText = fs.readFileSync(found.file, "utf8");
     let schema: Record<string, unknown> | undefined;
@@ -349,74 +330,181 @@ class Execution {
     const label = `agent ${call.skill}`;
     const activity = this.als.getStore()?.id;
     this.bus.emit({ type: "step", phase: "start", id, label, activity });
-
-    for (let round = 0; ; round++) {
-      let failure: string | undefined;
-      for (let tries = 0; tries < 2; tries++) {
-        const prompt = composePrompt(skillText, call.input, failure);
-        this.transcribe(call.session, `\n>>> ${call.skill}\n\n${prompt}\n`);
-        const first = call.first();
-        call.bump();
-        const outcome = await call.api.turn({
-          session: call.session,
-          first,
-          cwd: call.cwd,
-          prompt,
-          schema,
-          options: call.options,
-        });
-        if (outcome.ok) {
-          if (call.result === undefined) {
-            this.record({ type: "call", id, kind: "agent", key, result: null });
-            this.bus.emit({ type: "step", phase: "end", id, label, ok: true, activity });
-            return null;
+    this.begin();
+    try {
+      for (let round = 0; ; round++) {
+        let failure: string | undefined;
+        for (let tries = 0; tries < 2; tries++) {
+          const prompt = composePrompt(skillText, call.input, failure);
+          this.transcribe(call.session, `\n>>> ${call.skill}\n\n${prompt}\n`);
+          const first = call.first();
+          call.bump();
+          let outcome: AgentTurnResult;
+          try {
+            outcome = await inScope(set, () =>
+              call.api.turn({
+                session: call.session,
+                first,
+                cwd: call.cwd,
+                prompt,
+                schema,
+                options: call.options,
+              }),
+            );
+          } catch (error) {
+            if (!stopped()) throw error;
+            return this.endStep(id, label, activity, false, undefined);
           }
-          const checked = call.result.safeParse(outcome.value);
-          if (checked.success) {
-            this.record({ type: "call", id, kind: "agent", key, result: checked.data });
-            this.bus.emit({ type: "step", phase: "end", id, label, ok: true, activity });
-            return checked.data;
+          if (stopped()) return this.endStep(id, label, activity, false, undefined);
+          if (outcome.ok) {
+            if (call.result === undefined) return this.endStep(id, label, activity, true, null);
+            const checked = call.result.safeParse(outcome.value);
+            if (checked.success) {
+              return this.endStep(id, label, activity, true, checked.data);
+            }
+            failure = issues(checked.error);
+          } else {
+            failure = outcome.error;
           }
-          failure = issues(checked.error);
-        } else {
-          failure = outcome.error;
+          this.bus.emit({
+            type: "event",
+            level: "warn",
+            message: `step ${id} failed: ${failure}`,
+            activity,
+          });
         }
-        this.bus.emit({
-          type: "event",
-          level: "warn",
-          message: `step ${id} failed: ${failure}`,
-          activity,
-        });
+        const answer = await this.paused(() =>
+          this.gateUntil(
+            `The agent step ${call.skill} failed twice: ${failure} Reply to run the step again.`,
+            halted,
+          ),
+        );
+        if (answer === undefined) return this.endStep(id, label, activity, false, undefined);
       }
-      await this.gateAt(
-        `${id}/gate/${round}`,
-        `The agent step ${call.skill} failed twice: ${failure} Reply to run the step again.`,
-      );
+    } finally {
+      this.end();
     }
   }
 
-  private async gateAt(id: string, question: string): Promise<string> {
-    const key = JSON.stringify({ question });
-    const recorded = this.lookup(id, "gate", key);
-    if (recorded !== undefined) return String(recorded.result);
-    this.bus.emit({ type: "gate", phase: "asked", question });
-    const answer = await ask(question);
-    if (answer === undefined) {
-      this.record({ type: "gate", id, key, question });
-      throw new Parked(`gate: ${question}`, false);
+  private endStep(
+    id: string,
+    label: string,
+    activity: string | undefined,
+    ok: boolean,
+    value: unknown,
+  ): unknown {
+    this.bus.emit({ type: "step", phase: "end", id, label, ok, activity });
+    return value;
+  }
+
+  private async paused<T>(body: () => Promise<T>): Promise<T> {
+    this.end();
+    try {
+      return await body();
+    } finally {
+      this.begin();
     }
-    this.record({ type: "call", id, kind: "gate", key, result: answer });
-    this.bus.emit({ type: "gate", phase: "answered", question, answer });
-    return answer;
+  }
+
+  private async gate(question: string): Promise<string> {
+    this.bus.emit({ type: "gate", phase: "asked", question });
+    const { message } = this.read(question);
+    return this.answered(question, await message);
+  }
+
+  private async gateUntil(question: string, halted: Promise<void>): Promise<string | undefined> {
+    this.bus.emit({ type: "gate", phase: "asked", question });
+    const reader = this.read(question);
+    const message = await Promise.race([reader.message, halted.then(() => undefined)]);
+    if (message === undefined) {
+      reader.cancel();
+      return undefined;
+    }
+    return this.answered(question, message);
+  }
+
+  private answered(question: string, message: Message): string {
+    this.bus.emit({ type: "gate", phase: "answered", question, answer: message.text });
+    return message.text;
+  }
+
+  private read(question?: string): { message: Promise<Message>; cancel(): void } {
+    const queued = this.queued.shift();
+    if (queued !== undefined) {
+      return { message: Promise.resolve(queued), cancel: () => {} };
+    }
+    let settle: (message: Message) => void = () => {};
+    const message = new Promise<Message>((resolve) => {
+      settle = resolve;
+    });
+    const reader: Reader = { question, resolve: settle };
+    this.readers.push(reader);
+    this.refresh();
+    return {
+      message,
+      cancel: () => {
+        const index = this.readers.indexOf(reader);
+        if (index === -1) return;
+        this.readers.splice(index, 1);
+        this.refresh();
+      },
+    };
+  }
+
+  private ingest(line: string): void {
+    let parsed: { text?: unknown; session?: unknown };
+    try {
+      parsed = JSON.parse(line) as { text?: unknown; session?: unknown };
+    } catch {
+      return;
+    }
+    if (typeof parsed.text !== "string") return;
+    const message: Message = {
+      text: parsed.text,
+      session: typeof parsed.session === "string" ? parsed.session : undefined,
+    };
+    this.bus.emit({ type: "message", text: message.text, session: message.session });
+    const reader = this.readers.shift();
+    if (reader === undefined) this.queued.push(message);
+    else reader.resolve(message);
+    this.refresh();
+  }
+
+  private begin(): void {
+    this.steps += 1;
+    this.refresh();
+  }
+
+  private end(): void {
+    this.steps -= 1;
+    this.refresh();
+  }
+
+  private refresh(): void {
+    const next = this.stateNow();
+    const key = `${next.state}\n${next.detail ?? ""}`;
+    if (key === this.state) return;
+    this.state = key;
+    this.bus.emit({ type: "state", state: next.state, detail: next.detail });
+  }
+
+  private stateNow(): State {
+    if (this.steps > this.waits.length) return { state: "running", detail: undefined };
+    const reader = this.readers[0];
+    if (reader !== undefined) return { state: "blocked", detail: reader.question };
+    const wait = this.waits[0];
+    if (wait !== undefined) return { state: "idle", detail: wait.label };
+    return { state: "running", detail: undefined };
   }
 
   private host(): Host {
     return {
-      cwd: this.start.cwd,
+      cwd: this.record.cwd,
       shell: (cmd, options) =>
         runCommand(cmd, this.resolveCwd(options?.cwd), { stdin: options?.stdin }),
       exec: (argv, options) => runArgv(argv, this.resolveCwd(options?.cwd), options),
-      emit: (event) => this.bus.emit(event),
+      wait: <T>(label: string, body: () => Promise<T>): Promise<T> => this.wait(label, body),
+      emit: (event: ViewEvent) => this.bus.emit(event),
     };
   }
 
@@ -433,41 +521,27 @@ class Execution {
     };
   }
 
+  private async wait<T>(label: string, body: () => Promise<T>): Promise<T> {
+    const entry: Wait = { label };
+    this.waits.push(entry);
+    this.refresh();
+    try {
+      return await body();
+    } finally {
+      const index = this.waits.indexOf(entry);
+      if (index !== -1) this.waits.splice(index, 1);
+      this.refresh();
+    }
+  }
+
   private transcribe(session: string, text: string): void {
     const dir = transcriptsDir(this.dir);
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, `${session}.txt`), text);
   }
 
-  private lookup(id: string, kind: journal.Kind, key: string): journal.CallEntry | undefined {
-    const entry = this.answers.get(id);
-    if (entry === undefined) {
-      this.bus.goLive();
-      return undefined;
-    }
-    if (entry.kind !== kind || entry.key !== key) {
-      throw this.parkError(
-        `divergence at step ${id}: the journal holds ${entry.kind} ${entry.key}, the run asked for ${kind} ${key}`,
-        true,
-      );
-    }
-    this.replayed += 1;
-    if (this.replayed >= this.answers.size) this.bus.goLive();
-    return entry;
-  }
-
-  private record(entry: journal.Entry): void {
-    if (this.closed) return;
-    journal.append(this.dir, entry);
-  }
-
-  private parkError(reason: string, fatal: boolean): Parked {
-    this.record({ type: "park", reason });
-    return new Parked(reason, fatal);
-  }
-
   private resolveCwd(relative: string | undefined): string {
-    return path.resolve(this.start.cwd, relative ?? ".");
+    return path.resolve(this.record.cwd, relative ?? ".");
   }
 
   private nextId(): string {
@@ -493,8 +567,4 @@ function issues(error: z.ZodError): string {
       return at === "" ? issue.message : `${at}: ${issue.message}`;
     })
     .join("; ");
-}
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
 }

@@ -32,10 +32,10 @@ export default workflow({
         view.fact({ round: `${round}/3` });
         await implementer.run("wa-implement", { input: brief(params.task, findings) });
         const reviewer = agent();
-        const review = await reviewer.run("wa-review", {
+        const review = (await reviewer.run("wa-review", {
           input: checklist(params.task, findings),
           result: Review,
-        });
+        }))!;
         findings.push(review.findings);
         view.fact({ verdict: review.verdict });
         return review.verdict === "approved";

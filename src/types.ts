@@ -1,15 +1,28 @@
 import type { z } from "zod";
 
+export const COMPOSE: unique symbol = Symbol.for("wa.compose");
+
 export type CommandResult = {
   code: number;
   stdout: string;
   stderr: string;
 };
 
+export type Message = { text: string; session?: string };
+
 export type ViewEvent =
-  | { type: "run"; phase: "started" | "resumed" | "done" | "parked"; run: string; reason?: string }
+  | {
+      type: "run";
+      phase: "started" | "done" | "stopped" | "error";
+      run: string;
+      reason?: string;
+      result?: unknown;
+    }
+  | { type: "state"; state: "running" | "blocked" | "idle"; detail?: string }
+  | { type: "session"; id: string; name: string; use: string }
+  | { type: "message"; text: string; session?: string }
   | { type: "activity"; phase: "start"; id: string; parent?: string; label: string }
-  | { type: "activity"; phase: "end"; id: string; outcome: "ok" | "failed" | "parked" }
+  | { type: "activity"; phase: "end"; id: string; outcome: "ok" | "failed" }
   | { type: "step"; phase: "start"; id: string; label: string; activity?: string }
   | { type: "step"; phase: "end"; id: string; label: string; ok: boolean; activity?: string }
   | { type: "fact"; values: Record<string, string | number | boolean> }
@@ -34,21 +47,25 @@ export type View = {
   watch(readouts: { elapsed?: boolean; diff?: string }): void;
 };
 
+export type Messages = {
+  next(): Promise<Message>;
+};
+
 export type AgentRunOptions = {
   input?: string;
 };
 
+export type Turn<R> = Promise<R | undefined> & { stop(): Promise<void> };
+
 export interface AgentSession {
-  run<R extends z.ZodObject>(
-    skill: string,
-    options: AgentRunOptions & { result: R },
-  ): Promise<z.infer<R>>;
-  run(skill: string, options?: AgentRunOptions): Promise<void>;
+  run<R extends z.ZodObject>(skill: string, options: AgentRunOptions & { result: R }): Turn<z.infer<R>>;
+  run(skill: string, options?: AgentRunOptions): Turn<null>;
 }
 
 export type AgentOptions = {
   use?: string;
   cwd?: string;
+  name?: string;
 } & Record<string, unknown>;
 
 export type AgentFactory = (options?: AgentOptions) => AgentSession;
@@ -59,15 +76,22 @@ export interface Adapters {}
 export type Ctx<Params> = {
   params: Params;
   gate(question: string): Promise<string>;
+  messages: Messages;
   view: View;
   agent: AgentFactory;
 } & Adapters;
 
-export type Workflow<Schema extends z.ZodObject = z.ZodObject> = {
+export type WorkflowDefinition<Schema extends z.ZodObject, R> = {
   description: string;
   params: Schema;
-  run(ctx: Ctx<z.infer<Schema>>): Promise<void>;
+  run(ctx: Ctx<z.infer<Schema>>): Promise<R>;
 };
+
+export type Workflow<Schema extends z.ZodObject = z.ZodObject, R = unknown> = ((
+  ctx: Ctx<unknown>,
+  params: z.input<Schema>,
+) => Promise<R>) &
+  WorkflowDefinition<Schema, R>;
 
 export type ShellOptions = {
   cwd?: string;
@@ -83,6 +107,7 @@ export type Host = {
   cwd: string;
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   exec(argv: string[], options?: ExecOptions): Promise<number>;
+  wait<T>(label: string, body: () => Promise<T>): Promise<T>;
   emit(event: ViewEvent): void;
 };
 

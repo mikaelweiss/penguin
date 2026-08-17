@@ -14,9 +14,13 @@ export type {
   Ctx,
   ExecOptions,
   Host,
+  Message,
+  Messages,
   ShellOptions,
+  Turn,
   View,
   ViewAdapter,
   ViewEvent,
   Workflow,
+  WorkflowDefinition,
 } from "./types.ts";

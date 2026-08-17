@@ -1,8 +1,8 @@
 # wa
 
-wa runs one workflow as a foreground process, against any repository, with any coding agent CLI.
+wa runs one workflow as a live process, against any repository, with any coding agent CLI.
 
-A workflow is one TypeScript file: a params schema and a run function over `ctx`. The engine journals every call. A run parks at a gate for days, and one command resumes it.
+A workflow is one TypeScript file: a params schema and a run function over `ctx`. The run is its own process: it keeps going with no terminal open. The terminal is a viewer that attaches, watches, sends messages, and detaches.
 
 ## Install
 
@@ -54,7 +54,7 @@ export default workflow({
   params: z.object({ ticket: z.string() }),
 
   async run({ params, agent, github, gate }) {
-    const t = await agent().run("wa-triage", { input: params.ticket, result: Triage });
+    const t = (await agent().run("wa-triage", { input: params.ticket, result: Triage }))!;
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
@@ -71,18 +71,19 @@ wa list workflows                 # name, params, and description
 wa list skills --verbose          # plus scope, source, and file
 wa list adapters                  # role, implementation, and description
 wa run ticket --ticket ABC-123    # by name, or by path: wa run ./ticket.ts
-wa ps                             # every run and its state
-wa resume ticket-1 approve
+wa run ticket --ticket ABC-123 --background
+wa ps                             # the live runs
+wa attach ticket-1                # watch one again
 ```
 
-`list` is how you see what wa has. Each entry is a block: the name and the params it takes, then the description under it. `--verbose` adds a line for where the entry comes from. `run` validates the params against the schema, creates the run, and executes it; with no workflow it lists them. It opens with one line, the run name and the agent it uses:
+`list` is how you see what wa has. Each entry is a block: the name and the params it takes, then the description under it. `--verbose` adds a line for where the entry comes from. `run` validates the params against the schema, creates the run, starts the run process, and attaches your terminal to it. With no workflow it lists them. It opens with one line, the run name and the agent it uses:
 
 ```
 $ wa run task --task "rename the flag"
 run task-1 started, agent claude
 ```
 
-Bare `wa` prints the usage. `ps` prints every run with its state. `resume` replays the journal and continues, with an optional reply for the pending gate.
+`--background` starts the run and gives the terminal back. `ps` lists the live runs: on a terminal it is a picker, and enter attaches to the run under the cursor. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw. Bare `wa` prints the usage.
 
 ```
 $ wa list workflows
@@ -98,28 +99,46 @@ A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name
 ## The ctx API
 
 - `ctx.params`: the validated params.
-- `ctx.agent({use, cwd})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A fresh handle is a fresh conversation.
-- `ctx.vcs`, `ctx.github`, and any role you add: the installed adapters, typed in your editor through the generated `wa-env.d.ts`. Every method call is a journaled step.
+- `ctx.agent({use, cwd, name})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A fresh handle is a fresh conversation. `turn.stop()` kills the agent process and keeps the partial work, and the next turn on the same handle continues the conversation.
+- `ctx.vcs`, `ctx.github`, and any role you add: the installed adapters, typed in your editor through the generated `wa-env.d.ts`. Every method call is one step in the view.
 - `ctx.view`: typed output. `activity` wraps a span, `fact` sets what is true now, `event` appends to the scroll, `artifact` names a thing to open, `watch` declares live numbers the view samples.
-- `ctx.gate(question)`: ask a question and wait for the answer.
+- `ctx.gate(question)`: ask a question and wait for the answer. The answer is the next message you send.
+- `ctx.messages.next()`: the next message sent into the run, as `{text, session}`. Race it against a turn to interrupt an agent, or read it between turns.
 
-Every await on a journaled call is a durable checkpoint. Control flow, batching, and parallelism are plain TypeScript.
+Control flow, batching, and parallelism are plain TypeScript. `Promise.all` fans out, `Promise.race` takes the first.
 
 ## Adapters
 
 An adapter is one TypeScript file: a role (its `ctx` key), a name, and a build function that returns its methods. The shell lives only there: adapter authors get `host.shell` and `host.exec`, workflows do not. Put a file in `<repo>/.wa/adapters/` or `~/.wa/adapters/` to add or replace one. Swapping git for jj means one file that declares the same role.
 
-## Keep the run replayable
+## Watch a run
 
-1. Send all IO through journaled ctx calls. Read no clock, no randomness, no environment, no files.
-2. Hold no module-level mutable state.
-3. Keep the code between two awaits fast and free of side effects.
+A run is in one of four states. **running**: a step is executing. **blocked**: the run waits on you, at a gate or at `ctx.messages.next()`. **idle**: the run waits on the outside world. **done**: the run function returned, you stopped it, or an error ended it. Done is final. To act again, start a new run.
 
-View calls are exempt: they are output, and replay never repeats them.
+In an attached terminal:
+
+- Type a line and press enter to send a message. A gate takes it as the answer.
+- `Tab` picks which session fills the screen, and addresses your next message to it.
+- `q` detaches. The run keeps going, and `wa attach` comes back to it.
+- `Ctrl-C` stops the run. wa kills the steps in flight and records the stop.
+
+Closing the terminal never touches the run.
+
+## Compose workflows
+
+A workflow calls another workflow as a function:
+
+```typescript
+import triage from "./triage.ts";
+
+const t = await triage(ctx, { ticket: params.ticket });
+```
+
+The call validates the arguments against the callee's params schema, runs the callee on the same `ctx`, and returns what the callee returns. Only the root is a run, so `wa ps` shows one line. `run` may return a value: a caller receives it, and at the root `wa run` prints it.
 
 ## Where the state lives
 
-`~/.wa/` holds your workflow files, `adapters/`, `skills/`, `defaults`, and `runs/`. `~/.wa/runs/<run>/` holds `journal.jsonl`, `events.jsonl`, the pinned copy of the workflow file, the session transcripts, and the lock. To discard a run, delete the directory. Set `WA_HOME` to move the whole tree.
+`~/.wa/` holds your workflow files, `adapters/`, `skills/`, `defaults`, and `runs/`. `~/.wa/runs/<run>/` holds `run.json`, `events.jsonl`, `inbox.jsonl`, the session transcripts, and the lock. Every event the run emits appends to `events.jsonl`, so any other program tails the same file. To discard a run, delete the directory. Set `WA_HOME` to move the whole tree.
 
 `<repo>/.wa/` holds the workflow files, skills, and adapters of one repository, and ships in git.
 

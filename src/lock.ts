@@ -36,7 +36,7 @@ export function acquire(dir: string): () => void {
   };
 }
 
-function alive(pid: number): boolean {
+export function alive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
