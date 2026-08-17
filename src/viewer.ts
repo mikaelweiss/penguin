@@ -3,11 +3,12 @@ import path from "node:path";
 import readline from "node:readline";
 import * as adapters from "./adapters.ts";
 import { readRun } from "./create.ts";
+import * as credentials from "./credentials.ts";
 import { messageOf, PenguinError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { alive, holder } from "./lock.ts";
 import { eventsPath, inboxPath, runDir } from "./paths.ts";
-import { type Control, control, interactive } from "./prompt.ts";
+import { control, entry, interactive } from "./prompt.ts";
 import { runArgv, runCommand } from "./spawn.ts";
 import type { Host, ViewAdapter, ViewEvent } from "./types.ts";
 import { plainRenderer } from "./view.ts";
@@ -18,6 +19,10 @@ const WATCH = 500;
 type Keys = { start(): void; stop(): void };
 
 type GateEvent = Extract<ViewEvent, { type: "gate" }>;
+
+type CredentialEvent = Extract<ViewEvent, { type: "credential" }>;
+
+type Asked = Extract<CredentialEvent, { phase: "asked" }>;
 
 export type GateControl = { list: string[]; many: boolean } | { hint: string | undefined };
 
@@ -125,8 +130,9 @@ class Viewer {
   private held: ViewEvent[] = [];
   private ended: number | undefined;
   private keys: Keys | undefined;
-  private control: Control | undefined;
+  private control: { cancel(): void } | undefined;
   private pending: { question: string; list: string[]; many: boolean } | undefined;
+  private wanted: Asked | undefined;
   private closed = false;
 
   constructor(name: string, dir: string, renderer: ViewAdapter, agent: string) {
@@ -155,6 +161,7 @@ class Viewer {
     if (this.buffer !== "" || this.control !== undefined) {
       this.held.push(event);
       if (event.type === "gate" && event.phase === "answered") this.control?.cancel();
+      if (event.type === "credential" && event.phase === "ready") this.control?.cancel();
       return;
     }
     this.show(event);
@@ -235,10 +242,21 @@ class Viewer {
     fs.appendFileSync(inboxPath(this.dir), `${JSON.stringify(message)}\n`);
   }
 
+  private provide(name: string): void {
+    const notice = { at: new Date().toISOString(), credential: name };
+    fs.appendFileSync(inboxPath(this.dir), `${JSON.stringify(notice)}\n`);
+  }
+
   private async open(): Promise<void> {
+    if (this.keys === undefined || this.control !== undefined) return;
     const gate = this.pending;
-    const keys = this.keys;
-    if (gate === undefined || keys === undefined || this.control !== undefined) return;
+    if (gate !== undefined) return this.openGate(gate);
+    const wanted = this.wanted;
+    if (wanted !== undefined) return this.openEntry(wanted);
+  }
+
+  private async openGate(gate: { question: string; list: string[]; many: boolean }): Promise<void> {
+    const keys = this.keys as Keys;
     keys.stop();
     const running = control(
       gate.question,
@@ -248,12 +266,35 @@ class Viewer {
     this.control = running;
     const picked = await running.picked;
     this.control = undefined;
+    this.pending = undefined;
     if (this.closed) return;
     keys.start();
     if (picked !== undefined && picked.length > 0) {
       this.deliver(picked.map((index) => gate.list[index] ?? "").join(", "));
     }
     this.flush();
+    void this.open();
+  }
+
+  /** The credential goes straight to the store. The run hears only that the store has it. */
+  private async openEntry(wanted: Asked): Promise<void> {
+    const keys = this.keys as Keys;
+    keys.stop();
+    const running = entry(`${wanted.label} needs a credential`, notes(wanted), wanted.fields, {
+      interrupt: () => this.stopRun(),
+    });
+    this.control = running;
+    const taken = await running.taken;
+    this.control = undefined;
+    if (this.closed) return;
+    keys.start();
+    if (taken !== undefined) {
+      this.wanted = undefined;
+      credentials.save(wanted.name, taken);
+      this.provide(wanted.name);
+    }
+    this.flush();
+    void this.open();
   }
 
   private gated(event: GateEvent): void {
@@ -268,6 +309,15 @@ class Viewer {
     void this.open();
   }
 
+  private credentialed(event: CredentialEvent): void {
+    if (event.phase === "ready") {
+      this.wanted = undefined;
+      return;
+    }
+    this.wanted = event;
+    void this.open();
+  }
+
   private show(event: ViewEvent): void {
     if (event.type === "run" && event.phase === "started") {
       this.render({ type: "event", level: "info", message: `run ${this.name} started, ${this.agent}` });
@@ -276,6 +326,7 @@ class Viewer {
     if (this.hidden(event)) return;
     this.render(event);
     if (event.type === "gate") this.gated(event);
+    if (event.type === "credential") this.credentialed(event);
     if (event.type !== "run") return;
     if (event.phase === "done") {
       const line = resultLine(event.result);
@@ -329,6 +380,16 @@ class Viewer {
     if (!this.tty && text.startsWith("\r")) return;
     process.stdout.write(text);
   }
+}
+
+export function notes(asked: Asked): string[] {
+  const lines: string[] = [];
+  if (asked.url !== undefined) lines.push(`make one at ${asked.url}`);
+  if (asked.hint !== undefined) lines.push(asked.hint);
+  const vars = asked.fields.map((field) => field.env).filter((name) => name !== undefined);
+  if (vars.length > 0) lines.push(`or set ${vars.join(", ")} in your environment`);
+  lines.push(`penguin keeps it in ${credentials.where(asked.name)}, readable by you alone`);
+  return lines;
 }
 
 export function controlFor(schema: Record<string, unknown>): GateControl {
@@ -399,5 +460,8 @@ function host(cwd: string): Host {
     exec: (argv, options) => runArgv(argv, at(options?.cwd), options),
     wait: (_label, body) => body(),
     emit: () => {},
+    credential: () => {
+      throw new PenguinError("a view adapter cannot ask for a credential");
+    },
   };
 }

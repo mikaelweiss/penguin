@@ -37,7 +37,17 @@ export type ViewEvent =
   | { type: "watch"; elapsed?: boolean; diff?: string }
   | { type: "agent"; session: string; kind: "text" | "tool" | "output"; text: string; activity?: string }
   | { type: "gate"; phase: "asked"; question: string; schema?: Record<string, unknown> }
-  | { type: "gate"; phase: "answered"; question: string; answer: string };
+  | { type: "gate"; phase: "answered"; question: string; answer: string }
+  | {
+      type: "credential";
+      phase: "asked";
+      name: string;
+      label: string;
+      url?: string;
+      hint?: string;
+      fields: { name: string; label: string; secret: boolean; env?: string }[];
+    }
+  | { type: "credential"; phase: "ready"; name: string; where: string };
 
 export type View = {
   activity<T>(label: string, body: () => Promise<T>): Promise<T>;
@@ -103,6 +113,31 @@ export type ExecOptions = ShellOptions & {
   onOutput?: (chunk: string, stream: "stdout" | "stderr") => void;
 };
 
+export type CredentialField = {
+  /** The key under which the value is stored, and the key on the returned object. */
+  name: string;
+  /** What to show the human who types the value. */
+  label: string;
+  /** An environment variable that supplies the value instead. */
+  env?: string;
+  /** A secret value: never shown, never logged. */
+  secret?: boolean;
+};
+
+export type CredentialRequest = {
+  /** The name of the stored record: lowercase letters, digits, and dashes. */
+  name: string;
+  /** What the credential is for, shown to the human. */
+  label: string;
+  /** Where the human makes the key. The viewer shows it as a link. */
+  url?: string;
+  /** One line of extra instruction. */
+  hint?: string;
+  fields: readonly CredentialField[];
+  /** Forget the stored values and ask again. Use it after the provider rejects them. */
+  refresh?: boolean;
+};
+
 export type Host = {
   /** The run's invoking folder. Relative cwd options resolve against it. */
   cwd: string;
@@ -110,6 +145,14 @@ export type Host = {
   exec(argv: string[], options?: ExecOptions): Promise<number>;
   wait<T>(label: string, body: () => Promise<T>): Promise<T>;
   emit(event: ViewEvent): void;
+  /**
+   * The values the adapter needs from the user, one field per value. Environment
+   * variables win, then the stored record. Anything still missing blocks the run
+   * until a viewer takes it and writes it to the store.
+   */
+  credential<const R extends CredentialRequest>(
+    request: R,
+  ): Promise<Record<R["fields"][number]["name"], string>>;
 };
 
 export type AgentTurn = {

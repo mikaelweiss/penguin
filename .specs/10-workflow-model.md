@@ -32,6 +32,8 @@ penguin imports the module and reads the exported params schema without calling 
 
 Parallelism is native: `Promise.all` fans out, `Promise.race` takes the first. Helpers (a retry loop, a parallel map) are plain TypeScript over these primitives.
 
+A workflow never handles a key. An adapter that needs one asks the engine, and the engine asks the user the first time and remembers the answer (`20-architecture.md`, credentials).
+
 ## Agent sessions
 
 `ctx.agent(options?)` opens a session: one conversation with one agent implementation. The handle's scope is the conversation's life.

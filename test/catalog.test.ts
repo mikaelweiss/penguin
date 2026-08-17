@@ -404,7 +404,7 @@ test("every catalog skill follows the SKILL.md format", () => {
 });
 
 test("the catalog adapters and tsconfig are ready to copy", () => {
-  for (const name of ["claude", "git", "gh", "terminal"]) {
+  for (const name of ["claude", "git", "gh", "jira", "terminal"]) {
     assert.ok(fs.existsSync(path.join(examples, "adapters", `${name}.ts`)), name);
   }
 

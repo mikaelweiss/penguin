@@ -1,5 +1,7 @@
 import readline from "node:readline";
 
+const CONTROL = new RegExp("[\\u0000-\\u001f\\u007f]");
+
 export type Choice = { label: string; note?: string };
 
 export type Control = { picked: Promise<number[] | undefined>; cancel(): void };
@@ -41,6 +43,96 @@ export function control(
   style: { many: boolean; interrupt: () => void },
 ): Control {
   return drive(question, choices, { many: style.many, empty: true, interrupt: style.interrupt });
+}
+
+export type Field = { name: string; label: string; secret: boolean };
+
+export type Entry = { taken: Promise<Record<string, string> | undefined>; cancel(): void };
+
+/** One field at a time. A secret field echoes stars, so it never reaches the screen. */
+export function entry(
+  title: string,
+  notes: string[],
+  fields: Field[],
+  style: { interrupt: () => void },
+): Entry {
+  const first = fields[0];
+  if (first === undefined) return { taken: Promise.resolve({}), cancel: () => {} };
+  const input = process.stdin;
+  const out = process.stdout;
+  out.write("\n");
+  const values: Record<string, string> = {};
+  let field = first;
+  let at = 0;
+  let buffer = "";
+  let tall = 0;
+
+  const masked = (one: Field, text: string): string => (one.secret ? "*".repeat(text.length) : text);
+
+  const draw = (): void => {
+    const lines = [
+      title,
+      ...notes.map((note) => `  ${note}`),
+      ...fields
+        .slice(0, at)
+        .map((one) => `  ${one.label}: ${masked(one, values[one.name] ?? "")}`),
+      `  ${field.label}`,
+      `> ${masked(field, buffer)}`,
+      "  enter confirms, esc clears the line",
+    ];
+    if (tall > 0) out.write(`\x1b[${tall}A`);
+    out.write(`${lines.map((line) => `\x1b[2K${line}`).join("\n")}\n\x1b[J`);
+    tall = lines.reduce((total, line) => total + rowsOf(line), 0);
+  };
+
+  let cancel = (): void => {};
+  const taken = new Promise<Record<string, string> | undefined>((resolve) => {
+    readline.emitKeypressEvents(input);
+    input.setRawMode(true);
+    input.resume();
+
+    let settled = false;
+    const leave = (result: Record<string, string> | undefined): void => {
+      if (settled) return;
+      settled = true;
+      out.write(`\x1b[${tall + 1}A\x1b[J`);
+      input.off("keypress", onKey);
+      input.setRawMode(false);
+      input.pause();
+      resolve(result);
+    };
+
+    const onKey = (text: string | undefined, key: { name?: string; ctrl?: boolean }): void => {
+      if (key.ctrl === true && key.name === "c") {
+        style.interrupt();
+        return;
+      }
+      if (key.name === "escape") {
+        buffer = "";
+      } else if (key.name === "backspace") {
+        buffer = buffer.slice(0, -1);
+      } else if (key.name === "return" || key.name === "enter" || text === "\r" || text === "\n") {
+        if (buffer.trim() === "") return;
+        values[field.name] = buffer.trim();
+        buffer = "";
+        at += 1;
+        const next = fields[at];
+        if (next === undefined) {
+          leave(values);
+          return;
+        }
+        field = next;
+      } else if (text !== undefined && text !== "" && !CONTROL.test(text)) {
+        buffer += text;
+      }
+      draw();
+    };
+
+    cancel = (): void => leave(undefined);
+    draw();
+    input.on("keypress", onKey);
+  });
+  return { taken, cancel: () => cancel() };
 }
 
 function rowsOf(line: string): number {

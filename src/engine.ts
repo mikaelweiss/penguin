@@ -5,6 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import * as adapters from "./adapters.ts";
 import { readRun, type RunRecord } from "./create.ts";
+import * as credentials from "./credentials.ts";
 import { messageOf, PenguinError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { acquire } from "./lock.ts";
@@ -19,6 +20,8 @@ import {
   type AgentSession,
   type AgentTurnResult,
   COMPOSE,
+  type CredentialField,
+  type CredentialRequest,
   type Ctx,
   type Host,
   type Message,
@@ -77,6 +80,8 @@ type Reader = { question: string | undefined; resolve(message: Message): void };
 
 type Wait = { label: string };
 
+type Want = { name: string; label: string; resolve(): void };
+
 type State = { state: "running" | "blocked" | "idle"; detail: string | undefined };
 
 type TurnCall = {
@@ -103,6 +108,7 @@ class Execution {
   private named = new Map<string, number>();
   private steps = 0;
   private waits: Wait[] = [];
+  private wants: Want[] = [];
   private readers: Reader[] = [];
   private queued: Message[] = [];
   private inbox: Tail | undefined;
@@ -462,11 +468,86 @@ class Execution {
     };
   }
 
+  /**
+   * The values an adapter needs from the user. A secret never travels as a message: a
+   * viewer writes it to the credential store and says only that the store now holds it.
+   */
+  private async credential(request: CredentialRequest): Promise<Record<string, string>> {
+    if (request.refresh === true) credentials.forget(request.name);
+    for (;;) {
+      const taken = this.take(request);
+      if (taken.missing.length === 0) {
+        this.bus.emit({ type: "credential", phase: "ready", name: request.name, where: taken.where });
+        return taken.values;
+      }
+      await this.paused(() => this.ask(request, taken.missing));
+    }
+  }
+
+  private take(request: CredentialRequest): {
+    values: Record<string, string>;
+    missing: CredentialField[];
+    where: string;
+  } {
+    const stored = credentials.read(request.name);
+    const values: Record<string, string> = {};
+    const missing: CredentialField[] = [];
+    const places = new Set<string>();
+    for (const field of request.fields) {
+      const fromEnv = field.env === undefined ? undefined : process.env[field.env];
+      if (fromEnv !== undefined && fromEnv !== "") {
+        values[field.name] = fromEnv;
+        places.add(`the environment`);
+        continue;
+      }
+      const kept = stored[field.name];
+      if (kept !== undefined) {
+        values[field.name] = kept;
+        places.add(credentials.where(request.name));
+        continue;
+      }
+      missing.push(field);
+    }
+    return { values, missing, where: [...places].join(" and ") };
+  }
+
+  private ask(request: CredentialRequest, missing: CredentialField[]): Promise<void> {
+    this.bus.emit({
+      type: "credential",
+      phase: "asked",
+      name: request.name,
+      label: request.label,
+      url: request.url,
+      hint: request.hint,
+      fields: missing.map((field) => ({
+        name: field.name,
+        label: field.label,
+        secret: field.secret === true,
+        env: field.env,
+      })),
+    });
+    return new Promise<void>((resolve) => {
+      this.wants.push({ name: request.name, label: `${request.label} needs a credential`, resolve });
+      this.refresh();
+    });
+  }
+
+  private provided(name: string): void {
+    const waiting = this.wants.filter((want) => want.name === name);
+    this.wants = this.wants.filter((want) => want.name !== name);
+    for (const want of waiting) want.resolve();
+    this.refresh();
+  }
+
   private ingest(line: string): void {
-    let parsed: { text?: unknown; session?: unknown };
+    let parsed: { text?: unknown; session?: unknown; credential?: unknown };
     try {
-      parsed = JSON.parse(line) as { text?: unknown; session?: unknown };
+      parsed = JSON.parse(line) as { text?: unknown; session?: unknown; credential?: unknown };
     } catch {
+      return;
+    }
+    if (typeof parsed.credential === "string") {
+      this.provided(parsed.credential);
       return;
     }
     if (typeof parsed.text !== "string") return;
@@ -503,6 +584,8 @@ class Execution {
     if (this.steps > this.waits.length) return { state: "running", detail: undefined };
     const reader = this.readers[0];
     if (reader !== undefined) return { state: "blocked", detail: reader.question };
+    const want = this.wants[0];
+    if (want !== undefined) return { state: "blocked", detail: want.label };
     const wait = this.waits[0];
     if (wait !== undefined) return { state: "idle", detail: wait.label };
     return { state: "running", detail: undefined };
@@ -516,6 +599,7 @@ class Execution {
       exec: (argv, options) => runArgv(argv, this.resolveCwd(options?.cwd), options),
       wait: <T>(label: string, body: () => Promise<T>): Promise<T> => this.wait(label, body),
       emit: (event: ViewEvent) => this.bus.emit(event),
+      credential: (request: CredentialRequest) => this.credential(request),
     };
   }
 

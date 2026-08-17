@@ -79,6 +79,7 @@ export type Sandbox = {
   project: string;
   writeSkill(dir: string, name: string, text: string): void;
   penguin(...args: string[]): Result;
+  penguinWith(extra: Record<string, string>, ...args: string[]): Result;
   start(...args: string[]): ChildProcess;
   write(relative: string, text: string): string;
   read(relative: string): string;
@@ -125,9 +126,12 @@ export function sandbox(t: TestContext): Sandbox {
       fs.writeFileSync(file, text);
     },
     penguin(...args) {
+      return box.penguinWith({}, ...args);
+    },
+    penguinWith(extra, ...args) {
       const done = spawnSync(process.execPath, [cli, ...args], {
         cwd: project,
-        env,
+        env: { ...env, ...extra },
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });

@@ -30,7 +30,7 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.penguin/` with nine workflows, their skills, four adapters, and a tsconfig for editor types. Two of them are pipelines:
+Install fills `~/.penguin/` with nine workflows, their skills, five adapters, and a tsconfig for editor types. Two of them are pipelines:
 
 - `pn run ticket --ticket ABC-123`: ticket to merged PR: triage, plan, a worktree, implement, then the pull request.
 - `pn run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, then the pull request.
@@ -47,7 +47,7 @@ The other seven are small workflows. Each one runs alone, and a pipeline calls a
 
 A pipeline is the small ones called as functions (Compose workflows, below).
 
-`~/.penguin/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, and `terminal`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
+`~/.penguin/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, `jira`, and `terminal`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
 Workflow files live in `~/.penguin/` for every repository, or in `<repo>/.penguin/` for one. Skills and adapters live next to them, in `skills/` and `adapters/`.
 
@@ -110,7 +110,7 @@ A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name
 
 - `ctx.params`: the validated params.
 - `ctx.agent({use, cwd, name})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A fresh handle is a fresh conversation. `turn.stop()` kills the agent process and keeps the partial work, and the next turn on the same handle continues the conversation.
-- `ctx.vcs`, `ctx.github`, and any role you add: the installed adapters, typed in your editor through the generated `penguin-env.d.ts`. Every method call is one step in the view.
+- `ctx.vcs`, `ctx.github`, `ctx.jira`, and any role you add: the installed adapters, typed in your editor through the generated `penguin-env.d.ts`. Every method call is one step in the view.
 - `ctx.view`: typed output. `activity` wraps a span, `fact` sets what is true now, `event` appends to the scroll, `artifact` names a thing to open, `watch` declares live numbers the view samples.
 - `ctx.gate(question, shape?)`: ask a question and wait for the answer. The answer is the next message you send. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`) the gate returns that type, the terminal draws a list for it, and an answer that does not fit gets the question again.
 - `ctx.messages.next()`: the next message sent into the run, as `{text, session}`. Race it against a turn to interrupt an agent, or read it between turns.
@@ -120,6 +120,29 @@ Control flow, batching, and parallelism are plain TypeScript. `Promise.all` fans
 ## Adapters
 
 An adapter is one TypeScript file: a role (its `ctx` key), a name, and a build function that returns its methods. The shell lives only there: adapter authors get `host.shell` and `host.exec`, workflows do not. Put a file in `<repo>/.penguin/adapters/` or `~/.penguin/adapters/` to add or replace one. Swapping git for jj means one file that declares the same role.
+
+### Keys an adapter needs
+
+An adapter that talks to an API asks for its key with `host.credential`:
+
+```typescript
+const creds = await host.credential({
+  name: "jira",
+  label: "Jira",
+  url: "https://id.atlassian.com/manage-profile/security/api-tokens",
+  fields: [
+    { name: "site", label: "Your Jira site, like acme.atlassian.net", env: "JIRA_SITE" },
+    { name: "email", label: "The email you sign in to Atlassian with", env: "JIRA_EMAIL" },
+    { name: "token", label: "An API token from the link above", env: "JIRA_API_TOKEN", secret: true },
+  ],
+});
+```
+
+The first time a workflow reaches that call, the run blocks and your terminal shows the link that makes the key, then takes one field at a time. A secret field echoes stars. The terminal writes the values to `~/.penguin/credentials/jira.json`, mode 0600, and tells the run only that the file now holds them, so nothing lands in `events.jsonl` or `inbox.jsonl`. Every run after that finds them and asks nothing.
+
+An environment variable wins over the stored file, which is how a server or a cron job supplies the same values. `refresh: true` throws the stored record away and asks again: the `jira` adapter does that once when your site answers 401, so a rotated token is one paste away.
+
+Workflow code writes none of this. `ctx.jira.issue.get("ABC-123")` is the whole story.
 
 ## Watch a run
 
@@ -148,7 +171,7 @@ The call validates the arguments against the callee's params schema, runs the ca
 
 ## Where the state lives
 
-`~/.penguin/` holds your workflow files, `adapters/`, `skills/`, `defaults`, and `runs/`. `~/.penguin/runs/<run>/` holds `run.json`, `events.jsonl`, `inbox.jsonl`, the session transcripts, and the lock. Every event the run emits appends to `events.jsonl`, so any other program tails the same file. To discard a run, delete the directory. Set `PENGUIN_HOME` to move the whole tree.
+`~/.penguin/` holds your workflow files, `adapters/`, `skills/`, `credentials/`, `defaults`, and `runs/`. `~/.penguin/runs/<run>/` holds `run.json`, `events.jsonl`, `inbox.jsonl`, the session transcripts, and the lock. Every event the run emits appends to `events.jsonl`, so any other program tails the same file. To discard a run, delete the directory. Set `PENGUIN_HOME` to move the whole tree.
 
 `<repo>/.penguin/` holds the workflow files, skills, and adapters of one repository, and ships in git.
 

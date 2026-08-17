@@ -48,9 +48,22 @@ function lineOf(event: ViewEvent): string | undefined {
       return event.kind === "tool" ? `[${event.text}]` : event.text;
     case "gate":
       return event.phase === "asked" ? `gate: ${event.question}` : undefined;
+    case "credential":
+      return event.phase === "asked"
+        ? askedFor(event)
+        : `credential ${event.name} ready, from ${event.where}`;
     case "message":
       return `> ${event.text}`;
     default:
       return undefined;
   }
+}
+
+function askedFor(event: Extract<ViewEvent, { type: "credential"; phase: "asked" }>): string {
+  const lines = [`credential: ${event.label} needs ${event.fields.map((one) => one.name).join(", ")}`];
+  if (event.url !== undefined) lines.push(`  make one at ${event.url}`);
+  if (event.hint !== undefined) lines.push(`  ${event.hint}`);
+  const vars = event.fields.map((field) => field.env).filter((name) => name !== undefined);
+  if (vars.length > 0) lines.push(`  or set ${vars.join(", ")} in your environment`);
+  return lines.join("\n");
 }

@@ -11,6 +11,8 @@ export type {
   AgentTurn,
   AgentTurnResult,
   CommandResult,
+  CredentialField,
+  CredentialRequest,
   Ctx,
   ExecOptions,
   Host,

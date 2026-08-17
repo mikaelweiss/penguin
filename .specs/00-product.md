@@ -14,7 +14,7 @@ A TypeScript CLI on Node. It runs one workflow as one live process against any r
 
 1. **A run is a live process.** It executes until the run function returns or the user stops it. It waits in memory for input, and `pn ps` shows its state: running, blocked, idle, or done.
 2. **The terminal is a viewer.** `pn run` attaches one, `q` detaches, and `pn attach` joins any run with its full history, as if attached from the start. Closing a terminal never touches a run.
-3. **The outside world is an adapter.** All IO goes through named adapters with typed interfaces: `ctx.agent`, `ctx.vcs`, `ctx.github`, `ctx.view`. Each is an ordinary TypeScript file the user can read, edit, or replace. Provider CLIs (`claude`, `git`, `gh`) run inside adapters, under the user's existing credentials. A workflow can only do what an adapter offers.
+3. **The outside world is an adapter.** All IO goes through named adapters with typed interfaces: `ctx.agent`, `ctx.vcs`, `ctx.github`, `ctx.view`. Each is an ordinary TypeScript file the user can read, edit, or replace. Provider CLIs (`claude`, `git`, `gh`) run inside adapters, under the user's existing credentials. An adapter that needs a key of its own asks the engine for it once, and penguin keeps it out of the run's history. A workflow can only do what an adapter offers.
 4. **Definitions are files the user keeps anywhere.** Team workflows, skills, and adapters sit in `<project>/.penguin/` and ship in git. Personal ones sit in `~/.penguin/`. penguin lists both and runs either. Run state lives under `~/.penguin/`.
 5. **Params are data, workflows are code.** What the engine must know before code runs is one schema. Everything inside a run's lifetime is TypeScript over `ctx`, so control flow never grows a schema.
 6. **Workflows compose as functions.** A workflow imports another workflow, calls it with params, and receives its return value. Small atomic workflows build large ones, and only the root is a run.
@@ -32,6 +32,7 @@ One name for one thing, used everywhere (code, UI, specs):
 - **step**: one ctx call in a run function: an adapter method, an agent turn, a session, or a gate.
 - **adapter**: one TypeScript file that gives workflows one typed capability. It declares a role and a name.
 - **role**: the `ctx` key an adapter provides: `agent`, `vcs`, `github`, `view`, or one the user invents.
+- **credential**: the values one adapter needs from the user, a site or a login or an API token. Asked once, kept in a file only the user can read.
 - **session**: one agent conversation. `ctx.agent()` opens it, and every turn on the handle continues it.
 - **turn**: one prompt to a session and its result. A workflow awaits it or stops it early.
 - **skill**: the markdown craft file an agent turn follows, in the Agent Skills format. A turn names it, and penguin finds it in a skills directory.

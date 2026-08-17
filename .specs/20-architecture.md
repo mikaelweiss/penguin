@@ -16,6 +16,7 @@ Plain files.
 - `~/.penguin/adapters/*.ts`: the personal adapter files. Install copies the shipped ones here.
 - `~/.penguin/skills/`: the skills every workflow can name. A skill directly inside it is penguin's own. A symlink inside it points at a whole skill directory the user already keeps, and `.order` holds those link names, most preferred first.
 - `~/.penguin/defaults`: one line per role, `<role> <name>`, choosing among installed implementations. Only a role with more than one implementation needs a line.
+- `~/.penguin/credentials/<name>.json`: one file per credential an adapter needs, mode 0600 inside a 0700 directory (credentials below).
 - `~/.penguin/penguin-env.d.ts`: generated. It types `ctx` from the installed adapters, so workflow files autocomplete with zero imports. penguin rewrites it on install, on every `pn run`, and on `pn list adapters`. A stale copy misleads the editor only: the engine resolves adapters when it runs.
 - `~/.penguin/runs/<name>/`: one flat directory per run, the run name as the directory name. `run.json` (the params, the workflow file path, the invoking folder, the creation time), `events.jsonl` (every emitted event, append-only), `inbox.jsonl` (every message sent in, append-only), `transcripts/` (one file per agent session), `lock` (held by the run process).
 - `<project>/.penguin/`: the same definition places for one repository: `*.ts`, `adapters/`, and `skills/`. It ships in git. It holds no runs.
@@ -30,7 +31,7 @@ Run state derives from the files and the process: a held lock is a live run, and
 
 An adapter is one TypeScript file that default-exports `adapter({role, name, description, build})`. `role` is the key it takes on `ctx`. `name` is which implementation it is. `build(host)` returns the role's API: an object of methods, nested objects allowed.
 
-`host` is the engine's hand to adapter authors, and the only place shell access lives: `host.cwd` (the run's invoking folder), `host.shell(cmd, {cwd, stdin})`, `host.exec(argv, {cwd, stdin, onOutput})` for streaming, `host.wait(label, body)` for long waits, and `host.emit(event)`. Workflows have no shell. Anything no adapter covers is impossible until someone writes the adapter, which is the point.
+`host` is the engine's hand to adapter authors, and the only place shell access lives: `host.cwd` (the run's invoking folder), `host.shell(cmd, {cwd, stdin})`, `host.exec(argv, {cwd, stdin, onOutput})` for streaming, `host.wait(label, body)` for long waits, `host.emit(event)`, and `host.credential(request)` for the keys the adapter needs from the user (credentials below). Workflows have no shell and no keys. Anything no adapter covers is impossible until someone writes the adapter, which is the point.
 
 The engine shows every adapter method call as one step in the view: role plus method, start and end. A method returns plain data, or a subscription: an object whose `next()` resolves on the next item. A method that waits on the outside world (a poll loop for new commits or tagged issues) wraps the wait in `host.wait(label, body)`: the run shows idle with the label while `body` runs. Processes an adapter starts through `host` die when the run ends.
 
@@ -43,11 +44,21 @@ Two roles the engine treats specially:
 
 ## Events
 
-Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended with its activity, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, gates asked and answered. A gate asked event carries the answer shape as a JSON schema when the gate has one. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
+Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended with its activity, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, gates asked and answered, credentials asked and ready. A gate asked event carries the answer shape as a JSON schema when the gate has one. A credential event carries the fields by name, never a value. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
 
 ## Messages
 
 A message is one line sent into a run: `{text, session?}`. A viewer's input field appends it to `inbox.jsonl`, addressed to the run or to the session the viewer has selected. The run process delivers each message once, in order, to the earliest waiting reader (`ctx.gate` or `ctx.messages.next()`). A message no reader awaits waits in the file. Only the workflow gives a message meaning: it stops a turn, feeds a new turn, or sits in the queue (`10-workflow-model.md`, messages).
+
+## Credentials
+
+Some adapters need a key the user has to make: a Jira API token, and anything like it. The adapter asks for it with `host.credential({name, label, url, hint, fields, refresh})`, and the engine finds it. A workflow writes nothing, so control flow never mentions a key.
+
+One field is one value. `name` is the key it is stored under and the key on the returned object, `label` is the line the human reads, `env` names an environment variable that supplies it instead, and `secret` marks a value that must never be shown. The engine takes each field from its environment variable first, then from the stored record. Whatever is still missing becomes one credential asked event carrying the label, the link, the hint, and only the missing fields. The run shows blocked with the label until it has them.
+
+A viewer answers it. On a terminal it takes one field at a time, echoes a secret field as stars, and shows the link that makes the key. It writes the values to the store itself, then appends one notice to `inbox.jsonl`, `{"credential": "<name>"}`. The value is never a message, so it never reaches `events.jsonl`. The run reads the store again and goes on, and emits a credential ready event naming only where the values came from. With no terminal the ask prints the link and the environment variable names, and the run waits for a viewer that can ask.
+
+The store is one file per credential, `~/.penguin/credentials/<name>.json`, mode 0600 inside a 0700 directory: the user reads it and nobody else does. A name is lowercase letters, digits, and dashes. An environment variable is never written to the store. `refresh: true` forgets the stored record and asks again, which is how an adapter answers a key the provider rejects.
 
 ## Agent sessions
 
@@ -119,3 +130,4 @@ Each one line, each pinned by a test:
 9. The first penguin command installs. Sync links whole directories, and never removes a skill the user put in the target.
 10. A skill name resolves from the project roots before the home roots, and from the preferred link before the other. A skill path resolves against the workflow file. An adapter resolves from the project before the home.
 11. A gate with a shape validates the answer against it, and asks the same question again until an answer fits.
+12. penguin never writes a credential value to `events.jsonl`, `inbox.jsonl`, or the screen. A viewer writes it to the store, and the run reads it from there.

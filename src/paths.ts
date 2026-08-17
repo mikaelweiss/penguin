@@ -51,6 +51,14 @@ export function defaultsFile(): string {
   return path.join(home(), "defaults");
 }
 
+export function credentialsDir(): string {
+  return path.join(home(), "credentials");
+}
+
+export function credentialFile(name: string): string {
+  return path.join(credentialsDir(), `${name}.json`);
+}
+
 export function envFile(dir: string): string {
   return path.join(dir, "penguin-env.d.ts");
 }
