@@ -197,6 +197,34 @@ test("a stored credential runs without a question, and refresh asks again", asyn
   assert.deepEqual(store(box, "tracker"), {}, "the store is empty while penguin asks");
 });
 
+test("the entry prompt leaves the cursor where the user types", async (t) => {
+  const box = sandbox(t);
+  box.writeAdapter("tracker", needsSource());
+  box.write("w.ts", callWorkflow);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const screen = terminal(t, box.home);
+  const watching = attach("w-1");
+  await waitFor(() => screen.text().includes("Your tracker site"));
+
+  screen.input.write("ab");
+  const parked = "\x1b[2A\x1b[5G";
+  await waitFor(() => screen.text().endsWith(parked), 2000).catch(() => {
+    assert.fail(`the cursor did not land after "> ab": ${JSON.stringify(screen.text().slice(-40))}`);
+  });
+
+  screen.input.write("c.tracker.test\r");
+  await waitFor(() => screen.text().includes("A tracker API token"));
+  screen.input.write(`${TOKEN}\r`);
+  const ended = await box.waitForEnd("w-1");
+  const code = await watching;
+  screen.stop();
+
+  assert.equal(code, 0);
+  assert.equal(ended["result"], "abc.tracker.test matched");
+});
+
 test("without a terminal the ask names the link and the environment variables", async (t) => {
   const box = sandbox(t);
   box.writeAdapter("tracker", needsSource());

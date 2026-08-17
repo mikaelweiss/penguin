@@ -66,10 +66,14 @@ export function entry(
   let at = 0;
   let buffer = "";
   let tall = 0;
+  let parked = 0;
 
   const masked = (one: Field, text: string): string => (one.secret ? "*".repeat(text.length) : text);
 
+  /** The last write puts the cursor back on the typed line, where the user reads it. */
   const draw = (): void => {
+    const typed = `> ${masked(field, buffer)}`;
+    const help = "  enter confirms, esc clears the line";
     const lines = [
       title,
       ...notes.map((note) => `  ${note}`),
@@ -77,12 +81,14 @@ export function entry(
         .slice(0, at)
         .map((one) => `  ${one.label}: ${masked(one, values[one.name] ?? "")}`),
       `  ${field.label}`,
-      `> ${masked(field, buffer)}`,
-      "  enter confirms, esc clears the line",
+      typed,
+      help,
     ];
-    if (tall > 0) out.write(`\x1b[${tall}A`);
+    if (tall > parked) out.write(`\x1b[${tall - parked}A`);
     out.write(`${lines.map((line) => `\x1b[2K${line}`).join("\n")}\n\x1b[J`);
     tall = lines.reduce((total, line) => total + rowsOf(line), 0);
+    parked = rowsOf(help) + 1;
+    out.write(`\x1b[${parked}A\x1b[${columnOf(typed)}G`);
   };
 
   let cancel = (): void => {};
@@ -95,7 +101,7 @@ export function entry(
     const leave = (result: Record<string, string> | undefined): void => {
       if (settled) return;
       settled = true;
-      out.write(`\x1b[${tall + 1}A\x1b[J`);
+      out.write(`\x1b[${tall + 1 - parked}A\x1b[J`);
       input.off("keypress", onKey);
       input.setRawMode(false);
       input.pause();
@@ -135,10 +141,19 @@ export function entry(
   return { taken, cancel: () => cancel() };
 }
 
-function rowsOf(line: string): number {
+function widthOf(): number {
   const columns = process.stdout.columns;
-  const width = columns !== undefined && columns > 0 ? columns : 80;
-  return Math.max(1, Math.ceil(line.length / width));
+  return columns !== undefined && columns > 0 ? columns : 80;
+}
+
+function rowsOf(line: string): number {
+  return Math.max(1, Math.ceil(line.length / widthOf()));
+}
+
+/** Where the cursor sits on the last row of a line that may have wrapped. */
+function columnOf(line: string): number {
+  const width = widthOf();
+  return Math.min(width, line.length - (rowsOf(line) - 1) * width + 1);
 }
 
 function drive(question: string, choices: Choice[], style: Style): Control {
