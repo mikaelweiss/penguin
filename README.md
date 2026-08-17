@@ -155,3 +155,7 @@ The call validates the arguments against the callee's params schema, runs the ca
 ## Specs
 
 `.specs/` is the source of truth for the design.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

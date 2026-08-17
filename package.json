@@ -2,6 +2,7 @@
   "name": "penguin",
   "version": "1.0.0",
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "pn": "./dist/cli.js"
