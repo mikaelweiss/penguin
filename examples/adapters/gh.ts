@@ -10,8 +10,25 @@ type Issue = {
   url: string;
 };
 
+type Comment = {
+  author: string;
+  at: string;
+  body: string;
+};
+
+type Written = { author?: { login?: string }; createdAt?: string; body?: string };
+
 function quoted(text: string): string {
   return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+function commentsOf(stdout: string): Comment[] {
+  const parsed = JSON.parse(stdout) as { comments?: Written[] };
+  return (parsed.comments ?? []).map((one) => ({
+    author: one.author?.login ?? "",
+    at: one.createdAt ?? "",
+    body: (one.body ?? "").trim(),
+  }));
 }
 
 export default adapter({
@@ -24,6 +41,11 @@ export default adapter({
         const done = await host.shell(`gh issue view ${quoted(ref)} --json ${FIELDS}`);
         if (done.code !== 0) return { ok: false, issue: null, reason: done.stderr.trim() };
         return { ok: true, issue: JSON.parse(done.stdout) as Issue, reason: "" };
+      },
+      async comments(ref: string): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
+        const done = await host.shell(`gh issue view ${quoted(ref)} --json comments`);
+        if (done.code !== 0) return { ok: false, comments: [], reason: done.stderr.trim() };
+        return { ok: true, comments: commentsOf(done.stdout), reason: "" };
       },
     },
     pr: {

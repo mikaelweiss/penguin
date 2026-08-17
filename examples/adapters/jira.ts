@@ -18,6 +18,12 @@ type Issue = {
   url: string;
 };
 
+type Comment = {
+  author: string;
+  at: string;
+  body: string;
+};
+
 type Reply = { ok: boolean; status: number; body: unknown; reason: string; base: string };
 
 export function siteUrl(site: string): string {
@@ -80,6 +86,18 @@ function issueOf(body: unknown, base: string): Issue {
     assignee: named(fields["assignee"]),
     url: key === "" ? "" : `${base}/browse/${key}`,
   };
+}
+
+function commentsOf(body: unknown): Comment[] {
+  const list = (body as { comments?: unknown[] } | null)?.comments ?? [];
+  return list.map((one) => {
+    const note = one as { author?: unknown; created?: unknown; body?: unknown };
+    return {
+      author: named(note.author),
+      at: typeof note.created === "string" ? note.created : "",
+      body: plain(note.body).trim(),
+    };
+  });
 }
 
 function transitionsOf(body: unknown): { id: string; name: string }[] {
@@ -176,6 +194,17 @@ export default adapter({
           const reply = await call("GET", route);
           if (!reply.ok) return { ok: false, issue: null, reason: reply.reason };
           return { ok: true, issue: issueOf(reply.body, reply.base), reason: "" };
+        },
+
+        async comments(
+          key: string,
+          options?: { max?: number },
+        ): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
+          const max = options?.max ?? 50;
+          const route = `/rest/api/3/issue/${encodeURIComponent(key)}/comment?maxResults=${max}&orderBy=created`;
+          const reply = await call("GET", route);
+          if (!reply.ok) return { ok: false, comments: [], reason: reply.reason };
+          return { ok: true, comments: commentsOf(reply.body), reason: "" };
         },
 
         async search(

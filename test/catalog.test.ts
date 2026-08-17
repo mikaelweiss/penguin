@@ -58,6 +58,11 @@ export default adapter({
         },
         reason: "",
       }),
+      comments: async () => ({
+        ok: true,
+        comments: [{ author: "octocat", at: "2026-01-02", body: "it also jumps on resize" }],
+        reason: "",
+      }),
     },
     pr: {
       create: async () => ({ ok: true, url: "https://example.test/pr/7", reason: "" }),
@@ -87,6 +92,11 @@ export default adapter({
           assignee: "",
           url: "https://example.test/browse/" + key,
         },
+        reason: "",
+      }),
+      comments: async () => ({
+        ok: true,
+        comments: [{ author: "Ada", at: "2026-01-02", body: "only on the slow network" }],
         reason: "",
       }),
     },
@@ -205,7 +215,7 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
   assert.ok(dirs.includes(worktree), `no session ran in the worktree: ${dirs.join(", ")}`);
 });
 
-test("the catalog plan workflow reads a jira key it was given by position", async (t) => {
+test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"spec":"plan.md","acceptance":"acceptance.md"}');
   outsideReady(box);
@@ -226,6 +236,33 @@ test("the catalog plan workflow reads a jira key it was given by position", asyn
   const [prompt] = box.invocations("prompts.txt");
   assert.match(String(prompt), /ABC-1: the login times out/);
   assert.match(String(prompt), /it hangs at the spinner/);
+  assert.match(String(prompt), /# Comments/);
+  assert.match(String(prompt), /## Ada on 2026-01-02/);
+  assert.match(String(prompt), /only on the slow network/);
+});
+
+test("the catalog plan workflow reads a github issue and its comments", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"spec":"plan.md","acceptance":"acceptance.md"}');
+  outsideReady(box);
+  box.setAgent('{"spec":"plan.md","acceptance":"acceptance.md"}', "prompts.txt");
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "plan.ts"),
+    "https://github.com/acme/app/issues/12",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "plan-1", "Type approve", "approve");
+  const ended = await box.waitForEnd("plan-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  const [prompt] = box.invocations("prompts.txt");
+  assert.match(String(prompt), /the footer scrolls away/);
+  assert.match(String(prompt), /## octocat on 2026-01-02/);
+  assert.match(String(prompt), /it also jumps on resize/);
 });
 
 test("the catalog ticket workflow stops at the triage gate", async (t) => {
