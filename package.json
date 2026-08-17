@@ -20,7 +20,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "check": "tsc --noEmit",
     "test": "node --test test/*.test.ts"
   },
