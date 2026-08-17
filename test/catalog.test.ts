@@ -31,6 +31,7 @@ export default adapter({
   build: (host) => ({
     stageAll: async () => ({ ok: true, reason: "" }),
     commit: async () => ({ ok: true, reason: "" }),
+    pull: async () => ({ ok: true, reason: "" }),
     worktree: {
       add: async (name) => ({ ok: true, path: host.cwd + "/" + name, reason: "" }),
       remove: async () => ({ ok: true, reason: "" }),
@@ -39,13 +40,14 @@ export default adapter({
 });
 `;
 
-const fakeGithub = `import { adapter } from "penguin";
+const fakeGithub = `import fs from "node:fs";
+import { adapter } from "penguin";
 
 export default adapter({
   role: "github",
   name: "gh",
   description: "fake github",
-  build: () => ({
+  build: (host) => ({
     issue: {
       get: async (ref) => ({
         ok: true,
@@ -65,9 +67,50 @@ export default adapter({
       }),
     },
     pr: {
+      get: async (ref) => ({
+        ok: true,
+        pr: {
+          number: Number(ref),
+          title: "pin the footer",
+          body: "the footer scrolls away",
+          state: "OPEN",
+          isDraft: false,
+          headRefOid: "abc123",
+          url: "https://example.test/pr/" + ref,
+        },
+        reason: "",
+      }),
+      comments: async () => ({
+        ok: true,
+        comments: [{ author: "octocat", at: "2026-01-02", body: "it also jumps on resize" }],
+        reason: "",
+      }),
       create: async () => ({ ok: true, url: "https://example.test/pr/7", reason: "" }),
       diff: async () => ({ ok: true, diff: "diff --git a/a b/a", reason: "" }),
-      comment: async () => ({ ok: true, reason: "" }),
+      comment: async (ref, options) => {
+        fs.writeFileSync(host.cwd + "/commented.txt", options.body ?? "");
+        return { ok: true, reason: "" };
+      },
+      approve: async () => {
+        fs.writeFileSync(host.cwd + "/approved.txt", "approved");
+        return { ok: true, reason: "" };
+      },
+      changes: () => {
+        let sent = false;
+        return {
+          next: () =>
+            new Promise((resolve) => {
+              const timer = setInterval(() => {
+                if (!sent && fs.existsSync(host.cwd + "/commented.txt")) {
+                  sent = true;
+                  clearInterval(timer);
+                  resolve({ kind: "closed", state: "MERGED" });
+                }
+              }, 25);
+              if (sent) clearInterval(timer);
+            }),
+        };
+      },
     },
   }),
 });
@@ -392,22 +435,49 @@ test("the catalog fix workflow verifies the fix and opens the pull request", asy
   ]);
 });
 
-test("the catalog review-pr workflow posts the findings it was told to post", async (t) => {
+test("the catalog review-pr workflow approves a clean PR and follows it to the close", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"verdict":"changes_needed","report":"findings.md"}');
+  catalogReady(box, '{"blockers":[],"nonBlockers":["tiny nit"]}');
+  outsideReady(box);
+
+  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  assert.equal(started.code, 0, started.output);
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.deepEqual(box.lines("commented.txt"), [
+    "### Blockers",
+    "none",
+    "### Non-blockers",
+    "- tiny nit",
+  ]);
+  assert.ok(box.exists("approved.txt"), "the PR was not approved");
+});
+
+test("the catalog review-pr workflow gates on blockers and posts without approving", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"blockers":["the flag is wrong"],"nonBlockers":[]}');
   outsideReady(box);
 
   const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "review-pr-1", "changes_needed, findings in", "post");
+  await answerGate(box, "review-pr-1", "### Blockers", "send");
   const ended = await box.waitForEnd("review-pr-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
-  assert.deepEqual(ended["result"], { verdict: "changes_needed", report: "findings.md" });
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.deepEqual(box.lines("commented.txt"), [
+    "### Blockers",
+    "- the flag is wrong",
+    "### Non-blockers",
+    "none",
+  ]);
+  assert.ok(!box.exists("approved.txt"), "the PR was approved despite a blocker");
 });
 
-test("the catalog review-pr workflow gates when the diff command fails", async (t) => {
+test("the catalog review-pr workflow gates when the PR does not read", async (t) => {
   const box = sandbox(t);
   catalogReady(box, "none");
 
@@ -415,7 +485,7 @@ test("the catalog review-pr workflow gates when the diff command fails", async (
 
   assert.equal(started.code, 0, started.output);
   const question = await gateOf(box, "review-pr-1");
-  assert.ok(question.startsWith("gh pr diff 42 failed:"), question);
+  assert.ok(question.startsWith("gh pr view 42 failed:"), question);
   box.send("review-pr-1", "ok");
   assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
 });
