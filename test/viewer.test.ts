@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { attach, controlFor } from "../src/viewer.ts";
 import { type Sandbox, sandbox, terminal, waitFor } from "./helpers.ts";
+
+const examples = fileURLToPath(new URL("../examples/adapters", import.meta.url));
 
 function gateWorkflow(box: Sandbox, question: string, shape: string): void {
   box.write(
@@ -152,4 +155,71 @@ test("the control follows the schema", () => {
   assert.deepEqual(controlFor(shapeOf(z.url())), { hint: "url" });
   assert.deepEqual(controlFor(shapeOf(z.string())), { hint: "string" });
   assert.deepEqual(controlFor(shapeOf(z.array(z.string()))), { hint: "array" });
+});
+
+function talkingAgent(box: Sandbox): void {
+  box.writeAdapter(
+    "fake",
+    `import { adapter } from "penguin";
+
+export default adapter({
+  role: "agent",
+  name: "fake",
+  description: "fake test agent",
+  build: (host) => ({
+    async turn(turn) {
+      const say = (kind, text, detail) =>
+        host.emit({ type: "agent", session: turn.session, kind, text, detail });
+      say("thinking", "I need the branch");
+      say("tool", "Bash", "git status");
+      say("tool", "Read");
+      say("text", "the branch is clean");
+      return { ok: true, value: null };
+    },
+  }),
+});
+`,
+  );
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skill.md");
+  },
+});
+`,
+  );
+}
+
+test("a tool line says what the call acts on, and thinking reads as its own lines", (t) => {
+  const box = sandbox(t);
+  talkingAgent(box);
+
+  const done = box.penguin("run", "./w.ts");
+
+  assert.equal(done.code, 0, done.output);
+  assert.match(done.stdout, /^\[Bash\] git status$/m);
+  assert.match(done.stdout, /^\[Read\]$/m);
+  assert.match(done.stdout, /^I need the branch$/m);
+  assert.match(done.stdout, /^the branch is clean$/m);
+});
+
+test("the terminal adapter renders the same call, with thinking set apart", (t) => {
+  const box = sandbox(t);
+  talkingAgent(box);
+  box.writeAdapter("terminal", fs.readFileSync(path.join(examples, "terminal.ts"), "utf8"));
+
+  const done = box.penguin("run", "./w.ts");
+
+  assert.equal(done.code, 0, done.output);
+  assert.match(done.stdout, /^\[Bash\] git status$/m);
+  assert.match(done.stdout, /^\[Read\]$/m);
+  assert.match(done.stdout, /^ {2}I need the branch$/m);
+  assert.match(done.stdout, /^the branch is clean$/m);
 });

@@ -2,11 +2,11 @@
 
 The npm package carries an `examples/` directory, and install copies it into `~/.penguin/`. Every entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
-- `examples/adapters/claude.ts`: the `agent` role on the claude CLI: sessions over `--session-id` and `--resume`, stream-json into typed agent events, results over `--json-schema`.
+- `examples/adapters/claude.ts`: the `agent` role on the claude CLI: sessions over `--session-id` and `--resume`, stream-json into typed agent events (text, thinking, and each tool call with what it acts on), results over `--json-schema`.
 - `examples/adapters/git.ts`: the `vcs` role on git: staging, commits, and worktrees.
 - `examples/adapters/gh.ts`: the `github` role on the gh CLI: read an issue and its comments, and create, diff, and comment on pull requests.
 - `examples/adapters/jira.ts`: the `jira` role on the Jira Cloud REST API: read an issue and its comments, and search, create, comment on, and transition issues, under a token penguin asks for once (`20-architecture.md`, credentials).
-- `examples/adapters/terminal.ts`: the `view` role: events as terminal lines, and a live footer on a TTY.
+- `examples/adapters/terminal.ts`: the `view` role: events as terminal lines, and a live footer on a TTY. A tool call is one line, the name and what it acts on, cut to the terminal width. Thinking is dim and indented.
 - `examples/ticket.ts`: a ticket to merged PR pipeline: it calls triage, plan, implement, and pr, and holds the work in a worktree.
 - `examples/fix.ts`: a bug fix: reproduce, gate when the bug does not reproduce, then a fix loop that calls verify until the repository checks pass, then pr.
 - `examples/triage.ts`: one triage turn: is the ticket ready to work on, and the deciding fact.

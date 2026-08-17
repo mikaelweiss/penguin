@@ -78,6 +78,8 @@ type ActivityStore = { id: string };
 
 type Reader = { question: string | undefined; resolve(message: Message): void };
 
+type Step = { id: string; label: string; paused: boolean };
+
 type Wait = { label: string };
 
 type Want = { name: string; label: string; resolve(): void };
@@ -106,7 +108,7 @@ class Execution {
   private counter = 0;
   private activityCounter = 0;
   private named = new Map<string, number>();
-  private steps = 0;
+  private steps: Step[] = [];
   private waits: Wait[] = [];
   private wants: Want[] = [];
   private readers: Reader[] = [];
@@ -250,7 +252,7 @@ class Execution {
     const label = `${role}.${method}`;
     const activity = this.als.getStore()?.id;
     this.bus.emit({ type: "step", phase: "start", id, label, activity });
-    this.begin();
+    this.begin(id, label);
     try {
       const value = (await fn(...args)) ?? null;
       this.bus.emit({ type: "step", phase: "end", id, label, ok: true, activity });
@@ -259,7 +261,7 @@ class Execution {
       this.bus.emit({ type: "step", phase: "end", id, label, ok: false, activity });
       throw error;
     } finally {
-      this.end();
+      this.end(id);
     }
   }
 
@@ -332,7 +334,7 @@ class Execution {
     const label = `agent ${call.skill}`;
     const activity = this.als.getStore()?.id;
     this.bus.emit({ type: "step", phase: "start", id, label, activity });
-    this.begin();
+    this.begin(id, label);
     try {
       for (let round = 0; ; round++) {
         let failure: string | undefined;
@@ -384,7 +386,7 @@ class Execution {
         if (answer === undefined) return this.endStep(id, label, activity, false, undefined);
       }
     } finally {
-      this.end();
+      this.end(id);
     }
   }
 
@@ -399,13 +401,21 @@ class Execution {
     return value;
   }
 
+  /** The innermost step stops counting as running while it waits on the user. */
   private async paused<T>(body: () => Promise<T>): Promise<T> {
-    this.end();
+    const step = this.running().at(-1);
+    if (step !== undefined) step.paused = true;
+    this.refresh();
     try {
       return await body();
     } finally {
-      this.begin();
+      if (step !== undefined) step.paused = false;
+      this.refresh();
     }
+  }
+
+  private running(): Step[] {
+    return this.steps.filter((step) => !step.paused);
   }
 
   private async gate(question: string, shape?: z.ZodType): Promise<unknown> {
@@ -578,13 +588,14 @@ class Execution {
     this.refresh();
   }
 
-  private begin(): void {
-    this.steps += 1;
+  private begin(id: string, label: string): void {
+    this.steps.push({ id, label, paused: false });
     this.refresh();
   }
 
-  private end(): void {
-    this.steps -= 1;
+  private end(id: string): void {
+    const index = this.steps.findIndex((step) => step.id === id);
+    if (index !== -1) this.steps.splice(index, 1);
     this.refresh();
   }
 
@@ -597,7 +608,8 @@ class Execution {
   }
 
   private stateNow(): State {
-    if (this.steps > this.waits.length) return { state: "running", detail: undefined };
+    const live = this.running();
+    if (live.length > this.waits.length) return { state: "running", detail: live.at(-1)?.label };
     const reader = this.readers[0];
     if (reader !== undefined) return { state: "blocked", detail: reader.question };
     const want = this.wants[0];

@@ -44,7 +44,7 @@ Two roles the engine treats specially:
 
 ## Events
 
-Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended with its activity, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, gates asked and answered, credentials asked and ready. A gate asked event carries the answer shape as a JSON schema when the gate has one. A credential event carries the fields by name, never a value. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
+Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended with its activity, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, gates asked and answered, credentials asked and ready. An agent event carries its kind: what the agent said, what it thought, a tool call, or raw output. A tool call event carries the tool name and one line for what the call acts on, which is the adapter's reading of the tool arguments. How any of it looks on a screen is the view adapter's choice. A gate asked event carries the answer shape as a JSON schema when the gate has one. A credential event carries the fields by name, never a value. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
 
 ## Messages
 
@@ -77,7 +77,7 @@ A run is in one of four states:
 - **idle**: the run waits on the outside world, inside `host.wait`.
 - **done**: the run function returned, the user stopped it, an error ended it, or the process died. Done is final: nothing revives a run. To act again, start a new run.
 
-When waits overlap, running beats blocked, and blocked beats idle. The run process emits a state event on every change.
+When waits overlap, running beats blocked, and blocked beats idle. The run process emits a state event on every change. The event carries a detail: the innermost step's label while running, the question while blocked, and the wait's label while idle. A step that waits on the user stops counting as running until the answer lands.
 
 In a viewer: typing into the input field sends a message, a key switches which session's stream fills the screen, `q` detaches, and Ctrl-C stops the run. A gate with a shape draws a control on a terminal, picked from the shape: a list for an enum, a checkbox list for an array of enum, yes or no for a boolean, and the input field with the expected type for anything else. The choice goes back as a message like any other, and an answer from elsewhere closes the control. The engine validates every answer against the shape, and asks the same question again until one fits. A stop kills the steps in flight, records the stop, and the run is done. Attaching to a done run renders the history read-only: no input field, because nothing can react.
 

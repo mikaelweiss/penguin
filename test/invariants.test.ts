@@ -78,6 +78,7 @@ export default workflow({
     "step",
     "state",
     "step",
+    "state",
     "fact",
     "activity",
     "artifact",

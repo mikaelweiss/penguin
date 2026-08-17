@@ -441,6 +441,7 @@ export default workflow({
     "step:start",
     "state",
     "step:end",
+    "state",
     "fact",
     "artifact",
     "activity:end",
@@ -451,6 +452,38 @@ export default workflow({
   const step = events[2] as { label?: string; activity?: string };
   assert.equal(step.label, "shell.run");
   assert.equal(step.activity, span.id);
+});
+
+test("the running state names the step that is running", (t) => {
+  const box = sandbox(t);
+  box.withShell();
+  box.setAgent("none");
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent, shell }) {
+    await shell.run("true");
+    await agent().run("./skill.md");
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
+
+  assert.deepEqual(
+    box
+      .events("w-1")
+      .filter((event) => event["type"] === "state")
+      .map((event) => `${String(event["state"])}:${String(event["detail"] ?? "")}`),
+    ["running:shell.run", "running:", "running:agent ./skill.md", "running:"],
+  );
 });
 
 test("a session event names each session, by default and by option", (t) => {

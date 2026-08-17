@@ -1,7 +1,13 @@
 import { adapter } from "penguin";
 import type { AgentTurn, AgentTurnResult } from "penguin";
 
-type ContentBlock = { type?: string; text?: string; name?: string };
+type ContentBlock = {
+  type?: string;
+  text?: string;
+  thinking?: string;
+  name?: string;
+  input?: unknown;
+};
 type StreamLine = {
   type?: string;
   is_error?: boolean;
@@ -9,6 +15,36 @@ type StreamLine = {
   structured_output?: unknown;
   message?: { content?: ContentBlock[] };
 };
+
+const TARGETS = [
+  "command",
+  "file_path",
+  "path",
+  "pattern",
+  "query",
+  "url",
+  "skill",
+  "description",
+  "prompt",
+];
+
+/** The one value that says what a tool call acts on. Only this adapter knows claude's tool shapes. */
+function target(input: unknown): string | undefined {
+  if (input === null || typeof input !== "object") return undefined;
+  const values = input as Record<string, unknown>;
+  const named = TARGETS.map((field) => values[field]).find(said);
+  if (named !== undefined) return flatten(named as string);
+  const first = Object.values(values).find(said);
+  return first === undefined ? undefined : flatten(first as string);
+}
+
+function said(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function flatten(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
 
 export default adapter({
   role: "agent",
@@ -40,8 +76,22 @@ export default adapter({
             if (block.type === "text" && block.text !== undefined && block.text !== "") {
               host.emit({ type: "agent", session: turn.session, kind: "text", text: block.text });
             }
+            if (block.type === "thinking" && block.thinking !== undefined && block.thinking !== "") {
+              host.emit({
+                type: "agent",
+                session: turn.session,
+                kind: "thinking",
+                text: block.thinking,
+              });
+            }
             if (block.type === "tool_use" && block.name !== undefined) {
-              host.emit({ type: "agent", session: turn.session, kind: "tool", text: block.name });
+              host.emit({
+                type: "agent",
+                session: turn.session,
+                kind: "tool",
+                text: block.name,
+                detail: target(block.input),
+              });
             }
           }
         }

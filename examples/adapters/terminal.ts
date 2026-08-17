@@ -60,6 +60,12 @@ export default adapter({
       timer = undefined;
       if (tty) process.stdout.write("\r\x1b[2K");
     };
+    const cut = (line: string): string => {
+      const limit = (process.stdout.columns ?? 80) - 1;
+      if (!tty || line.length <= limit) return line;
+      return `${line.slice(0, limit - 3)}...`;
+    };
+    const dim = (text: string): string => (tty ? `\x1b[2m${text}\x1b[0m` : text);
     const speaker = (id: string): string => {
       const name = sessions.get(id);
       if (name === undefined || sessions.size < 2) return "";
@@ -120,8 +126,20 @@ export default adapter({
             return;
           }
           case "agent":
-            if (event.kind === "output") process.stdout.write(event.text);
-            else print(`${speaker(event.session)}${event.kind === "tool" ? `[${event.text}]` : event.text}`);
+            if (event.kind === "output") {
+              process.stdout.write(event.text);
+              return;
+            }
+            if (event.kind === "thinking") {
+              for (const line of event.text.split("\n")) print(line === "" ? "" : dim(`  ${line}`));
+              return;
+            }
+            if (event.kind === "tool") {
+              const detail = event.detail === undefined ? "" : ` ${event.detail}`;
+              print(cut(`${speaker(event.session)}[${event.text}]${detail}`));
+              return;
+            }
+            print(`${speaker(event.session)}${event.text}`);
             return;
           default:
             return;

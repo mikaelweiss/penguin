@@ -45,7 +45,8 @@ function lineOf(event: ViewEvent): string | undefined {
       return where === undefined ? `artifact: ${event.title}` : `artifact: ${event.title} (${where})`;
     }
     case "agent":
-      return event.kind === "tool" ? `[${event.text}]` : event.text;
+      if (event.kind !== "tool") return event.text;
+      return event.detail === undefined ? `[${event.text}]` : `[${event.text}] ${event.detail}`;
     case "gate":
       return event.phase === "asked" ? `gate: ${event.question}` : undefined;
     case "credential":
