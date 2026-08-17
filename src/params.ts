@@ -13,11 +13,21 @@ export function usage(schema: z.ZodObject): string[] {
 export function parseParams(schema: z.ZodObject, argv: string[]): Record<string, unknown> {
   const shape = schema.shape as Record<string, unknown>;
   const values: Record<string, unknown> = {};
+  const ordered = Object.entries(shape)
+    .filter(([, field]) => inspect(field).kind !== "boolean")
+    .map(([name]) => name);
   let index = 0;
   while (index < argv.length) {
     const token = argv[index] ?? "";
     if (!token.startsWith("--")) {
-      throw new PenguinError(`params take the form --name value, got ${token}`);
+      const open = ordered.find((key) => !(key in values));
+      if (open === undefined) {
+        const takes = ordered.length === 0 ? "no params by position" : `only ${ordered.join(", ")}`;
+        throw new PenguinError(`nothing left to fill with ${token}. This workflow takes ${takes}`);
+      }
+      values[open] = coerce(inspect(shape[open]).kind, open, token);
+      index += 1;
+      continue;
     }
     let name = token.slice(2);
     let raw: string | undefined;

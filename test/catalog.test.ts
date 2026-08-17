@@ -46,10 +46,49 @@ export default adapter({
   name: "gh",
   description: "fake github",
   build: () => ({
+    issue: {
+      get: async (ref) => ({
+        ok: true,
+        issue: {
+          number: Number(ref),
+          title: "the footer scrolls away",
+          body: "it should stay put",
+          state: "OPEN",
+          url: "https://example.test/issues/" + ref,
+        },
+        reason: "",
+      }),
+    },
     pr: {
       create: async () => ({ ok: true, url: "https://example.test/pr/7", reason: "" }),
       diff: async () => ({ ok: true, diff: "diff --git a/a b/a", reason: "" }),
       comment: async () => ({ ok: true, reason: "" }),
+    },
+  }),
+});
+`;
+
+const fakeJira = `import { adapter } from "penguin";
+
+export default adapter({
+  role: "jira",
+  name: "cloud",
+  description: "fake jira",
+  build: () => ({
+    issue: {
+      get: async (key) => ({
+        ok: true,
+        issue: {
+          key,
+          summary: "the login times out",
+          description: "it hangs at the spinner",
+          status: "To Do",
+          type: "Bug",
+          assignee: "",
+          url: "https://example.test/browse/" + key,
+        },
+        reason: "",
+      }),
     },
   }),
 });
@@ -65,6 +104,7 @@ function catalogReady(box: Sandbox, result: string): void {
 function outsideReady(box: Sandbox): void {
   box.writeAdapter("git", fakeVcs);
   box.writeAdapter("gh", fakeGithub);
+  box.writeAdapter("jira", fakeJira);
 }
 
 async function gateOf(box: Sandbox, run: string): Promise<string> {
@@ -141,7 +181,7 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
   const started = box.penguin("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "ticket-1", "Approve the plan?", "approve");
+  await answerGate(box, "ticket-1", "Type approve", "approve");
   await answerGate(box, "ticket-1", "PR is up:", "done");
   const ended = await box.waitForEnd("ticket-1");
 
@@ -163,6 +203,29 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
   const worktree = path.join(box.project, "penguin-ABC-1");
   const dirs = box.sessions().map((line) => line.cwd);
   assert.ok(dirs.includes(worktree), `no session ran in the worktree: ${dirs.join(", ")}`);
+});
+
+test("the catalog plan workflow reads a jira key it was given by position", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"spec":"plan.md","acceptance":"acceptance.md"}');
+  outsideReady(box);
+  box.setAgent('{"spec":"plan.md","acceptance":"acceptance.md"}', "prompts.txt");
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "plan.ts"),
+    "https://example.test/browse/ABC-1?atlOrigin=xyz",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "plan-1", "Type approve", "approve");
+  const ended = await box.waitForEnd("plan-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  const [prompt] = box.invocations("prompts.txt");
+  assert.match(String(prompt), /ABC-1: the login times out/);
+  assert.match(String(prompt), /it hangs at the spinner/);
 });
 
 test("the catalog ticket workflow stops at the triage gate", async (t) => {

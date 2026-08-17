@@ -51,6 +51,25 @@ test("params are coerced to the schema types", (t) => {
   assert.deepEqual(box.lines("out.txt"), ["3:true:release", "4:false:none"]);
 });
 
+test("a bare value fills the next unfilled param, and a boolean is a flag only", (t) => {
+  const box = sandbox(t);
+  box.withShell();
+  box.write("w.ts", paramsWorkflow);
+
+  assert.equal(box.penguin("run", "./w.ts", "3", "release").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "4", "--dry").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--count", "5", "beta").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--tag", "rc", "6").code, 0);
+
+  assert.deepEqual(box.lines("out.txt"), ["3:false:release", "4:true:none", "5:false:beta", "6:false:rc"]);
+
+  const failed = box.penguin("run", "./w.ts", "1", "two", "three");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /nothing left to fill with three/);
+  assert.match(failed.stderr, /count, tag/);
+});
+
 test("a missing param fails before the run is created", (t) => {
   const box = sandbox(t);
   box.write("w.ts", paramsWorkflow);

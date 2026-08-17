@@ -15,7 +15,7 @@ export default workflow({
 
 `description` is required: a non-empty string. `pn list workflows` reads it from the export. A file with no description fails to load.
 
-`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. `pn list workflows` prints the fields as the params the workflow takes. A URL or file path is text the workflow hands to an agent.
+`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. `--name value` fills the field it names. A bare value fills the first field nothing has filled yet, in the order the schema declares them, so the first param never needs its name. A boolean field is a flag only, and no bare value ever fills it. `pn list workflows` prints the fields as the params the workflow takes. A URL or file path is text the workflow hands to an agent.
 
 penguin imports the module and reads the exported params schema without calling `run`. Module top level is side-effect-free.
 
