@@ -4,13 +4,13 @@ The npm package carries an `examples/` directory, and install copies it into `~/
 
 - `examples/adapters/claude.ts`: the `agent` role on the claude CLI: sessions over `--session-id` and `--resume`, stream-json into typed agent events, results over `--json-schema`.
 - `examples/adapters/git.ts`: the `vcs` role on git: staging, commits, and worktrees.
-- `examples/adapters/gh.ts`: the `github` role on the gh CLI: create, diff, and comment on pull requests.
+- `examples/adapters/gh.ts`: the `github` role on the gh CLI: read an issue, and create, diff, and comment on pull requests.
 - `examples/adapters/jira.ts`: the `jira` role on the Jira Cloud REST API: read, search, create, comment on, and transition issues, under a token penguin asks for once (`20-architecture.md`, credentials).
 - `examples/adapters/terminal.ts`: the `view` role: events as terminal lines, and a live footer on a TTY.
 - `examples/ticket.ts`: a ticket to merged PR pipeline: it calls triage, plan, implement, and pr, and holds the work in a worktree.
 - `examples/fix.ts`: a bug fix: reproduce, gate when the bug does not reproduce, then a fix loop that calls verify until the repository checks pass, then pr.
 - `examples/triage.ts`: one triage turn: is the ticket ready to work on, and the deciding fact.
-- `examples/plan.ts`: the plan turn plus the approve-or-revise gate, and it feeds a revision answer back to the planner.
+- `examples/plan.ts`: the plan turn plus the approve-or-revise gate, and it feeds a revision answer back to the planner. A ticket that reads as a Jira key or a GitHub issue number is fetched first, and anything else is the text itself.
 - `examples/implement.ts`: a persistent implementer with a fresh review call per round, accumulated findings, and a `rounds` bound.
 - `examples/review.ts`: one review turn of a working tree against its acceptance checks and the findings so far.
 - `examples/verify.ts`: one verify turn: the checks of the repository, and what fails.

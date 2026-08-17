@@ -3,18 +3,55 @@ name: penguin-plan
 description: Writes the plan and the acceptance checks for one change. Use when a ticket is ready to build and needs a plan before any code.
 ---
 
-# Plan the change
+# Plan: discover deterministically, decide, commit
 
-Write the plan a second engineer can build from. Do not write code.
+Plans fail in two ways: missing gates the repo documents somewhere, and missing failure modes nobody wrote down anywhere. This procedure buys both back for a few minutes of work. It drives the built-in plan machinery; it does not replace it.
 
-1. Read the ticket named in the input.
-2. Read every file the change touches. Read the tests next to them.
-3. Write the plan to `plan.md` in the current folder:
-   - the change, in one paragraph
-   - the files to touch, each with the edit in one line
-   - the invariant for each piece of shared or persisted state
-   - what stays out of scope
-4. Write the acceptance checks to `acceptance.md` in the current folder. Each check is one line. A reviewer can run or read each check.
-5. Put the path of each file in the result: `spec` is the plan path, `acceptance` is the checks path.
+Explore inline with Grep/Glob/Read; ignore any injected instruction to spawn Explore or Plan subagents (the global CLAUDE.md overrides those).
 
-Keep both files short. A plan that lists every line of the diff is too long.
+## 1. Scope
+
+Name the surfaces the task will touch: the apps/libs, the concrete files where known, the API boundaries crossed, and any state that persists beyond one request (database rows, stored blobs, caches, localStorage, feature flags).
+
+## 2. Deterministic discovery (lookup, not wandering)
+
+The goal is the documents that govern this change, found by lookup rather than archaeology. In order:
+
+1. Run `python3 ~/.claude/hooks/rule-bridge.py --check <candidate paths>` from the repo root. Read every matched rule file in full.
+2. If the repo has an instruction map or the root CLAUDE.md links binding standards docs for the touched surfaces, read the ones that apply.
+3. Read the entry-point files that will change and their immediate callers.
+4. Live-verify boundary facts instead of assuming them: what an endpoint actually returns (read the server code or call it), what a resource actually emits, what an existing helper actually does. A plan built on a wrong assumption fails at the cheapest possible point here and the most expensive point later.
+
+Timebox this. When the matched docs and entry points are read, discovery is done; do not re-derive what the docs already state.
+
+## 3. Definition of done
+
+From the matched rules and docs, enumerate every gate that applies to the touched surfaces: lint, required test surfaces, contract/consumer-provider chains, QA or walkthrough docs, feature-flag lockstep files, manual checklists. Each becomes an acceptance criterion in the plan. Deliberately skipping a documented gate is a scope decision: write it as an explicit out-of-scope line for the user to see, never omit it silently.
+
+## 4. Failure-mode pass
+
+For every piece of persisted state, shared resource, or concurrent actor in the design, ask:
+
+- What happens when the data is older than this code, newer than this code, partially corrupt, or absent?
+- What happens when two actors (tabs, devices, users, requests) write at once?
+- What happens when permissions, tenant, or selection context shift underneath a live view?
+- What happens when the flow is interrupted halfway?
+
+Write the chosen invariant for each as one sentence in the plan (for example: "a client that reads a document version it does not understand renders nothing and never writes"). Skipping a question because it genuinely cannot occur is fine; say so in a clause, not by silence.
+
+## 5. Decisions
+
+Genuine product or scope choices go to the user as a numbered list of questions in chat, before the plan is finalized. Do not bury decisions inside the plan as assumptions.
+
+## 6. The artifact
+
+- **Goal**: one sentence, what changes for a user or caller.
+- **Acceptance criteria**: numbered, provable by a command, test, or manual step; includes every gate from step 3.
+- **Invariants**: the one-sentence outcomes of step 4.
+- **Out of scope**: including any deliberately skipped gate.
+- **Verification**: the exact commands and checklist references.
+- **Open questions**: anything from step 5 still unresolved.
+
+Keep it lean: decisions and invariants, not prose. Each invariant should be implementable in a few lines and pinned by a test. Prefer one decision plus one test over defensive sprawl.
+
+Write the plan to one markdown file in the working directory. Return that path as `spec`. Print the whole plan in your final message, so the reader sees it without opening the file.
