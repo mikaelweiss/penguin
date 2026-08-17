@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { WaError } from "./errors.ts";
+import { PenguinError } from "./errors.ts";
 
 export function lockPath(dir: string): string {
   return path.join(dir, "lock");
@@ -23,7 +23,7 @@ export function acquire(dir: string): () => void {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const pid = Number(fs.readFileSync(file, "utf8").trim());
       if (alive(pid)) {
-        throw new WaError(`run ${path.basename(dir)} is already executing (pid ${pid})`);
+        throw new PenguinError(`run ${path.basename(dir)} is already executing (pid ${pid})`);
       }
       fs.rmSync(file, { force: true });
     }

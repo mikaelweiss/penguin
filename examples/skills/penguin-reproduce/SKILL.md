@@ -1,5 +1,5 @@
 ---
-name: wa-reproduce
+name: penguin-reproduce
 description: Reproduces a reported bug and records the steps that show it. Use before any fix, when a bug report needs confirmation.
 ---
 

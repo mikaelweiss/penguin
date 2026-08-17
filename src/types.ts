@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export const COMPOSE: unique symbol = Symbol.for("wa.compose");
+export const COMPOSE: unique symbol = Symbol.for("penguin.compose");
 
 export type CommandResult = {
   code: number;
@@ -70,7 +70,7 @@ export type AgentOptions = {
 
 export type AgentFactory = (options?: AgentOptions) => AgentSession;
 
-/** The roles the installed adapters put on ctx. wa-env.d.ts merges them in. */
+/** The roles the installed adapters put on ctx. penguin-env.d.ts merges them in. */
 export interface Adapters {}
 
 export type Ctx<Params> = {

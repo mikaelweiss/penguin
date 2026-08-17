@@ -9,7 +9,7 @@ import { type Sandbox, sandbox, terminal, waitFor } from "./helpers.ts";
 function gateWorkflow(box: Sandbox, question: string, shape: string): void {
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -40,7 +40,7 @@ function shapeOf(shape: z.ZodType): Record<string, unknown> {
 test("an enum gate draws a single-select list, and the pick answers it", async (t) => {
   const box = sandbox(t);
   gateWorkflow(box, "Environment?", 'z.enum(["dev", "staging", "prod"])');
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const screen = terminal(t, box.home);
@@ -61,7 +61,7 @@ test("an enum gate draws a single-select list, and the pick answers it", async (
 test("an array gate draws a checkbox list, and space toggles the labels", async (t) => {
   const box = sandbox(t);
   gateWorkflow(box, "Which targets?", 'z.array(z.enum(["web", "ios"]))');
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const screen = terminal(t, box.home);
@@ -85,7 +85,7 @@ test("an array gate draws a checkbox list, and space toggles the labels", async 
 test("a boolean gate draws yes and no", async (t) => {
   const box = sandbox(t);
   gateWorkflow(box, "Ship it?", "z.boolean()");
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const screen = terminal(t, box.home);
@@ -103,7 +103,7 @@ test("a boolean gate draws yes and no", async (t) => {
 test("a number gate shows the type hint and takes the typed line", async (t) => {
   const box = sandbox(t);
   gateWorkflow(box, "Port?", "z.number().min(1).max(65535)");
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const screen = terminal(t, box.home);
@@ -123,7 +123,7 @@ test("a number gate shows the type hint and takes the typed line", async (t) => 
 test("an answer from outside cancels the control", async (t) => {
   const box = sandbox(t);
   gateWorkflow(box, "Environment?", 'z.enum(["dev", "staging", "prod"])');
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const screen = terminal(t, box.home);

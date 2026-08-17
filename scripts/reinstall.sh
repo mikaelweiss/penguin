@@ -1,8 +1,8 @@
 #!/bin/bash
 
-npm uninstall -g wa
+npm uninstall -g penguin
 
-rm -rf ~/.wa
+rm -rf ~/.penguin
 
 npm install
 

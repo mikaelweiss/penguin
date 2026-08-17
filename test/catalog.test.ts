@@ -22,7 +22,7 @@ const workflowFiles = [
   "verify.ts",
 ];
 
-const fakeVcs = `import { adapter } from "wa";
+const fakeVcs = `import { adapter } from "penguin";
 
 export default adapter({
   role: "vcs",
@@ -39,7 +39,7 @@ export default adapter({
 });
 `;
 
-const fakeGithub = `import { adapter } from "wa";
+const fakeGithub = `import { adapter } from "penguin";
 
 export default adapter({
   role: "github",
@@ -138,7 +138,7 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
   );
   outsideReady(box);
 
-  const started = box.wa("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
+  const started = box.penguin("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "ticket-1", "Approve the plan?", "approve");
@@ -160,7 +160,7 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
   assert.ok(reviewed !== undefined);
   assert.ok(ancestors(spans, reviewed).includes(await description("implement.ts")));
 
-  const worktree = path.join(box.project, "wa-ABC-1");
+  const worktree = path.join(box.project, "penguin-ABC-1");
   const dirs = box.sessions().map((line) => line.cwd);
   assert.ok(dirs.includes(worktree), `no session ran in the worktree: ${dirs.join(", ")}`);
 });
@@ -169,7 +169,7 @@ test("the catalog ticket workflow stops at the triage gate", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"actionable":false,"reason":"no repro"}');
 
-  const started = box.wa("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
+  const started = box.penguin("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
 
   assert.equal(started.code, 0, started.output);
   assert.equal(await gateOf(box, "ticket-1"), "Not actionable: no repro");
@@ -184,7 +184,7 @@ test("the catalog implement workflow runs alone in the invoking repository", asy
   const box = sandbox(t);
   catalogReady(box, '{"verdict":"approved","findings":"none"}');
 
-  const started = box.wa(
+  const started = box.penguin(
     "run",
     path.join(examples, "implement.ts"),
     "--task",
@@ -217,7 +217,7 @@ test("the catalog implement workflow stops after its round bound", async (t) => 
   const box = sandbox(t);
   catalogReady(box, '{"verdict":"changes_needed","findings":"the flag is still there"}');
 
-  const started = box.wa(
+  const started = box.penguin(
     "run",
     path.join(examples, "implement.ts"),
     "--task",
@@ -240,7 +240,7 @@ test("the catalog fix workflow gates when the bug does not reproduce", async (t)
   const box = sandbox(t);
   catalogReady(box, '{"reproduced":false,"notes":"the page loads"}');
 
-  const started = box.wa("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
+  const started = box.penguin("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
 
   assert.equal(started.code, 0, started.output);
   assert.equal(await gateOf(box, "fix-1"), "Not reproduced: the page loads");
@@ -256,7 +256,7 @@ test("the catalog fix workflow verifies the fix and opens the pull request", asy
   );
   outsideReady(box);
 
-  const started = box.wa("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
+  const started = box.penguin("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "fix-1", "PR is up:", "done");
@@ -279,7 +279,7 @@ test("the catalog review-pr workflow posts the findings it was told to post", as
   catalogReady(box, '{"verdict":"changes_needed","report":"findings.md"}');
   outsideReady(box);
 
-  const started = box.wa("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "review-pr-1", "changes_needed, findings in", "post");
@@ -293,7 +293,7 @@ test("the catalog review-pr workflow gates when the diff command fails", async (
   const box = sandbox(t);
   catalogReady(box, "none");
 
-  const started = box.wa("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
 
   assert.equal(started.code, 0, started.output);
   const question = await gateOf(box, "review-pr-1");
@@ -309,7 +309,7 @@ test("the catalog make-workflow workflow designs, writes, and reviews the new wo
     '{"path":"workflow-design.md","summary":"one summary","file":"new-thing.ts","name":"new-thing","verdict":"approved","findings":"none"}',
   );
 
-  const started = box.wa(
+  const started = box.penguin(
     "run",
     path.join(examples, "make-workflow.ts"),
     "--idea",
@@ -322,7 +322,7 @@ test("the catalog make-workflow workflow designs, writes, and reviews the new wo
   const ended = await box.waitForEnd("make-workflow-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
-  assert.deepEqual(ended["result"], { file: "new-thing.ts", run: "wa run new-thing" });
+  assert.deepEqual(ended["result"], { file: "new-thing.ts", run: "penguin run new-thing" });
 
   const labels = activities(box, "make-workflow-1").map((span) => span.label);
   assert.deepEqual(labels, ["round 1 of 3"]);
@@ -340,7 +340,7 @@ test("the catalog make-workflow workflow stops after its round bound", async (t)
     '{"path":"workflow-design.md","summary":"one summary","file":"new-thing.ts","name":"new-thing","verdict":"changes_needed","findings":"the loop has no bound"}',
   );
 
-  const started = box.wa(
+  const started = box.penguin(
     "run",
     path.join(examples, "make-workflow.ts"),
     "--idea",
@@ -382,7 +382,7 @@ test("every catalog skill follows the SKILL.md format", () => {
   assert.ok(names.length > 0);
 
   for (const name of names) {
-    assert.match(name, /^wa-[a-z0-9]+(-[a-z0-9]+)*$/, `${name} is not a wa- prefixed skill name`);
+    assert.match(name, /^penguin-[a-z0-9]+(-[a-z0-9]+)*$/, `${name} is not a penguin- prefixed skill name`);
     assert.ok(name.length <= 64, `${name} is longer than 64 characters`);
 
     const text = fs.readFileSync(path.join(dir, name, "SKILL.md"), "utf8");
@@ -413,23 +413,23 @@ test("the catalog adapters and tsconfig are ready to copy", () => {
     compilerOptions: { paths: Record<string, string[]> };
     include: string[];
   };
-  assert.ok(config.compilerOptions.paths["wa"]?.[0]?.includes("wa"));
+  assert.ok(config.compilerOptions.paths["penguin"]?.[0]?.includes("penguin"));
   assert.ok(config.compilerOptions.paths["zod"]?.[0]?.includes("zod"));
   assert.ok(config.include.includes("adapters/*.ts"));
 });
 
-test("the checked-in wa-env.d.ts is what wa writes for the catalog", async () => {
-  const prior = process.env["WA_HOME"];
-  process.env["WA_HOME"] = examples;
+test("the checked-in penguin-env.d.ts is what penguin writes for the catalog", async () => {
+  const prior = process.env["PENGUIN_HOME"];
+  process.env["PENGUIN_HOME"] = examples;
   try {
     const list = await installed(examples);
     assert.equal(
       renderEnv(examples, list),
-      fs.readFileSync(path.join(examples, "wa-env.d.ts"), "utf8"),
+      fs.readFileSync(path.join(examples, "penguin-env.d.ts"), "utf8"),
     );
   } finally {
-    if (prior === undefined) delete process.env["WA_HOME"];
-    else process.env["WA_HOME"] = prior;
+    if (prior === undefined) delete process.env["PENGUIN_HOME"];
+    else process.env["PENGUIN_HOME"] = prior;
   }
 });
 
@@ -439,7 +439,7 @@ test("a workflow loads inside a repo whose package.json has no type field", (t) 
   fs.writeFileSync(path.join(box.project, "package.json"), '{"name":"repo"}\n');
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -452,7 +452,7 @@ export default workflow({
 `,
   );
 
-  const done = box.wa("run", "./w.ts", "--tag", "loaded");
+  const done = box.penguin("run", "./w.ts", "--tag", "loaded");
 
   assert.equal(done.code, 0, done.output);
   assert.deepEqual(box.lines("out.txt"), ["loaded"]);

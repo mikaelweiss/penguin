@@ -1,5 +1,5 @@
 ---
-name: wa-review-diff
+name: penguin-review-diff
 description: Reviews a pull request diff and writes the findings to a markdown file. Use when an open pull request needs a review comment, before the merge.
 ---
 

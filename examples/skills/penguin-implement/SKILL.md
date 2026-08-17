@@ -1,5 +1,5 @@
 ---
-name: wa-implement
+name: penguin-implement
 description: Builds the change a plan describes, with its tests and quality gates. Use when a plan is approved and the code must be written.
 ---
 

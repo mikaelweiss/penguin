@@ -27,7 +27,7 @@ function fakeAgentSource(
   log: string,
 ): string {
   return `import fs from "node:fs";
-import { adapter } from "wa";
+import { adapter } from "penguin";
 
 const result = ${JSON.stringify(result)};
 const marker = ${JSON.stringify(marker ?? null)};
@@ -61,7 +61,7 @@ export default adapter({
 `;
 }
 
-const shellSource = `import { adapter } from "wa";
+const shellSource = `import { adapter } from "penguin";
 
 export default adapter({
   role: "shell",
@@ -78,7 +78,7 @@ export type Sandbox = {
   userHome: string;
   project: string;
   writeSkill(dir: string, name: string, text: string): void;
-  wa(...args: string[]): Result;
+  penguin(...args: string[]): Result;
   start(...args: string[]): ChildProcess;
   write(relative: string, text: string): string;
   read(relative: string): string;
@@ -101,8 +101,8 @@ export type Sandbox = {
 };
 
 export function sandbox(t: TestContext): Sandbox {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wa-test-")));
-  const home = path.join(root, "wa-home");
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-test-")));
+  const home = path.join(root, "penguin-home");
   const userHome = path.join(root, "user-home");
   const project = path.join(root, "project");
   fs.mkdirSync(home);
@@ -114,7 +114,7 @@ export function sandbox(t: TestContext): Sandbox {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const env = { ...process.env, WA_HOME: home, HOME: userHome };
+  const env = { ...process.env, PENGUIN_HOME: home, HOME: userHome };
   const box: Sandbox = {
     home,
     userHome,
@@ -124,7 +124,7 @@ export function sandbox(t: TestContext): Sandbox {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, text);
     },
-    wa(...args) {
+    penguin(...args) {
       const done = spawnSync(process.execPath, [cli, ...args], {
         cwd: project,
         env,
@@ -175,7 +175,7 @@ export function sandbox(t: TestContext): Sandbox {
       box.writeAdapter("shell", shellSource);
     },
     writeAdapter(name, source, scope = "home") {
-      const dir = scope === "home" ? path.join(home, "adapters") : path.join(project, ".wa", "adapters");
+      const dir = scope === "home" ? path.join(home, "adapters") : path.join(project, ".penguin", "adapters");
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, `${name}.ts`), source);
     },
@@ -266,7 +266,7 @@ export function terminal(t: TestContext, home: string): Screen {
   const stdin = Object.getOwnPropertyDescriptor(process, "stdin");
   const isTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
   const write = process.stdout.write.bind(process.stdout);
-  const waHome = process.env["WA_HOME"];
+  const penguinHome = process.env["PENGUIN_HOME"];
   const chunks: string[] = [];
   let stopped = false;
   const restore = (): string => {
@@ -276,8 +276,8 @@ export function terminal(t: TestContext, home: string): Screen {
     if (stdin !== undefined) Object.defineProperty(process, "stdin", stdin);
     if (isTTY === undefined) delete (process.stdout as { isTTY?: boolean }).isTTY;
     else Object.defineProperty(process.stdout, "isTTY", isTTY);
-    if (waHome === undefined) delete process.env["WA_HOME"];
-    else process.env["WA_HOME"] = waHome;
+    if (penguinHome === undefined) delete process.env["PENGUIN_HOME"];
+    else process.env["PENGUIN_HOME"] = penguinHome;
     return chunks.join("");
   };
   Object.defineProperty(process, "stdin", { value: input, configurable: true });
@@ -286,7 +286,7 @@ export function terminal(t: TestContext, home: string): Screen {
     chunks.push(chunk.toString());
     return true;
   }) as typeof process.stdout.write;
-  process.env["WA_HOME"] = home;
+  process.env["PENGUIN_HOME"] = home;
   t.after(restore);
   return { input, text: () => chunks.join(""), stop: restore };
 }

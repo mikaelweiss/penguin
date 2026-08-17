@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { exited, sandbox } from "./helpers.ts";
 
-const paramsWorkflow = `import { workflow } from "wa";
+const paramsWorkflow = `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -16,7 +16,7 @@ export default workflow({
 });
 `;
 
-const quickWorkflow = `import { workflow } from "wa";
+const quickWorkflow = `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -28,7 +28,7 @@ export default workflow({
 });
 `;
 
-const gateWorkflow = `import { workflow } from "wa";
+const gateWorkflow = `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -45,8 +45,8 @@ test("params are coerced to the schema types", (t) => {
   box.withShell();
   box.write("w.ts", paramsWorkflow);
 
-  assert.equal(box.wa("run", "./w.ts", "--count", "3", "--dry", "--tag", "release").code, 0);
-  assert.equal(box.wa("run", "./w.ts", "--count=4", "--no-dry").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--count", "3", "--dry", "--tag", "release").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--count=4", "--no-dry").code, 0);
 
   assert.deepEqual(box.lines("out.txt"), ["3:true:release", "4:false:none"]);
 });
@@ -55,7 +55,7 @@ test("a missing param fails before the run is created", (t) => {
   const box = sandbox(t);
   box.write("w.ts", paramsWorkflow);
 
-  const failed = box.wa("run", "./w.ts");
+  const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /invalid params:/);
@@ -68,7 +68,7 @@ test("an unknown param names the params the workflow takes", (t) => {
   const box = sandbox(t);
   box.write("w.ts", paramsWorkflow);
 
-  const failed = box.wa("run", "./w.ts", "--count", "1", "--nope", "x");
+  const failed = box.penguin("run", "./w.ts", "--count", "1", "--nope", "x");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /unknown param --nope/);
@@ -79,7 +79,7 @@ test("a param that needs a number rejects text", (t) => {
   const box = sandbox(t);
   box.write("w.ts", paramsWorkflow);
 
-  const failed = box.wa("run", "./w.ts", "--count", "many");
+  const failed = box.penguin("run", "./w.ts", "--count", "many");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /--count needs a number/);
@@ -90,9 +90,9 @@ test("run names count up per workflow file", (t) => {
   box.write("w.ts", quickWorkflow);
   box.write("other.ts", quickWorkflow);
 
-  assert.match(box.wa("run", "./w.ts", "--background").stdout, /^run w-1 started,/m);
-  assert.match(box.wa("run", "./w.ts", "--background").stdout, /^run w-2 started,/m);
-  assert.match(box.wa("run", "./other.ts", "--background").stdout, /^run other-1 started,/m);
+  assert.match(box.penguin("run", "./w.ts", "--background").stdout, /^run w-1 started,/m);
+  assert.match(box.penguin("run", "./w.ts", "--background").stdout, /^run w-2 started,/m);
+  assert.match(box.penguin("run", "./other.ts", "--background").stdout, /^run other-1 started,/m);
 
   assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")).sort(), ["other-1", "w-1", "w-2"]);
 });
@@ -101,15 +101,15 @@ test("a run starts by naming the run and the agent adapter", (t) => {
   const box = sandbox(t);
   box.write("w.ts", quickWorkflow);
 
-  const bare = box.wa("run", "./w.ts");
+  const bare = box.penguin("run", "./w.ts");
   assert.equal(bare.code, 0, bare.output);
   assert.match(bare.stdout, /^run w-1 started, no agent adapter is installed$/m);
 
   box.setAgent("none");
-  const watched = box.wa("run", "./w.ts");
+  const watched = box.penguin("run", "./w.ts");
   assert.match(watched.stdout, /^run w-2 started, agent fake$/m);
 
-  const background = box.wa("run", "./w.ts", "--background");
+  const background = box.penguin("run", "./w.ts", "--background");
   assert.equal(background.code, 0, background.output);
   assert.equal(background.stdout, "run w-3 started, agent fake\n");
 });
@@ -117,10 +117,10 @@ test("a run starts by naming the run and the agent adapter", (t) => {
 test("ps lists the live runs as a table, and never a done one", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  const live = box.wa("ps");
+  const live = box.penguin("ps");
 
   assert.equal(live.code, 0, live.output);
   const rows = live.stdout.split("\n").filter((line) => line.trim() !== "");
@@ -131,7 +131,7 @@ test("ps lists the live runs as a table, and never a done one", async (t) => {
   box.send("w-1", "yes");
   await box.waitForEnd("w-1");
 
-  const finished = box.wa("ps");
+  const finished = box.penguin("ps");
   assert.equal(finished.stdout.split("\n").filter((line) => line.trim() !== "").length, 1);
   assert.doesNotMatch(finished.stdout, /w-1/);
 });
@@ -139,7 +139,7 @@ test("ps lists the live runs as a table, and never a done one", async (t) => {
 test("ps with no live run prints the header alone", (t) => {
   const box = sandbox(t);
 
-  const empty = box.wa("ps");
+  const empty = box.penguin("ps");
 
   assert.equal(empty.code, 0);
   assert.equal(empty.stdout, "RUN  WORKFLOW  STATE  DETAIL  AGE  DIRECTORY\n");
@@ -148,7 +148,7 @@ test("ps with no live run prints the header alone", (t) => {
 test("attach follows a live run and leaves when the run ends", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const viewer = box.start("attach", "w-1");
@@ -169,27 +169,27 @@ test("attach follows a live run and leaves when the run ends", async (t) => {
 test("attach names the runs it cannot open", (t) => {
   const box = sandbox(t);
 
-  const bare = box.wa("attach");
+  const bare = box.penguin("attach");
   assert.equal(bare.code, 1);
-  assert.match(bare.stderr, /wa attach needs a run name/);
+  assert.match(bare.stderr, /penguin attach needs a run name/);
 
-  const missing = box.wa("attach", "nothing-1");
+  const missing = box.penguin("attach", "nothing-1");
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /no run named nothing-1/);
 });
 
-test("wa help prints the usage", (t) => {
+test("penguin help prints the usage", (t) => {
   const box = sandbox(t);
 
-  const help = box.wa("help");
+  const help = box.penguin("help");
 
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /wa list workflows\|skills\|adapters \[--verbose\]/);
-  assert.match(help.stdout, /wa run <workflow> \[--param value \.\.\.\]/);
-  assert.match(help.stdout, /wa run <workflow> --background/);
-  assert.match(help.stdout, /wa ps/);
-  assert.match(help.stdout, /wa attach <run>/);
-  assert.match(help.stdout, /wa sync-skills/);
+  assert.match(help.stdout, /penguin list workflows\|skills\|adapters \[--verbose\]/);
+  assert.match(help.stdout, /penguin run <workflow> \[--param value \.\.\.\]/);
+  assert.match(help.stdout, /penguin run <workflow> --background/);
+  assert.match(help.stdout, /penguin ps/);
+  assert.match(help.stdout, /penguin attach <run>/);
+  assert.match(help.stdout, /penguin sync-skills/);
   assert.match(help.stdout, /q detaches, Ctrl-C stops the run/);
   assert.doesNotMatch(help.stdout, /resume/);
 });
@@ -197,7 +197,7 @@ test("wa help prints the usage", (t) => {
 test("an unknown command names it and prints the usage", (t) => {
   const box = sandbox(t);
 
-  const failed = box.wa("continue", "w-1");
+  const failed = box.penguin("continue", "w-1");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /unknown command continue/);
@@ -208,7 +208,7 @@ test("a workflow with no description fails to load", (t) => {
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -218,7 +218,7 @@ export default workflow({
 `,
   );
 
-  const failed = box.wa("run", "./w.ts");
+  const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /needs a description/);
@@ -228,7 +228,7 @@ test("a file that exports no workflow is refused", (t) => {
   const box = sandbox(t);
   box.write("w.ts", "export const nothing = 1;\n");
 
-  const failed = box.wa("run", "./w.ts");
+  const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /does not default-export a workflow/);
@@ -240,32 +240,32 @@ test("list adapters shows role, name, and description", (t) => {
   box.withShell();
   box.setAgent("none");
 
-  const listed = box.wa("list", "adapters");
+  const listed = box.penguin("list", "adapters");
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(listed.stdout, /^agent {2}fake\n {2}fake test agent$/m);
   assert.match(listed.stdout, /^shell {2}shell\n {2}test shell$/m);
 
-  const verbose = box.wa("list", "adapters", "--verbose");
+  const verbose = box.penguin("list", "adapters", "--verbose");
   assert.match(verbose.stdout, /^ {2}global {2}\S+adapters\/fake\.ts$/m);
 });
 
 test("list adapters with none installed says where they go", (t) => {
   const box = sandbox(t);
 
-  const empty = box.wa("list", "adapters");
+  const empty = box.penguin("list", "adapters");
 
   assert.equal(empty.code, 0);
   assert.match(empty.stdout, /no adapter file in/);
 });
 
-test("run and list adapters write the wa-env declaration", (t) => {
+test("run and list adapters write the penguin-env declaration", (t) => {
   const box = sandbox(t);
   box.withShell();
-  box.wa("list", "adapters");
+  box.penguin("list", "adapters");
 
-  const env = fs.readFileSync(path.join(box.home, "wa-env.d.ts"), "utf8");
-  assert.match(env, /declare module "wa"/);
+  const env = fs.readFileSync(path.join(box.home, "penguin-env.d.ts"), "utf8");
+  assert.match(env, /declare module "penguin"/);
   assert.match(env, /shell: ReturnType<\(typeof adapter0\)\["build"\]>;/);
   assert.match(env, /\.\/adapters\/shell\.ts/);
 });

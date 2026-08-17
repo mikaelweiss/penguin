@@ -1,5 +1,5 @@
 {
-  // "paths" points at the wa install. Run `npm root -g` to find it.
+  // "paths" points at the penguin install. Run `npm root -g` to find it.
   "compilerOptions": {
     "target": "es2023",
     "lib": ["es2023"],
@@ -10,8 +10,8 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "wa": ["./node_modules/wa/dist/index.d.ts", "../src/index.ts"],
-      "zod": ["./node_modules/wa/node_modules/zod", "./node_modules/zod", "../node_modules/zod"]
+      "penguin": ["./node_modules/penguin/dist/index.d.ts", "../src/index.ts"],
+      "zod": ["./node_modules/penguin/node_modules/zod", "./node_modules/zod", "../node_modules/zod"]
     }
   },
   "include": ["*.ts", "adapters/*.ts"]

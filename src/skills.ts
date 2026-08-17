@@ -52,7 +52,7 @@ export function roots(dir: string, scope: Scope): Root[] {
   const wanted = order(dir).filter((name) => inside.includes(name));
   const rest = inside.filter((name) => !wanted.includes(name)).sort();
   return [
-    { dir, scope, source: "wa" },
+    { dir, scope, source: "penguin" },
     ...[...wanted, ...rest].map((name) => ({ dir: path.join(dir, name), scope, source: name })),
   ];
 }

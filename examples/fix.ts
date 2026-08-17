@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 import pr from "./pr.ts";
 import verify from "./verify.ts";
@@ -18,7 +18,7 @@ export default workflow({
   async run(ctx) {
     const { params, agent, view, gate } = ctx;
     const investigator = agent();
-    const repro = (await investigator.run("wa-reproduce", {
+    const repro = (await investigator.run("penguin-reproduce", {
       input: params.bug,
       result: Reproduce,
     }))!;
@@ -35,7 +35,7 @@ export default workflow({
     for (let round = 1; round <= params.rounds && !passing; round++) {
       passing = await view.activity(`round ${round} of ${params.rounds}`, async () => {
         view.fact({ round: `${round}/${params.rounds}` });
-        await implementer.run("wa-implement", {
+        await implementer.run("penguin-implement", {
           input: brief(params.bug, repro.notes, failures),
         });
         const checks = await verify(ctx, {});

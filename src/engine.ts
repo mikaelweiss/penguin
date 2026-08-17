@@ -5,7 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import * as adapters from "./adapters.ts";
 import { readRun, type RunRecord } from "./create.ts";
-import { messageOf, WaError } from "./errors.ts";
+import { messageOf, PenguinError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { acquire } from "./lock.ts";
 import { load } from "./loader.ts";
@@ -153,7 +153,7 @@ class Execution {
           cached.set(prop, built);
           return built;
         }
-        throw new WaError(
+        throw new PenguinError(
           `nothing provides ctx.${prop}. Installed adapter roles: ${[...roles, "agent", "view"].sort().join(", ")}. Adapters are files in ${adapters.searched(this.record.cwd).join(" and ")}.`,
         );
       },
@@ -163,7 +163,7 @@ class Execution {
   private async compose(definition: Workflow, args: unknown): Promise<unknown> {
     const checked = definition.params.safeParse(args);
     if (!checked.success) {
-      throw new WaError(
+      throw new PenguinError(
         `invalid params for the workflow "${definition.description}": ${issues(checked.error)}`,
       );
     }
@@ -203,8 +203,8 @@ class Execution {
 
   private role(role: string): unknown {
     const picked = adapters.pick(this.found, role);
-    if ("missing" in picked) throw new WaError(picked.missing);
-    if ("conflict" in picked) throw new WaError(picked.conflict);
+    if ("missing" in picked) throw new PenguinError(picked.missing);
+    if ("conflict" in picked) throw new PenguinError(picked.conflict);
     return this.wrap(role, this.build(picked.found, this.host()));
   }
 
@@ -260,8 +260,8 @@ class Execution {
   private session(options: AgentOptions): AgentSession {
     const { use, cwd, name, ...rest } = options;
     const picked = adapters.pick(this.found, "agent", use);
-    if ("missing" in picked) throw new WaError(picked.missing);
-    if ("conflict" in picked) throw new WaError(picked.conflict);
+    if ("missing" in picked) throw new PenguinError(picked.missing);
+    if ("conflict" in picked) throw new PenguinError(picked.conflict);
     const id = crypto.randomUUID();
     const label = name === undefined || name === "" ? this.sessionName(picked.found.name) : name;
     this.bus.emit({ type: "session", id, name: label, use: picked.found.name });
@@ -319,7 +319,7 @@ class Execution {
     const id = this.nextId();
     const found = resolveSkill(call.skill, this.record.workflow, this.record.cwd);
     if (found.file === undefined) {
-      throw new WaError(`no skill ${call.skill}. Looked in ${found.searched.join(", ")}`);
+      throw new PenguinError(`no skill ${call.skill}. Looked in ${found.searched.join(", ")}`);
     }
     const skillText = fs.readFileSync(found.file, "utf8");
     const schema = call.result === undefined ? undefined : jsonSchema(call.result);

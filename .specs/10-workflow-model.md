@@ -1,9 +1,9 @@
 # Workflow model
 
-A workflow is one TypeScript file: a **params schema** plus a **run function**. It imports `wa`, `zod`, other workflow files, and shared TypeScript files by relative path. The params schema is what the engine must know before code runs. The run function is everything within a run's lifetime, written as code over `ctx`. Control flow, batching, and parallelism are the language.
+A workflow is one TypeScript file: a **params schema** plus a **run function**. It imports `penguin`, `zod`, other workflow files, and shared TypeScript files by relative path. The params schema is what the engine must know before code runs. The run function is everything within a run's lifetime, written as code over `ctx`. Control flow, batching, and parallelism are the language.
 
 ```typescript
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -13,11 +13,11 @@ export default workflow({
 });
 ```
 
-`description` is required: a non-empty string. `wa list workflows` reads it from the export. A file with no description fails to load.
+`description` is required: a non-empty string. `penguin list workflows` reads it from the export. A file with no description fails to load.
 
-`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. `wa list workflows` prints the fields as the params the workflow takes. A URL or file path is text the workflow hands to an agent.
+`params` is a `z.object` schema. CLI args map onto its fields and are validated before the run is created. `penguin list workflows` prints the fields as the params the workflow takes. A URL or file path is text the workflow hands to an agent.
 
-wa imports the module and reads the exported params schema without calling `run`. Module top level is side-effect-free.
+penguin imports the module and reads the exported params schema without calling `run`. Module top level is side-effect-free.
 
 ## The ctx API
 
@@ -39,9 +39,9 @@ Parallelism is native: `Promise.all` fans out, `Promise.race` takes the first. H
 ```typescript
 const implementer = ctx.agent();              // one conversation across the whole run
 for (let round = 1; round <= 3; round++) {
-  await implementer.run("wa-implement", { input });   // each turn continues it
+  await implementer.run("penguin-implement", { input });   // each turn continues it
   const reviewer = ctx.agent();               // a fresh conversation each round
-  const review = (await reviewer.run("wa-review", { input, result: Review }))!;
+  const review = (await reviewer.run("penguin-review", { input, result: Review }))!;
 }
 ```
 
@@ -59,7 +59,7 @@ A workflow chooses what a message means. Race it against a turn to allow interru
 
 ```typescript
 const implementer = ctx.agent({ name: "implementer", cwd: ws.path });
-let turn = implementer.run("wa-implement", { input: plan.spec });
+let turn = implementer.run("penguin-implement", { input: plan.spec });
 let inbound = ctx.messages.next();
 while (true) {
   const first = await Promise.race([turn.then(() => "turn"), inbound.then(() => "message")]);
@@ -67,7 +67,7 @@ while (true) {
   const message = await inbound;
   inbound = ctx.messages.next();
   await turn.stop();
-  turn = implementer.run("wa-implement", { input: `The user says: ${message.text}. Adjust and continue.` });
+  turn = implementer.run("penguin-implement", { input: `The user says: ${message.text}. Adjust and continue.` });
 }
 ```
 
@@ -83,9 +83,9 @@ import triage from "./triage.ts";
 const t = await triage(ctx, { ticket: params.ticket });
 ```
 
-The call validates the arguments against the callee's params schema, runs the callee's run function on the same ctx with the callee's params, and returns what the callee returns. The engine wraps the call in an activity named for the callee, so the view shows the structure. A composed call creates no run: `wa ps` shows the root alone.
+The call validates the arguments against the callee's params schema, runs the callee's run function on the same ctx with the callee's params, and returns what the callee returns. The engine wraps the call in an activity named for the callee, so the view shows the structure. A composed call creates no run: `penguin ps` shows the root alone.
 
-`run` may return a value. A composing caller receives it. At the root, `wa run` prints it.
+`run` may return a value. A composing caller receives it. At the root, `penguin run` prints it.
 
 ## The view
 
@@ -107,14 +107,14 @@ Agent turns return a small typed envelope (zod-validated): verdicts, numbers, sh
 
 ## Skills
 
-A skill is a markdown craft file: how to do one step well. The skill holds craft, and the workflow holds control flow. wa reads the file and sends its content with the turn prompt.
+A skill is a markdown craft file: how to do one step well. The skill holds craft, and the workflow holds control flow. penguin reads the file and sends its content with the turn prompt.
 
 A turn names its skill two ways:
 
-- **By name**, for example `wa-review`. The name is a directory that holds a `SKILL.md`, or one markdown file named for the skill. wa looks in the project skills roots, then the home skills roots (`20-architecture.md`, skills).
+- **By name**, for example `penguin-review`. The name is a directory that holds a `SKILL.md`, or one markdown file named for the skill. penguin looks in the project skills roots, then the home skills roots (`20-architecture.md`, skills).
 - **By path**, for example `./skills/review.md`, resolved against the workflow file. A path holds a `/` or starts with a `.`.
 
-A name that resolves nowhere ends the run, and the error names every place wa looked.
+A name that resolves nowhere ends the run, and the error names every place penguin looked.
 
 ## Run identity
 
@@ -123,7 +123,7 @@ A run's name is `<workflow file stem>-<n>`, unique across all runs. The name is 
 ## Example
 
 ```typescript
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 
 const Triage = z.object({ actionable: z.boolean(), reason: z.string() });
@@ -135,7 +135,7 @@ export default workflow({
   params: z.object({ ticket: z.string() }),
 
   async run({ params, agent, vcs, github, view, gate }) {
-    const t = (await agent().run("wa-triage", { input: params.ticket, result: Triage }))!;
+    const t = (await agent().run("penguin-triage", { input: params.ticket, result: Triage }))!;
     if (!t.actionable) {
       await gate(`Not actionable: ${t.reason}`);
       return;
@@ -144,10 +144,10 @@ export default workflow({
     const planner = agent();
     let plan;
     do {
-      plan = (await planner.run("wa-plan", { input: params.ticket, result: Plan }))!;
+      plan = (await planner.run("penguin-plan", { input: params.ticket, result: Plan }))!;
     } while ((await gate("Approve the plan? (approve / revise)")) !== "approve");
 
-    const ws = await vcs.worktree.add(`wa-${params.ticket}`);
+    const ws = await vcs.worktree.add(`penguin-${params.ticket}`);
     view.watch({ elapsed: true, diff: ws.path });
 
     const implementer = agent({ cwd: ws.path });
@@ -156,9 +156,9 @@ export default workflow({
     for (let round = 1; round <= 3 && !approved; round++) {
       approved = await view.activity(`round ${round} of 3`, async () => {
         view.fact({ round: `${round}/3` });
-        await implementer.run("wa-implement", { input: plan.spec });
+        await implementer.run("penguin-implement", { input: plan.spec });
         const reviewer = agent({ cwd: ws.path });
-        const review = (await reviewer.run("wa-review", { input: plan.acceptance, result: Review }))!;
+        const review = (await reviewer.run("penguin-review", { input: plan.acceptance, result: Review }))!;
         findings.push(review.findings);
         return review.verdict === "approved";
       });
@@ -168,7 +168,7 @@ export default workflow({
     const pr = await github.pr.create({ cwd: ws.path });
     view.artifact({ title: "Pull request", url: pr.url });
     while ((await gate(`PR is up: ${pr.url} (address-feedback / done)`)) !== "done") {
-      await agent({ cwd: ws.path }).run("wa-address-feedback");
+      await agent({ cwd: ws.path }).run("penguin-address-feedback");
     }
   },
 });

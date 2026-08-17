@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -15,7 +15,7 @@ export default workflow({
     view.artifact({ title: "Pull request", url: pr.url });
     while ((await gate(`PR is up: ${pr.url} (address-feedback / done)`)) !== "done") {
       const fixer = agent({ cwd: params.dir });
-      await fixer.run("wa-address-feedback");
+      await fixer.run("penguin-address-feedback");
     }
     return { url: pr.url };
   },

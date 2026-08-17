@@ -1,5 +1,5 @@
 ---
-name: wa-plan
+name: penguin-plan
 description: Writes the plan and the acceptance checks for one change. Use when a ticket is ready to build and needs a plan before any code.
 ---
 

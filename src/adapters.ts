@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { WaError } from "./errors.ts";
+import { PenguinError } from "./errors.ts";
 import { importDefault } from "./loader.ts";
 import { defaultsFile, envFile, home, homeAdapters, projectAdapters, projectHome, type Scope } from "./paths.ts";
 import type { Adapter } from "./types.ts";
@@ -35,7 +35,7 @@ export async function loadAdapter(file: string): Promise<Adapter> {
     typeof definition.description !== "string" ||
     typeof definition.build !== "function"
   ) {
-    throw new WaError(`${file} does not default-export an adapter`);
+    throw new PenguinError(`${file} does not default-export an adapter`);
   }
   return definition;
 }
@@ -65,13 +65,13 @@ export function pick(list: Found[], role: string, name?: string): Picked {
     return {
       missing:
         implementations.length === 0
-          ? `no ${role} adapter is installed. wa list adapters shows what wa found.`
+          ? `no ${role} adapter is installed. penguin list adapters shows what penguin found.`
           : `no ${role} adapter named ${wanted}. Installed: ${names}.`,
     };
   }
   const first = implementations[0];
   if (first === undefined) {
-    return { missing: `no ${role} adapter is installed. wa list adapters shows what wa found.` };
+    return { missing: `no ${role} adapter is installed. penguin list adapters shows what penguin found.` };
   }
   if (implementations.length > 1) {
     const names = implementations.map((entry) => entry.name).join(", ");
@@ -104,8 +104,8 @@ export function renderEnv(dir: string, list: Found[]): string {
   const body =
     chosen.length === 0
       ? "export {};\n"
-      : `${imports.join("\n")}\n\ndeclare module "wa" {\n  interface Adapters {\n${fields.join("\n")}\n  }\n}\n`;
-  return `// wa writes this file from the installed adapters. Do not edit.\n${body}`;
+      : `${imports.join("\n")}\n\ndeclare module "penguin" {\n  interface Adapters {\n${fields.join("\n")}\n  }\n}\n`;
+  return `// penguin writes this file from the installed adapters. Do not edit.\n${body}`;
 }
 
 function writeEnvFile(dir: string, list: Found[]): void {

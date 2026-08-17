@@ -2,9 +2,9 @@ import os from "node:os";
 import path from "node:path";
 
 export function home(): string {
-  const override = process.env["WA_HOME"];
+  const override = process.env["PENGUIN_HOME"];
   if (override !== undefined && override !== "") return path.resolve(override);
-  return path.join(os.homedir(), ".wa");
+  return path.join(os.homedir(), ".penguin");
 }
 
 export function runsRoot(): string {
@@ -16,7 +16,7 @@ export function homeSkills(): string {
 }
 
 export function projectHome(cwd: string): string {
-  return path.join(cwd, ".wa");
+  return path.join(cwd, ".penguin");
 }
 
 export function projectSkills(cwd: string): string {
@@ -52,7 +52,7 @@ export function defaultsFile(): string {
 }
 
 export function envFile(dir: string): string {
-  return path.join(dir, "wa-env.d.ts");
+  return path.join(dir, "penguin-env.d.ts");
 }
 
 export function eventsPath(dir: string): string {

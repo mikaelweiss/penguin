@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { WaError } from "./errors.ts";
+import { PenguinError } from "./errors.ts";
 import { inboxPath, runDir, runJsonPath, runsRoot, transcriptsDir } from "./paths.ts";
 
 export type RunRecord = {
@@ -37,6 +37,6 @@ export function createRun(file: string, params: unknown): string {
 
 export function readRun(dir: string): RunRecord {
   const file = runJsonPath(dir);
-  if (!fs.existsSync(file)) throw new WaError(`no run at ${dir}`);
+  if (!fs.existsSync(file)) throw new PenguinError(`no run at ${dir}`);
   return JSON.parse(fs.readFileSync(file, "utf8")) as RunRecord;
 }

@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { WaError } from "./errors.ts";
+import { PenguinError } from "./errors.ts";
 
 export function usage(schema: z.ZodObject): string[] {
   const shape = schema.shape as Record<string, unknown>;
@@ -17,7 +17,7 @@ export function parseParams(schema: z.ZodObject, argv: string[]): Record<string,
   while (index < argv.length) {
     const token = argv[index] ?? "";
     if (!token.startsWith("--")) {
-      throw new WaError(`params take the form --name value, got ${token}`);
+      throw new PenguinError(`params take the form --name value, got ${token}`);
     }
     let name = token.slice(2);
     let raw: string | undefined;
@@ -36,7 +36,7 @@ export function parseParams(schema: z.ZodObject, argv: string[]): Record<string,
       const known = Object.keys(shape)
         .map((key) => `--${key}`)
         .join(" ");
-      throw new WaError(`unknown param --${name}. This workflow takes: ${known || "no params"}`);
+      throw new PenguinError(`unknown param --${name}. This workflow takes: ${known || "no params"}`);
     }
     const kind = inspect(field).kind;
     if (raw === undefined) {
@@ -45,7 +45,7 @@ export function parseParams(schema: z.ZodObject, argv: string[]): Record<string,
       } else {
         const next = argv[index + 1];
         if (next === undefined || next.startsWith("--")) {
-          throw new WaError(`--${name} needs a value`);
+          throw new PenguinError(`--${name} needs a value`);
         }
         raw = next;
         index += 1;
@@ -64,7 +64,7 @@ export function validate(schema: z.ZodObject, values: Record<string, unknown>): 
       const at = issue.path.join(".");
       return at === "" ? `  ${issue.message}` : `  ${at}: ${issue.message}`;
     });
-    throw new WaError(`invalid params:\n${lines.join("\n")}`);
+    throw new PenguinError(`invalid params:\n${lines.join("\n")}`);
   }
   return values;
 }
@@ -72,13 +72,13 @@ export function validate(schema: z.ZodObject, values: Record<string, unknown>): 
 function coerce(kind: string, name: string, raw: string): unknown {
   if (kind === "number") {
     const value = Number(raw);
-    if (Number.isNaN(value)) throw new WaError(`--${name} needs a number, got ${raw}`);
+    if (Number.isNaN(value)) throw new PenguinError(`--${name} needs a number, got ${raw}`);
     return value;
   }
   if (kind === "boolean") {
     if (raw === "true") return true;
     if (raw === "false") return false;
-    throw new WaError(`--${name} needs true or false, got ${raw}`);
+    throw new PenguinError(`--${name} needs true or false, got ${raw}`);
   }
   return raw;
 }

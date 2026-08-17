@@ -1,5 +1,5 @@
 ---
-name: wa-review
+name: penguin-review
 description: Reviews a working tree against its acceptance checks and reports each defect. Use after an implementation step, before the pull request.
 ---
 

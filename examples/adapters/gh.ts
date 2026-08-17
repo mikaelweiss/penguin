@@ -1,4 +1,4 @@
-import { adapter } from "wa";
+import { adapter } from "penguin";
 
 function quoted(text: string): string {
   return `'${text.replaceAll("'", "'\\''")}'`;

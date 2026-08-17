@@ -1,8 +1,8 @@
-# wa
+# penguin
 
 Read `.specs/` before any work. It is the source of truth:
 
-- `.specs/00-product.md`: what wa is, principles, glossary.
+- `.specs/00-product.md`: what penguin is, principles, glossary.
 - `.specs/10-workflow-model.md`: params, the ctx API, sessions, messages, composition.
 - `.specs/20-architecture.md`: components, storage, run lifecycle, commands, invariants.
 - `.specs/30-defaults.md`: the example catalog.

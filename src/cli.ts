@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import * as adapters from "./adapters.ts";
 import { createRun } from "./create.ts";
 import { execute } from "./engine.ts";
-import { messageOf, WaError } from "./errors.ts";
+import { messageOf, PenguinError } from "./errors.ts";
 import { firstRun, install, syncSkills } from "./install.ts";
 import { blocks } from "./layout.ts";
 import { load } from "./loader.ts";
@@ -18,16 +18,16 @@ import * as skills from "./skills.ts";
 import { agentLine, attach } from "./viewer.ts";
 import * as workflows from "./workflows.ts";
 
-const usage = `wa runs one workflow as a live process, and the terminal watches it.
+const usage = `penguin runs one workflow as a live process, and the terminal watches it.
 
 usage:
-  wa list workflows|skills|adapters [--verbose]   show what wa can use
-  wa run <workflow> [--param value ...]           start a run and watch it
-  wa run <workflow> --background                  start a run and leave it alone
-  wa ps                                           the live runs, and a picker to attach
-  wa attach <run>                                 watch a run, with its history first
-  wa install                                      set up ~/.wa and choose your skill directories
-  wa sync-skills [--global|--local]               choose your skill directories again
+  penguin list workflows|skills|adapters [--verbose]   show what penguin can use
+  penguin run <workflow> [--param value ...]           start a run and watch it
+  penguin run <workflow> --background                  start a run and leave it alone
+  penguin ps                                           the live runs, and a picker to attach
+  penguin attach <run>                                 watch a run, with its history first
+  penguin install                                      set up ~/.penguin and choose your skill directories
+  penguin sync-skills [--global|--local]               choose your skill directories again
 
 <workflow> is a name from the list, or a path to a workflow file.
 In a run: type to send a message, q detaches, Ctrl-C stops the run.
@@ -54,24 +54,24 @@ async function main(argv: string[]): Promise<number> {
     process.stdout.write(usage);
     return 0;
   }
-  throw new WaError(`unknown command ${command}\n\n${usage}`);
+  throw new PenguinError(`unknown command ${command}\n\n${usage}`);
 }
 
 async function listWhat(argv: string[]): Promise<number> {
   const flags = argv.filter((arg) => arg.startsWith("-"));
   const rest = argv.filter((arg) => !arg.startsWith("-"));
   const unknown = flags.find((flag) => flag !== "--verbose" && flag !== "-v");
-  if (unknown !== undefined) throw new WaError(`unknown option ${unknown}\n\n${usage}`);
+  if (unknown !== undefined) throw new PenguinError(`unknown option ${unknown}\n\n${usage}`);
   const verbose = flags.length > 0;
   const [what] = rest;
   if (what === "workflows") return listWorkflows(false, verbose);
   if (what === "skills") return listSkills(verbose);
   if (what === "adapters") return listAdapters(verbose);
   if (what === undefined) {
-    throw new WaError("wa list needs a target: wa list workflows, wa list skills, or wa list adapters");
+    throw new PenguinError("penguin list needs a target: penguin list workflows, penguin list skills, or penguin list adapters");
   }
-  if (what === "runs") throw new WaError("wa ps shows the runs");
-  throw new WaError(`wa list takes workflows, skills, or adapters, not ${what}\n\n${usage}`);
+  if (what === "runs") throw new PenguinError("penguin ps shows the runs");
+  throw new PenguinError(`penguin list takes workflows, skills, or adapters, not ${what}\n\n${usage}`);
 }
 
 async function listAdapters(verbose = false): Promise<number> {
@@ -102,14 +102,14 @@ async function listWorkflows(hint = false, verbose = false): Promise<number> {
     return 0;
   }
   say(workflows.render(list, verbose));
-  if (hint) say("\nrun one with: wa run <workflow> [--param value ...]");
+  if (hint) say("\nrun one with: penguin run <workflow> [--param value ...]");
   return 0;
 }
 
 function listSkills(verbose = false): number {
   const list = skills.available(process.cwd());
   if (list.length === 0) {
-    say("no skill yet. wa sync-skills links the ones you have");
+    say("no skill yet. penguin sync-skills links the ones you have");
     return 0;
   }
   say(skills.render(list, verbose));
@@ -126,7 +126,7 @@ async function syncScopes(argv: string[]): Promise<number> {
 function scopeOf(flag: string): Scope {
   if (flag === "--global") return "global";
   if (flag === "--local") return "local";
-  throw new WaError(`unknown option ${flag}\n\n${usage}`);
+  throw new PenguinError(`unknown option ${flag}\n\n${usage}`);
 }
 
 async function runWorkflow(argv: string[]): Promise<number> {
@@ -160,7 +160,7 @@ function start(name: string): number {
 
 async function runProcess(argv: string[]): Promise<number> {
   const [name] = argv;
-  if (name === undefined) throw new WaError("wa _run needs a run name");
+  if (name === undefined) throw new PenguinError("penguin _run needs a run name");
   process.exit(await execute(name));
 }
 
@@ -184,7 +184,7 @@ async function listRuns(): Promise<number> {
 
 async function attachRun(argv: string[]): Promise<number> {
   const [name] = argv;
-  if (name === undefined) throw new WaError(`wa attach needs a run name\n\n${usage}`);
+  if (name === undefined) throw new PenguinError(`penguin attach needs a run name\n\n${usage}`);
   return attach(name);
 }
 
@@ -194,7 +194,7 @@ function sourceOf(target: string): string {
   const named = workflows.locate(target, process.cwd());
   if (named !== undefined) return named;
   const places = workflows.searched(process.cwd()).join(" or ");
-  throw new WaError(`no workflow file at ${file}, and no workflow named ${target} in ${places}`);
+  throw new PenguinError(`no workflow file at ${file}, and no workflow named ${target} in ${places}`);
 }
 
 function say(text: string): void {
@@ -204,8 +204,8 @@ function say(text: string): void {
 try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (error) {
-  process.stderr.write(`wa: ${messageOf(error)}\n`);
-  if (!(error instanceof WaError) && error instanceof Error && error.stack !== undefined) {
+  process.stderr.write(`penguin: ${messageOf(error)}\n`);
+  if (!(error instanceof PenguinError) && error instanceof Error && error.stack !== undefined) {
     process.stderr.write(`${error.stack}\n`);
   }
   process.exitCode = 1;

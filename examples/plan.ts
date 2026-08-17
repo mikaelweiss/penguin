@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 
 const Plan = z.object({ spec: z.string(), acceptance: z.string() });
@@ -13,10 +13,10 @@ export default workflow({
 
   async run({ params, agent, view, gate }) {
     const planner = agent({ cwd: params.dir });
-    let plan = (await planner.run("wa-plan", { input: params.ticket, result: Plan }))!;
+    let plan = (await planner.run("penguin-plan", { input: params.ticket, result: Plan }))!;
     let answer = await gate("Approve the plan? (approve / revise)");
     while (answer !== "approve") {
-      plan = (await planner.run("wa-plan", {
+      plan = (await planner.run("penguin-plan", {
         input: revision(params.ticket, answer),
         result: Plan,
       }))!;

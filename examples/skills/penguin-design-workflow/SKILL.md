@@ -1,17 +1,17 @@
 ---
-name: wa-design-workflow
-description: Designs one wa workflow from an idea. Use when a workflow idea needs a design before any code.
+name: penguin-design-workflow
+description: Designs one penguin workflow from an idea. Use when a workflow idea needs a design before any code.
 ---
 
 # Design the workflow
 
-You design a wa workflow: one TypeScript file with a params schema and a run function. Write the design a second engineer can build from. Do not write the workflow itself.
+You design a penguin workflow: one TypeScript file with a params schema and a run function. Write the design a second engineer can build from. Do not write the workflow itself.
 
 1. Read the idea in the input.
 2. Learn what already exists:
-   - Run `wa list workflows` and `wa list skills`.
-   - Read two or three workflow files in `~/.wa/` for the idiom.
-   - Read `~/.wa/wa-env.d.ts` for the ctx types.
+   - Run `penguin list workflows` and `penguin list skills`.
+   - Read two or three workflow files in `~/.penguin/` for the idiom.
+   - Read `~/.penguin/penguin-env.d.ts` for the ctx types.
 3. Write the design to `workflow-design.md` in the current folder:
    - the description, one line
    - the params: each field, its zod type, and why the engine must know it before code runs
@@ -21,7 +21,7 @@ You design a wa workflow: one TypeScript file with a params schema and a run fun
    - the acceptance checks, one per line, each one a reviewer can check by reading the file
 4. Put the design path in `path` and a two-sentence summary in `summary`.
 
-The wa model:
+The penguin model:
 
 - Params are the data the engine needs before code runs. Everything after that is code over ctx, or a gate.
 - Control flow lives in the workflow. Craft lives in skills. A long inline prompt is a missing skill.

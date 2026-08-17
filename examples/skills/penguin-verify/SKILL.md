@@ -1,5 +1,5 @@
 ---
-name: wa-verify
+name: penguin-verify
 description: Runs the quality gates of the repository and reports what passes and what fails. Use after a change, before a pull request.
 ---
 

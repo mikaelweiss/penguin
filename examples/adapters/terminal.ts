@@ -1,5 +1,5 @@
-import { adapter } from "wa";
-import type { ViewEvent } from "wa";
+import { adapter } from "penguin";
+import type { ViewEvent } from "penguin";
 
 function elapsed(millis: number): string {
   const seconds = Math.floor(millis / 1000);

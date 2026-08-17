@@ -11,7 +11,7 @@ test("an agent turn returns the validated result and hands the adapter the schem
   box.write("skill.md", "review the change\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -29,7 +29,7 @@ export default workflow({
 `,
   );
 
-  const done = box.wa("run", "./w.ts", "--ticket", "ABC-1");
+  const done = box.penguin("run", "./w.ts", "--ticket", "ABC-1");
 
   assert.equal(done.code, 0, done.output);
   assert.deepEqual(box.lines("out.txt"), ["approved:7"]);
@@ -48,7 +48,7 @@ test("an agent turn with no result schema resolves null", (t) => {
   box.write("skill.md", "implement the plan\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -61,7 +61,7 @@ export default workflow({
 `,
   );
 
-  const done = box.wa("run", "./w.ts");
+  const done = box.penguin("run", "./w.ts");
 
   assert.equal(done.code, 0, done.output);
   assert.equal(box.invocations("prompts.txt").length, 1);
@@ -77,7 +77,7 @@ test("an invalid result is retried once with the correction, then gates", async 
   box.write("skill.md", "triage the ticket\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -90,7 +90,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const prompts = box.invocations("prompts.txt");
@@ -123,7 +123,7 @@ test("a session use option picks the named agent adapter over the default", (t) 
   box.write("skill.md", "do the thing\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -137,7 +137,7 @@ export default workflow({
 `,
   );
 
-  const done = box.wa("run", "./w.ts");
+  const done = box.penguin("run", "./w.ts");
 
   assert.equal(done.code, 0, done.output);
   assert.equal(box.invocations("first.txt").length, 1);
@@ -151,7 +151,7 @@ test("two agent adapters with no default end the run with the fix", (t) => {
   box.write("skill.md", "do the thing\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -164,7 +164,7 @@ export default workflow({
 `,
   );
 
-  const failed = box.wa("run", "./w.ts");
+  const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stdout, /2 agent adapters are installed/);
@@ -177,7 +177,7 @@ test("a project adapter shadows the home adapter of the same role and name", (t)
   box.withShell();
   box.writeAdapter(
     "shell",
-    `import { adapter } from "wa";
+    `import { adapter } from "penguin";
 
 export default adapter({
   role: "shell",
@@ -192,7 +192,7 @@ export default adapter({
   );
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -206,7 +206,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   assert.equal(box.ended("w-1")?.["result"], "local");
 });
@@ -215,7 +215,7 @@ test("an adapter method is one step, nested methods included", (t) => {
   const box = sandbox(t);
   box.writeAdapter(
     "git",
-    `import { adapter } from "wa";
+    `import { adapter } from "penguin";
 
 export default adapter({
   role: "vcs",
@@ -231,7 +231,7 @@ export default adapter({
   );
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -245,7 +245,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   const steps = box.events("w-1").filter((event) => event["type"] === "step");
   assert.deepEqual(
@@ -264,7 +264,7 @@ test("a session cwd resolves from the invoking folder", (t) => {
   fs.mkdirSync(path.join(box.project, "sub"));
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -278,7 +278,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
   assert.deepEqual(box.lines("out.txt"), [fs.realpathSync(path.join(box.project, "sub"))]);
 });
 
@@ -288,7 +288,7 @@ test("a skill path resolves against the workflow file, not the run directory", (
   box.write("flows/skills/craft.md", "the craft\n");
   box.write(
     "flows/w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -301,7 +301,7 @@ export default workflow({
 `,
   );
 
-  const done = box.wa("run", "./flows/w.ts");
+  const done = box.penguin("run", "./flows/w.ts");
 
   assert.equal(done.code, 0);
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the craft/);
@@ -312,7 +312,7 @@ test("Promise.all runs the steps together", (t) => {
   box.withShell();
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -329,7 +329,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   const steps = box.events("w-1").filter((event) => event["type"] === "step");
   assert.deepEqual(
@@ -350,7 +350,7 @@ test("an uncaught error ends the run with the reason", (t) => {
   box.withShell();
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -364,7 +364,7 @@ export default workflow({
 `,
   );
 
-  const failed = box.wa("run", "./w.ts");
+  const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stdout, /run w-1 failed: the workflow gave up/);
@@ -380,7 +380,7 @@ test("a transcript holds the session conversation across attempts", async (t) =>
   box.write("skill.md", "triage\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -393,7 +393,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   const dir = path.join(box.runDir("w-1"), "transcripts");
@@ -412,7 +412,7 @@ test("the events file holds the run lifecycle and the activity spans", (t) => {
   box.withShell();
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -429,7 +429,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   const events = box.events("w-1");
   const types = events.map(
@@ -459,7 +459,7 @@ test("a session event names each session, by default and by option", (t) => {
   box.write("skill.md", "do the thing\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -474,7 +474,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   const sessions = box.events("w-1").filter((event) => event["type"] === "session");
   assert.deepEqual(
@@ -495,7 +495,7 @@ test("a gate posts blocked with the question, then running when the answer lands
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -508,7 +508,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
   assert.equal(box.lastState("w-1")?.["detail"], "keep going?");
 
@@ -529,7 +529,7 @@ test("a typed gate parses the answer and carries the schema", async (t) => {
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -548,7 +548,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
   box.send("w-1", "8080");
   box.send("w-1", "staging");
@@ -584,7 +584,7 @@ test("a typed gate warns and asks the same question again", async (t) => {
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -597,7 +597,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
   box.send("w-1", "not a url");
   await waitFor(
@@ -624,7 +624,7 @@ test("ctx.messages delivers the text and the session it was addressed to", async
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -638,7 +638,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
   box.send("w-1", "look at the diff", "worker");
   const ended = await box.waitForEnd("w-1");
@@ -653,7 +653,7 @@ test("host.wait shows the run idle with the label", async (t) => {
   box.writeAdapter(
     "clock",
     `import fs from "node:fs";
-import { adapter } from "wa";
+import { adapter } from "penguin";
 
 export default adapter({
   role: "clock",
@@ -673,7 +673,7 @@ export default adapter({
   );
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -688,7 +688,7 @@ export default workflow({
   );
 
   const file = path.join(box.project, "commit.txt");
-  assert.equal(box.wa("run", "./w.ts", "--file", file, "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--file", file, "--background").code, 0);
   await box.waitForState("w-1", "idle");
   assert.equal(box.lastState("w-1")?.["detail"], "new commits");
 
@@ -702,7 +702,7 @@ test("a composed call is one activity and returns its value to the caller", (t) 
   const box = sandbox(t);
   box.write(
     "double.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -717,7 +717,7 @@ export default workflow({
   );
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 import double from "./double.ts";
 
@@ -732,7 +732,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   const events = box.events("w-1");
   const activity = events.find((event) => event["type"] === "activity");
@@ -747,7 +747,7 @@ test("the done event carries what the run function returned", (t) => {
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -760,7 +760,7 @@ export default workflow({
 `,
   );
 
-  const done = box.wa("run", "./w.ts");
+  const done = box.penguin("run", "./w.ts");
 
   assert.equal(done.code, 0, done.output);
   assert.match(done.stdout, /\{"verdict":"approved","rounds":2\}/);

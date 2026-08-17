@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 import review from "./review.ts";
 
@@ -28,7 +28,7 @@ export default workflow({
     for (let round = 1; round <= params.rounds && !approved; round++) {
       approved = await view.activity(`round ${round} of ${params.rounds}`, async () => {
         view.fact({ round: `${round}/${params.rounds}` });
-        await implementer.run("wa-implement", { input: brief(params.task, findings) });
+        await implementer.run("penguin-implement", { input: brief(params.task, findings) });
         const reviewed = await review(ctx, {
           acceptance: params.acceptance ?? params.task,
           dir: params.dir,

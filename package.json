@@ -1,10 +1,10 @@
 {
-  "name": "wa",
+  "name": "penguin",
   "version": "1.0.0",
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "type": "module",
   "bin": {
-    "wa": "./dist/cli.js"
+    "penguin": "./dist/cli.js"
   },
   "exports": {
     ".": {

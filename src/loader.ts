@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
-import { WaError } from "./errors.ts";
+import { PenguinError } from "./errors.ts";
 import type { Workflow } from "./types.ts";
 
 let registered = false;
@@ -14,10 +14,10 @@ function isTypeScript(url: string): boolean {
 export function register(): void {
   if (registered) return;
   registered = true;
-  const wa = publicEntry();
+  const penguin = publicEntry();
   registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (specifier === "wa") return { url: wa, shortCircuit: true };
+      if (specifier === "penguin") return { url: penguin, shortCircuit: true };
       if (specifier === "zod" || specifier.startsWith("zod/")) {
         return nextResolve(specifier, { ...context, parentURL: import.meta.url });
       }
@@ -57,10 +57,10 @@ export async function load(file: string): Promise<Workflow> {
     typeof definition.run !== "function" ||
     typeof definition.params?.parse !== "function"
   ) {
-    throw new WaError(`${file} does not default-export a workflow`);
+    throw new PenguinError(`${file} does not default-export a workflow`);
   }
   if (typeof definition.description !== "string" || definition.description.trim() === "") {
-    throw new WaError(`${file} has no description`);
+    throw new PenguinError(`${file} has no description`);
   }
   return definition;
 }

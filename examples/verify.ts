@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 
 const Verify = z.object({ passing: z.boolean(), details: z.string() });
@@ -9,7 +9,7 @@ export default workflow({
 
   async run({ params, agent, view }) {
     const verifier = agent({ cwd: params.dir });
-    const checks = (await verifier.run("wa-verify", { result: Verify }))!;
+    const checks = (await verifier.run("penguin-verify", { result: Verify }))!;
     view.fact({ checks: checks.passing ? "passing" : "failing" });
     return checks;
   },

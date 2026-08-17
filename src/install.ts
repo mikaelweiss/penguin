@@ -17,18 +17,18 @@ import { interactive, pick, pickMany } from "./prompt.ts";
 import { link, shared, type Source, sources } from "./skills.ts";
 
 const hint =
-  "run `wa list workflows` to see what's available and then `wa run <workflow>` from a project directory to get started";
+  "run `penguin list workflows` to see what's available and then `penguin run <workflow>` from a project directory to get started";
 
 export async function install(): Promise<void> {
   const fresh = !fs.existsSync(home());
-  if (interactive()) await wordmark("wa", { color: color(), delay: 65 });
+  if (interactive()) await wordmark("penguin", { color: color(), delay: 65 });
   fs.mkdirSync(runsRoot(), { recursive: true });
   if (fresh) {
     copyCatalog();
     writeEnv(process.cwd(), await installed(process.cwd()));
   }
   await syncSkills("global", true);
-  say(fresh ? `\ncreated ${short(home())}` : `\nwa home is ${short(home())}`);
+  say(fresh ? `\ncreated ${short(home())}` : `\npenguin home is ${short(home())}`);
   say(hint);
 }
 
@@ -75,7 +75,7 @@ export async function syncSkills(scope: Scope, quiet = false): Promise<void> {
 async function choose(found: Source[]): Promise<Source[]> {
   if (!interactive()) return found;
   const wanted = await pickMany(
-    "Which skill directories should wa use?",
+    "Which skill directories should penguin use?",
     found.map((source) => ({ label: short(source.dir) })),
   );
   const chosen = wanted.map((index) => found[index]).filter((source) => source !== undefined);

@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 
 const Review = z.object({
@@ -21,7 +21,7 @@ export default workflow({
 
   async run({ params, agent, view }) {
     const reviewer = agent({ cwd: params.dir });
-    const review = (await reviewer.run("wa-review", {
+    const review = (await reviewer.run("penguin-review", {
       input: checklist(params.acceptance, params.findings),
       result: Review,
     }))!;

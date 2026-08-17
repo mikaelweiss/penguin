@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 import implement from "./implement.ts";
 import plan from "./plan.ts";
@@ -17,7 +17,7 @@ export default workflow({
       return;
     }
 
-    const ws = await vcs.worktree.add(`wa-${params.ticket}`);
+    const ws = await vcs.worktree.add(`penguin-${params.ticket}`);
     if (!ws.ok) {
       await gate(`No worktree: ${ws.reason}`);
       return;

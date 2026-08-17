@@ -1,4 +1,4 @@
-import { workflow } from "wa";
+import { workflow } from "penguin";
 import { z } from "zod";
 
 const Triage = z.object({ actionable: z.boolean(), reason: z.string() });
@@ -9,7 +9,7 @@ export default workflow({
 
   async run({ params, agent, view }) {
     const triager = agent();
-    const triage = (await triager.run("wa-triage", { input: params.ticket, result: Triage }))!;
+    const triage = (await triager.run("penguin-triage", { input: params.ticket, result: Triage }))!;
     view.fact({ actionable: triage.actionable });
     return triage;
   },

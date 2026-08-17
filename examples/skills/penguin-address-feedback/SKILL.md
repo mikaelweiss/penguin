@@ -1,5 +1,5 @@
 ---
-name: wa-address-feedback
+name: penguin-address-feedback
 description: Answers the open review threads on a pull request, with code changes or replies. Use when a pull request has unresolved review comments.
 ---
 

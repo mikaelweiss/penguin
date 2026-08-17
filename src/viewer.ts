@@ -3,7 +3,7 @@ import path from "node:path";
 import readline from "node:readline";
 import * as adapters from "./adapters.ts";
 import { readRun } from "./create.ts";
-import { messageOf, WaError } from "./errors.ts";
+import { messageOf, PenguinError } from "./errors.ts";
 import { Tail } from "./follow.ts";
 import { alive, holder } from "./lock.ts";
 import { eventsPath, inboxPath, runDir } from "./paths.ts";
@@ -23,12 +23,12 @@ export type GateControl = { list: string[]; many: boolean } | { hint: string | u
 
 export async function attach(name: string, pid?: number): Promise<number> {
   const dir = runDir(name);
-  if (!fs.existsSync(dir)) throw new WaError(`no run named ${name}`);
+  if (!fs.existsSync(dir)) throw new PenguinError(`no run named ${name}`);
   const record = readRun(dir);
   const found = await adapters.installed(record.cwd);
   const viewer = new Viewer(name, dir, build(found, record.cwd), agentLine(found));
   if (pid !== undefined && !(await started(dir, pid))) {
-    process.stderr.write(`wa: the run process for ${name} died before it started\n`);
+    process.stderr.write(`penguin: the run process for ${name} died before it started\n`);
     return 1;
   }
   const tail = new Tail(eventsPath(dir), (line) => viewer.line(line));
@@ -58,7 +58,7 @@ function follow(dir: string, tail: Tail, viewer: Viewer): Promise<number> {
       if (holder(dir) !== undefined) return;
       tail.read();
       if (settled) return;
-      process.stderr.write("wa: the run process died\n");
+      process.stderr.write("penguin: the run process died\n");
       finish(1);
     }, WATCH);
     const keys = interactive() ? keyboard(viewer, finish) : undefined;
@@ -307,7 +307,7 @@ class Viewer {
     try {
       this.renderer.render(event);
     } catch (error) {
-      process.stderr.write(`wa: the view adapter failed: ${messageOf(error)}\n`);
+      process.stderr.write(`penguin: the view adapter failed: ${messageOf(error)}\n`);
     }
   }
 
@@ -386,7 +386,7 @@ function build(found: adapters.Found[], cwd: string): ViewAdapter {
   try {
     return picked.found.definition.build(host(cwd)) as ViewAdapter;
   } catch (error) {
-    process.stderr.write(`wa: the view adapter failed to build: ${messageOf(error)}\n`);
+    process.stderr.write(`penguin: the view adapter failed to build: ${messageOf(error)}\n`);
     return plainRenderer();
   }
 }

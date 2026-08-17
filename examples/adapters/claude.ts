@@ -1,5 +1,5 @@
-import { adapter } from "wa";
-import type { AgentTurn, AgentTurnResult } from "wa";
+import { adapter } from "penguin";
+import type { AgentTurn, AgentTurnResult } from "penguin";
 
 type ContentBlock = { type?: string; text?: string; name?: string };
 type StreamLine = {

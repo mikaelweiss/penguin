@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { sandbox } from "./helpers.ts";
 
-const writes = (text: string, params = "z.object({})") => `import { workflow } from "wa";
+const writes = (text: string, params = "z.object({})") => `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -18,10 +18,10 @@ export default workflow({
 
 test("list workflows shows the description under the name", (t) => {
   const box = sandbox(t);
-  box.write(".wa/ticket.ts", writes("local"));
+  box.write(".penguin/ticket.ts", writes("local"));
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
 
-  const listed = box.wa("list", "workflows");
+  const listed = box.penguin("list", "workflows");
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(listed.stdout, /^ticket\n {2}local$/m);
@@ -33,14 +33,14 @@ test("list workflows shows the description under the name", (t) => {
 test("list workflows shows the params next to the name", (t) => {
   const box = sandbox(t);
   box.write(
-    ".wa/ticket.ts",
+    ".penguin/ticket.ts",
     writes(
       "local",
       "z.object({ ticket: z.string(), rounds: z.number().default(3), draft: z.boolean().optional(), mode: z.enum(['fast', 'slow']) })",
     ),
   );
 
-  const listed = box.wa("list", "workflows");
+  const listed = box.penguin("list", "workflows");
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(
@@ -53,9 +53,9 @@ test("list workflows wraps a long description and a long param line", (t) => {
   const box = sandbox(t);
   const long = "wraps ".repeat(40).trim();
   const many = Array.from({ length: 12 }, (_, index) => `p${index}: z.string()`).join(", ");
-  box.write(".wa/ticket.ts", writes(long, `z.object({ ${many} })`));
+  box.write(".penguin/ticket.ts", writes(long, `z.object({ ${many} })`));
 
-  const listed = box.wa("list", "workflows");
+  const listed = box.penguin("list", "workflows");
 
   assert.equal(listed.code, 0, listed.output);
   const lines = listed.stdout.split("\n").filter((line) => line !== "");
@@ -67,15 +67,15 @@ test("list workflows wraps a long description and a long param line", (t) => {
 
 test("list workflows --verbose adds scope and file", (t) => {
   const box = sandbox(t);
-  box.write(".wa/ticket.ts", writes("local"));
+  box.write(".penguin/ticket.ts", writes("local"));
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
 
-  const listed = box.wa("list", "workflows", "--verbose");
+  const listed = box.penguin("list", "workflows", "--verbose");
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(
     listed.stdout,
-    new RegExp(`^ticket\\n {2}local\\n {2}local {2}${path.join(box.project, ".wa")}`, "m"),
+    new RegExp(`^ticket\\n {2}local\\n {2}local {2}${path.join(box.project, ".penguin")}`, "m"),
   );
   assert.match(
     listed.stdout,
@@ -83,57 +83,57 @@ test("list workflows --verbose adds scope and file", (t) => {
   );
 });
 
-test("wa with no command prints the usage", (t) => {
+test("penguin with no command prints the usage", (t) => {
   const box = sandbox(t);
-  box.write(".wa/ticket.ts", writes("local"));
+  box.write(".penguin/ticket.ts", writes("local"));
 
-  const listed = box.wa();
+  const listed = box.penguin();
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(listed.stdout, /usage:/);
   assert.doesNotMatch(listed.stdout, /^ticket/m);
 });
 
-test("wa run with no workflow lists them instead of failing", (t) => {
+test("penguin run with no workflow lists them instead of failing", (t) => {
   const box = sandbox(t);
-  box.write(".wa/ticket.ts", writes("local"));
+  box.write(".penguin/ticket.ts", writes("local"));
 
-  const listed = box.wa("run");
+  const listed = box.penguin("run");
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(listed.stdout, /^ticket\s+local$/m);
-  assert.match(listed.stdout, /run one with: wa run <workflow>/);
+  assert.match(listed.stdout, /run one with: penguin run <workflow>/);
 });
 
-test("wa list workflows with no file says where to put one", (t) => {
+test("penguin list workflows with no file says where to put one", (t) => {
   const box = sandbox(t);
 
-  const empty = box.wa("list", "workflows");
+  const empty = box.penguin("list", "workflows");
 
   assert.equal(empty.code, 0);
-  assert.match(empty.stdout, new RegExp(`no workflow file in ${path.join(box.project, ".wa")}`));
+  assert.match(empty.stdout, new RegExp(`no workflow file in ${path.join(box.project, ".penguin")}`));
   assert.match(empty.stdout, new RegExp(box.home));
 });
 
-test("the first bare wa stops after the install output", (t) => {
+test("the first bare penguin stops after the install output", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
 
-  const first = box.wa();
+  const first = box.penguin();
 
   assert.equal(first.code, 0);
   assert.match(first.stdout, /created/);
-  assert.match(first.stdout, /wa list workflows/);
+  assert.match(first.stdout, /penguin list workflows/);
   assert.doesNotMatch(first.stdout, /no workflow file/);
   assert.doesNotMatch(first.stdout, /usage:/);
 });
 
-test("wa run takes a workflow name", (t) => {
+test("penguin run takes a workflow name", (t) => {
   const box = sandbox(t);
   box.withShell();
   fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
 
-  const done = box.wa("run", "release");
+  const done = box.penguin("run", "release");
 
   assert.equal(done.code, 0, done.output);
   assert.match(done.stdout, /^run release-1 started,/m);
@@ -143,10 +143,10 @@ test("wa run takes a workflow name", (t) => {
 test("a project workflow shadows the home workflow of the same name", (t) => {
   const box = sandbox(t);
   box.withShell();
-  box.write(".wa/ticket.ts", writes("local"));
+  box.write(".penguin/ticket.ts", writes("local"));
   fs.writeFileSync(path.join(box.home, "ticket.ts"), writes("global"));
 
-  assert.equal(box.wa("run", "ticket").code, 0);
+  assert.equal(box.penguin("run", "ticket").code, 0);
 
   assert.deepEqual(box.lines("out.txt"), ["local"]);
 });
@@ -154,19 +154,19 @@ test("a project workflow shadows the home workflow of the same name", (t) => {
 test("a name that matches nothing names both places", (t) => {
   const box = sandbox(t);
 
-  const failed = box.wa("run", "nothing");
+  const failed = box.penguin("run", "nothing");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /no workflow file at .*nothing/);
   assert.match(failed.stderr, /no workflow named nothing in/);
 });
 
-test("wa run still takes a path", (t) => {
+test("penguin run still takes a path", (t) => {
   const box = sandbox(t);
   box.withShell();
   box.write("w.ts", writes("path"));
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   assert.deepEqual(box.lines("out.txt"), ["path"]);
 });

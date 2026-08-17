@@ -5,7 +5,7 @@ import test from "node:test";
 import { attach } from "../src/viewer.ts";
 import { type Event, sandbox, terminal, waitFor } from "./helpers.ts";
 
-const gateWorkflow = `import { workflow } from "wa";
+const gateWorkflow = `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -20,12 +20,12 @@ export default workflow({
 test("invariant 1: at most one process executes a run", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
   const holder = box.holder("w-1");
   assert.ok(holder !== undefined, "the live run holds the lock");
 
-  const second = box.wa("_run", "w-1");
+  const second = box.penguin("_run", "w-1");
 
   assert.equal(second.code, 1);
   assert.match(second.stderr, new RegExp(`run w-1 is already executing \\(pid ${holder}\\)`));
@@ -39,7 +39,7 @@ test("invariant 2: a viewer that joins late renders the same story", (t) => {
   box.withShell();
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -58,8 +58,8 @@ export default workflow({
 `,
   );
 
-  const live = box.wa("run", "./w.ts");
-  const late = box.wa("attach", "w-1");
+  const live = box.penguin("run", "./w.ts");
+  const late = box.penguin("attach", "w-1");
 
   assert.equal(live.code, 0, live.output);
   assert.equal(late.code, 0, late.output);
@@ -88,7 +88,7 @@ export default workflow({
 test("invariant 3: q detaches and the run continues", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
   const holder = box.holder("w-1");
 
@@ -110,7 +110,7 @@ test("invariant 3: q detaches and the run continues", async (t) => {
 test("invariant 3: Ctrl-C stops the run, and the stop is recorded", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
   const holder = box.holder("w-1") as number;
 
@@ -126,7 +126,7 @@ test("invariant 4: done is final, and attach to a done run is read-only", (t) =>
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -138,11 +138,11 @@ export default workflow({
 });
 `,
   );
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
   const file = path.join(box.runDir("w-1"), "events.jsonl");
   const story = fs.readFileSync(file, "utf8");
 
-  const attached = box.wa("attach", "w-1");
+  const attached = box.penguin("attach", "w-1");
 
   assert.equal(attached.code, 0, attached.output);
   assert.match(attached.stdout, /the only step/);
@@ -150,11 +150,11 @@ export default workflow({
   assert.equal(fs.readFileSync(path.join(box.runDir("w-1"), "inbox.jsonl"), "utf8"), "");
   assert.equal(box.holder("w-1"), undefined);
 
-  const listed = box.wa("ps");
+  const listed = box.penguin("ps");
   assert.equal(listed.code, 0);
   assert.doesNotMatch(listed.stdout, /^w-1\b/m, "a done run never lists");
 
-  const revived = box.wa("resume", "w-1", "go");
+  const revived = box.penguin("resume", "w-1", "go");
   assert.equal(revived.code, 1);
   assert.match(revived.stderr, /unknown command resume/);
 });
@@ -163,7 +163,7 @@ test("invariant 5: each message at most once, in order, and each ask consumes on
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -178,7 +178,7 @@ export default workflow({
 });
 `,
   );
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   box.send("w-1", "one");
@@ -214,7 +214,7 @@ test("invariant 6: turn.stop kills the agent process, and the next turn continue
   box.write("skill.md", "do the thing\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -232,7 +232,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await waitFor(() => box.exists("slow.pid"));
   const child = Number(box.read("slow.pid").trim());
   assert.equal(alive(child), true, "the agent process is running");
@@ -257,7 +257,7 @@ test("invariant 7: a call validates the callee params before the callee runs", (
   const box = sandbox(t);
   box.write(
     "double.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -272,7 +272,7 @@ export default workflow({
   );
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 import double from "./double.ts";
 
@@ -286,7 +286,7 @@ export default workflow({
 `,
   );
 
-  const failed = box.wa("run", "./w.ts");
+  const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stdout, /invalid params for the workflow "double a number"/);
@@ -308,7 +308,7 @@ test("invariant 7: a composed call creates no run", async (t) => {
   const box = sandbox(t);
   box.write(
     "ask.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -322,7 +322,7 @@ export default workflow({
   );
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 import ask from "./ask.ts";
 
@@ -337,11 +337,11 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")), ["w-1"]);
-  const listed = box.wa("ps");
+  const listed = box.penguin("ps");
   const rows = listed.stdout.split("\n").filter((line) => line.trim() !== "");
   assert.equal(rows.length, 2, listed.stdout);
   assert.match(rows[1] ?? "", /^w-1\s/);
@@ -357,13 +357,13 @@ test("invariant 8: the engine depends on no adapter and no definition", (t) => {
   const box = sandbox(t);
   assert.deepEqual(fs.readdirSync(box.home), []);
 
-  const listed = box.wa("ps");
+  const listed = box.penguin("ps");
   assert.equal(listed.code, 0);
   assert.match(listed.stdout, /^RUN\s+WORKFLOW\s+STATE\s+DETAIL\s+AGE\s+DIRECTORY$/m);
 
   box.write(
     "role.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -375,7 +375,7 @@ export default workflow({
 });
 `,
   );
-  const missing = box.wa("run", "./role.ts");
+  const missing = box.penguin("run", "./role.ts");
   assert.equal(missing.code, 1);
   assert.match(missing.stdout, /nothing provides ctx\.shell/);
   assert.match(missing.stdout, /Installed adapter roles: agent, view/);
@@ -384,7 +384,7 @@ export default workflow({
   box.write("skill.md", "do the thing\n");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -396,20 +396,20 @@ export default workflow({
 });
 `,
   );
-  const agentless = box.wa("run", "./w.ts");
+  const agentless = box.penguin("run", "./w.ts");
   assert.equal(agentless.code, 1);
   assert.match(agentless.stdout, /no agent adapter is installed/);
-  assert.match(agentless.stdout, /wa list adapters/);
+  assert.match(agentless.stdout, /penguin list adapters/);
   assert.match(String(box.ended("w-1")?.["reason"]), /no agent adapter is installed/);
 });
 
-test("invariant 9: the first wa command installs, and sync keeps a skill you wrote", (t) => {
+test("invariant 9: the first penguin command installs, and sync keeps a skill you wrote", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
   const claude = path.join(box.userHome, ".claude", "skills");
   box.writeSkill(claude, "review", "review it\n");
 
-  const first = box.wa("ps");
+  const first = box.penguin("ps");
 
   assert.equal(first.code, 0, first.output);
   assert.match(first.stdout, new RegExp(`created ${box.home}`));
@@ -417,12 +417,12 @@ test("invariant 9: the first wa command installs, and sync keeps a skill you wro
   assert.equal(fs.existsSync(path.join(box.home, "adapters", "claude.ts")), true);
   assert.equal(fs.readlinkSync(path.join(box.home, "skills", "claude")), claude);
 
-  const second = box.wa("ps");
+  const second = box.penguin("ps");
   assert.doesNotMatch(second.stdout, /created /);
 
   box.writeSkill(path.join(box.home, "skills"), "house-style", "our style\n");
   fs.rmSync(claude, { recursive: true });
-  assert.equal(box.wa("sync-skills", "--global").code, 0);
+  assert.equal(box.penguin("sync-skills", "--global").code, 0);
 
   const kept = fs.readdirSync(path.join(box.home, "skills"));
   assert.equal(kept.includes("claude"), false, "a link to a directory that is gone disappears");
@@ -437,59 +437,59 @@ test("invariant 10: a skill name resolves from the project before the home", (t)
   box.setAgent("none", "prompts.txt");
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
   description: "test",
   params: z.object({}),
   async run({ agent }) {
-    await agent().run("wa-review");
+    await agent().run("penguin-review");
   },
 });
 `,
   );
-  box.writeSkill(path.join(box.userHome, ".claude", "skills"), "wa-review", "the claude craft\n");
-  box.writeSkill(path.join(box.userHome, ".agents", "skills"), "wa-review", "the agents craft\n");
-  assert.equal(box.wa("sync-skills", "--global").code, 0);
+  box.writeSkill(path.join(box.userHome, ".claude", "skills"), "penguin-review", "the claude craft\n");
+  box.writeSkill(path.join(box.userHome, ".agents", "skills"), "penguin-review", "the agents craft\n");
+  assert.equal(box.penguin("sync-skills", "--global").code, 0);
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the claude craft/);
 
   fs.writeFileSync(path.join(box.home, "skills", ".order"), "agents\nclaude\n");
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
   assert.match(box.invocations("prompts.txt")[1] ?? "", /the agents craft/);
 
-  box.writeSkill(path.join(box.home, "skills"), "wa-review", "the home craft\n");
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  box.writeSkill(path.join(box.home, "skills"), "penguin-review", "the home craft\n");
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
   assert.match(box.invocations("prompts.txt")[2] ?? "", /the home craft/);
 
-  box.writeSkill(path.join(box.project, ".wa", "skills"), "wa-review", "the project craft\n");
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  box.writeSkill(path.join(box.project, ".penguin", "skills"), "penguin-review", "the project craft\n");
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
   assert.match(box.invocations("prompts.txt")[3] ?? "", /the project craft/);
 });
 
 test("invariant 10: a skill path resolves against the workflow file", (t) => {
   const box = sandbox(t);
   box.setAgent("none", "prompts.txt");
-  box.write("flows/skills/wa-review.md", "the craft next to the workflow\n");
-  box.writeSkill(path.join(box.home, "skills"), "wa-review", "the home craft\n");
+  box.write("flows/skills/penguin-review.md", "the craft next to the workflow\n");
+  box.writeSkill(path.join(box.home, "skills"), "penguin-review", "the home craft\n");
   box.write(
     "flows/w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
   description: "test",
   params: z.object({}),
   async run({ agent }) {
-    await agent().run("./skills/wa-review.md");
+    await agent().run("./skills/penguin-review.md");
   },
 });
 `,
   );
 
-  assert.equal(box.wa("run", "./flows/w.ts").code, 0);
+  assert.equal(box.penguin("run", "./flows/w.ts").code, 0);
 
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the craft next to the workflow/);
 });
@@ -499,7 +499,7 @@ test("invariant 10: an adapter resolves from the project before the home", (t) =
   box.withShell();
   box.writeAdapter(
     "shell",
-    `import { adapter } from "wa";
+    `import { adapter } from "penguin";
 
 export default adapter({
   role: "shell",
@@ -514,7 +514,7 @@ export default adapter({
   );
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -528,7 +528,7 @@ export default workflow({
 `,
   );
 
-  assert.equal(box.wa("run", "./w.ts").code, 0);
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
 
   assert.equal(box.ended("w-1")?.["result"], "the project shell");
 });
@@ -537,7 +537,7 @@ test("invariant 11: a typed gate validates the answer and asks again on a mismat
   const box = sandbox(t);
   box.write(
     "w.ts",
-    `import { workflow } from "wa";
+    `import { workflow } from "penguin";
 import { z } from "zod";
 
 export default workflow({
@@ -550,7 +550,7 @@ export default workflow({
 });
 `,
   );
-  assert.equal(box.wa("run", "./w.ts", "--background").code, 0);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
   box.send("w-1", "eighty");
