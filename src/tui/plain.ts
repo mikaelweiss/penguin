@@ -2,6 +2,7 @@ import { Tail } from "../follow.ts";
 import { holder } from "../lock.ts";
 import { eventsPath } from "../paths.ts";
 import type { ViewEvent } from "../types.ts";
+import { controlFor } from "./gate.ts";
 
 const WATCH = 500;
 
@@ -115,8 +116,13 @@ function lineOf(event: ViewEvent): string | undefined {
     case "agent":
       if (event.kind !== "tool") return event.text;
       return event.detail === undefined ? `[${event.text}]` : `[${event.text}] ${event.detail}`;
-    case "gate":
-      return event.phase === "asked" ? `gate: ${event.question}` : undefined;
+    case "gate": {
+      if (event.phase !== "asked") return undefined;
+      const line = `gate: ${event.question}`;
+      if (event.schema === undefined) return line;
+      const control = controlFor(event.schema);
+      return "list" in control ? `${line}\n  options: ${control.list.join(", ")}` : line;
+    }
     case "credential":
       if (event.phase === "asked") return askedFor(event);
       if (event.phase === "rejected") {

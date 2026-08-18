@@ -29,7 +29,8 @@ export default workflow({
         ? `committed: ${title(written.message)}`
         : "the tree was committed already";
       const answer = await gate(
-        `${worked.branch} is ready in ${worked.path}\n${state}\n\nType done to land it on ${params.onto}, or type what to change.`,
+        `${worked.branch} is ready in ${worked.path}\n${state}\n\nLand it on ${params.onto}?`,
+        z.union([z.enum(["done"]), z.string()]),
       );
       if (answer === "done") break;
       await implement(ctx, {

@@ -787,6 +787,68 @@ export default workflow({
   );
 });
 
+test("a gate that names options beside a string takes an option or any other text", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+const Approval = z.union([z.enum(["approve", "revise"]), z.string()]);
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate }) {
+    const first = await gate("Approve the plan?", Approval);
+    const second = await gate("Approve the plan?", Approval);
+    return { first, second };
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  box.send("w-1", "approve");
+  box.send("w-1", "make it blue");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.deepEqual(ended["result"], { first: "approve", second: "make it blue" });
+  const asked = box.events("w-1").filter((event) => event["phase"] === "asked");
+  assert.equal(asked.length, 2, "each answer fit at the first ask");
+  assert.deepEqual(asked.map((event) => event["schema"]), [
+    { anyOf: [{ type: "string", enum: ["approve", "revise"] }, { type: "string" }] },
+    { anyOf: [{ type: "string", enum: ["approve", "revise"] }, { type: "string" }] },
+  ]);
+});
+
+test("a gate takes the option word out of an answer with whitespace around it", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate }) {
+    const answer = await gate("Approve the plan?", z.union([z.enum(["approve"]), z.string()]));
+    return { answer, approved: answer === "approve" };
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  box.send("w-1", "  approve  ");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.deepEqual(ended["result"], { answer: "approve", approved: true });
+});
+
 test("ctx.messages delivers the text and the session it was addressed to", async (t) => {
   const box = sandbox(t);
   box.write(

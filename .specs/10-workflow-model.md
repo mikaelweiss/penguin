@@ -24,7 +24,7 @@ penguin imports the module and reads the exported params schema without calling 
 `run(ctx)` receives everything. All IO goes through it: a workflow can only do what an adapter offers.
 
 - `ctx.params`: validated params.
-- `ctx.gate(question, shape?)`: ask a question and wait for the answer. The run shows blocked with the question, and the answer arrives as a message from an attached viewer. With no shape the answer is free text, and the gate returns a string. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`, `z.url()`) the gate returns that type. The engine takes the first reading of the answer text the shape accepts: the text itself, a number, yes or no, a comma-separated list, or JSON. An answer no reading fits gets a warning, and the gate asks the same question again. A shape checks the form of an answer, never its meaning, so a workflow that wants approval still loops on the answer. A workflow that needs two facts asks two gates.
+- `ctx.gate(question, shape?)`: ask a question and wait for the answer. The run shows blocked with the question, and the answer arrives as a message from an attached viewer. With no shape the answer is free text, and the gate returns a string. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`, `z.url()`) the gate returns that type. `z.union([z.enum([...]), z.string()])` names the options and takes an option or any other text, and the gate returns a string. The engine takes the first reading of the answer text the shape accepts: the trimmed text, the text itself, a number, yes or no, a comma-separated list, or JSON. An answer no reading fits gets a warning, and the gate asks the same question again. A shape checks the form of an answer, never its meaning, so a workflow that wants approval still loops on the answer. A workflow that needs two facts asks two gates.
 - `ctx.agent(options?)`: open an agent session (below).
 - `ctx.messages`: the inbound message stream (below).
 - `ctx.view`: the typed output surface (below).
@@ -130,6 +130,9 @@ A run's name is `<workflow file stem>-<n>`, unique across all runs. The name is 
 import { workflow } from "penguin";
 import { z } from "zod";
 
+const Ack = z.union([z.enum(["ok"]), z.string()]);
+const Approval = z.union([z.enum(["approve", "revise"]), z.string()]);
+const Feedback = z.union([z.enum(["address-feedback", "done"]), z.string()]);
 const Blocked = z.object({ questions: z.array(z.string()) });
 const Triage = z.object({ actionable: z.boolean(), reason: z.string(), tasks: z.array(z.string()) });
 const Plan = z.object({ plan: z.string(), acceptance: z.string() });
@@ -149,7 +152,7 @@ export default workflow({
     }
     const t = out.result;
     if (!t.actionable) {
-      await gate(`Not actionable: ${t.reason}`);
+      await gate(`Not actionable: ${t.reason}`, Ack);
       return;
     }
 
@@ -161,7 +164,7 @@ export default workflow({
       let plan;
       do {
         plan = (await planner.run("penguin-plan", { input: task, result: Plan }))!;
-      } while ((await gate(`${plan.plan}\n\nApprove the plan? (approve / revise)`)) !== "approve");
+      } while ((await gate(`${plan.plan}\n\nApprove the plan?`, Approval)) !== "approve");
 
       const implementer = agent({ cwd: ws.path });
       const findings: string[] = [];
@@ -176,12 +179,12 @@ export default workflow({
           return review.verdict === "approved";
         });
       }
-      if (!approved) await gate("Three review rounds. Take a look.");
+      if (!approved) await gate("Three review rounds. Take a look.", Ack);
     }
 
     const pr = await github.pr.create({ cwd: ws.path });
     view.artifact({ title: "Pull request", url: pr.url });
-    while ((await gate(`PR is up: ${pr.url} (address-feedback / done)`)) !== "done") {
+    while ((await gate(`PR is up: ${pr.url}`, Feedback)) !== "done") {
       await agent({ cwd: ws.path }).run("penguin-address-feedback");
     }
   },

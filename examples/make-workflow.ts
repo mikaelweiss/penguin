@@ -1,6 +1,7 @@
 import { workflow } from "penguin";
 import { z } from "zod";
 
+const Approval = z.union([z.enum(["approve", "revise"]), z.string()]);
 const Design = z.object({ path: z.string(), summary: z.string() });
 const Written = z.object({ file: z.string(), name: z.string() });
 const Review = z.object({
@@ -35,13 +36,13 @@ export default workflow({
       input: params.idea,
       result: Design,
     }))!;
-    let answer = await gate("Approve the design? (approve / revise)");
+    let answer = await gate("Approve the design?", Approval);
     while (answer !== "approve") {
       design = (await author.run("penguin-design-workflow", {
         input: revision(params.idea, answer),
         result: Design,
       }))!;
-      answer = await gate("Approve the design? (approve / revise)");
+      answer = await gate("Approve the design?", Approval);
     }
     view.artifact({ title: "Design", path: design.path });
 
@@ -65,7 +66,10 @@ export default workflow({
       });
     }
     if (!approved) {
-      await gate(`${params.rounds} rounds and still findings. Take a look, then answer to finish.`);
+      await gate(
+        `${params.rounds} rounds and still findings. Take a look.`,
+        z.union([z.enum(["ok"]), z.string()]),
+      );
     }
 
     view.artifact({ title: "Workflow", path: written!.file });

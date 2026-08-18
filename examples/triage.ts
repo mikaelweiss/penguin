@@ -47,7 +47,8 @@ export default workflow({
       if (tasks.length === 1) return { ...triage, tasks };
       const listed = tasks.map((task, index) => `${index + 1}. ${task}`).join("\n");
       const answer = await gate(
-        `The ticket splits into ${tasks.length} tasks:\n\n${listed}\n\nType approve, or type what to change.`,
+        `The ticket splits into ${tasks.length} tasks:\n\n${listed}\n\nApprove the split?`,
+        z.union([z.enum(["approve"]), z.string()]),
       );
       if (answer === "approve") return { ...triage, tasks };
       input = `# The revision the user asks for\n\n${answer}`;

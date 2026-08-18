@@ -60,6 +60,7 @@ Workflow files live in `~/.penguin/` for every repository, or in `<repo>/.pengui
 import { workflow } from "penguin";
 import { z } from "zod";
 
+const Ack = z.union([z.enum(["ok"]), z.string()]);
 const Triage = z.object({ actionable: z.boolean(), reason: z.string(), tasks: z.array(z.string()) });
 
 export default workflow({
@@ -69,7 +70,7 @@ export default workflow({
   async run({ params, agent, github, gate }) {
     const t = (await agent().run("penguin-triage", { input: params.ticket, result: Triage }))!;
     if (!t.actionable) {
-      await gate(`Not actionable: ${t.reason}`);
+      await gate(`Not actionable: ${t.reason}`, Ack);
       return;
     }
     await github.pr.create();
@@ -116,7 +117,7 @@ A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name
 - `ctx.agent({use, cwd, name})`: open an agent session. The handle is one conversation: `session.run(skill, {input, result})` is one turn, and the engine validates the result against the schema. A `blocked` schema beside `result` makes the turn resolve to `{result}` or `{blocked}`: the agent fills exactly one, which is how an agent hands questions back for the workflow to gate. A fresh handle is a fresh conversation. `turn.stop()` kills the agent process and keeps the partial work, and the next turn on the same handle continues the conversation.
 - `ctx.vcs`, `ctx.github`, `ctx.jira`, and any role you add: the installed adapters, typed in your editor through the generated `penguin-env.d.ts`. Every method call is one step in the view.
 - `ctx.view`: typed output. `activity` wraps a span, `fact` sets what is true now, `event` appends to the scroll, `artifact` names a thing to open, `watch` declares live numbers the view samples.
-- `ctx.gate(question, shape?)`: ask a question and wait for the answer. The answer is the next message you send. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`) the gate returns that type, the terminal draws a list for it, and an answer that does not fit gets the question again.
+- `ctx.gate(question, shape?)`: ask a question and wait for the answer. The answer is the next message you send. With a zod shape (`z.number()`, `z.enum([...])`, `z.array(z.enum([...]))`, `z.boolean()`) the gate returns that type, the terminal draws a list for it, and an answer that does not fit gets the question again. `z.union([z.enum([...]), z.string()])` names the options and takes any other text, so the terminal draws the list and the gate returns a string.
 - `ctx.messages.next()`: the next message sent into the run, as `{text, session}`. Race it against a turn to interrupt an agent, or read it between turns.
 
 Control flow, batching, and parallelism are plain TypeScript. `Promise.all` fans out, `Promise.race` takes the first.

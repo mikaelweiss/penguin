@@ -82,7 +82,10 @@ export default workflow({
         continue;
       }
       const plan = out.result;
-      const answer = await gate(`${plan.plan}\n\nType approve, or type what to change.`);
+      const answer = await gate(
+        `${plan.plan}\n\nApprove the plan?`,
+        z.union([z.enum(["approve"]), z.string()]),
+      );
       if (answer === "approve") return plan;
       input = `# The revision the user asks for\n\n${answer}`;
     }

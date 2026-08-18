@@ -9,7 +9,25 @@ export function controlFor(schema: Record<string, unknown>): GateControl {
     if (items !== undefined) return { list: items, many: true };
   }
   if (schema["type"] === "boolean") return { list: ["yes", "no"], many: false };
+  const open = optionsOf(schema);
+  if (open !== undefined) return { list: open, many: false };
   return { hint: hintOf(schema) };
+}
+
+/** The options of a shape that names them beside any other string. */
+function optionsOf(schema: Record<string, unknown>): string[] | undefined {
+  const branches = schema["anyOf"];
+  if (!Array.isArray(branches) || branches.length !== 2) return undefined;
+  const named = branches.map((branch) => enumOf(branch));
+  const at = named.findIndex((labels) => labels !== undefined);
+  if (at === -1) return undefined;
+  return anyString(branches[1 - at]) ? named[at] : undefined;
+}
+
+function anyString(schema: unknown): boolean {
+  if (schema === null || typeof schema !== "object") return false;
+  const one = schema as Record<string, unknown>;
+  return one["type"] === "string" && one["enum"] === undefined;
 }
 
 function enumOf(schema: unknown): string[] | undefined {

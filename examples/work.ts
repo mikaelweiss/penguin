@@ -5,6 +5,8 @@ import implement from "./implement.ts";
 import plan from "./plan.ts";
 import triage from "./triage.ts";
 
+const Ack = z.union([z.enum(["ok"]), z.string()]);
+
 function slug(ticket: string): string {
   const cut = ticket.trim().replaceAll(/[^A-Za-z0-9]+/g, "-").slice(0, 40);
   const trimmed = cut.replaceAll(/^-+|-+$/g, "");
@@ -24,14 +26,14 @@ export default workflow({
 
     const triaged = await triage(ctx, { ticket: params.ticket });
     if (!triaged.actionable) {
-      await gate(`Not actionable: ${triaged.reason}`);
+      await gate(`Not actionable: ${triaged.reason}`, Ack);
       return nothing;
     }
 
     const branch = `penguin-${slug(params.ticket)}`;
     const ws = await vcs.worktree.add(branch);
     if (!ws.ok) {
-      await gate(`No worktree: ${ws.reason}`);
+      await gate(`No worktree: ${ws.reason}`, Ack);
       return nothing;
     }
     view.watch({ elapsed: true, diff: ws.path });
@@ -55,7 +57,10 @@ export default workflow({
           rounds: params.rounds,
         });
         if (!built.approved)
-          await gate(`The review did not approve the change:\n\n${built.blocking}\n\nTake a look.`);
+          await gate(
+            `The review did not approve the change:\n\n${built.blocking}\n\nTake a look.`,
+            Ack,
+          );
       });
     }
 

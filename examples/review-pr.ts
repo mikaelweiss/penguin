@@ -1,6 +1,7 @@
 import { workflow } from "penguin";
 import { z } from "zod";
 
+const Ack = z.union([z.enum(["ok"]), z.string()]);
 const Findings = z.object({
   blockers: z
     .array(z.string())
@@ -37,7 +38,7 @@ export default workflow({
   async run({ params, agent, vcs, github, view, gate }) {
     const found = await github.pr.get(params.pr);
     if (!found.ok || found.pr === null) {
-      await gate(`gh pr view ${params.pr} failed: ${found.reason}`);
+      await gate(`gh pr view ${params.pr} failed: ${found.reason}`, Ack);
       return { rounds: 0, posted: 0 };
     }
     const pr = found.pr;
@@ -62,7 +63,7 @@ export default workflow({
     let ws = await vcs.worktree.add(name, { ref });
     while (!ws.ok) {
       if (!ws.exists) {
-        await gate(`The worktree failed: ${ws.reason}`);
+        await gate(`The worktree failed: ${ws.reason}`, Ack);
         return { rounds: 0, posted: 0 };
       }
       const choice = await gate(
@@ -107,7 +108,8 @@ export default workflow({
       const done = await vcs.pull(ref, { cwd: ws.path });
       if (!done.ok)
         await gate(
-          `The pull failed: ${done.reason} Reply to go on with the last fetched code.`,
+          `The pull failed: ${done.reason} The review goes on with the last fetched code.`,
+          Ack,
         );
     };
 
@@ -116,7 +118,7 @@ export default workflow({
         body: report(findings),
       });
       if (!sent.ok) {
-        await gate(`The comment failed: ${sent.reason}`);
+        await gate(`The comment failed: ${sent.reason}`, Ack);
         return;
       }
       posted += 1;
@@ -177,7 +179,8 @@ export default workflow({
       previous = findings;
       while (findings.blockers.length > 0) {
         const answer = await gate(
-          `${report(findings)}\n\nType send to post this without approving, or type feedback for the reviewer.`,
+          `${report(findings)}\n\nPost this without approving?`,
+          z.union([z.enum(["send"]), z.string()]),
         );
         if (answer === "send") {
           await post(findings);
@@ -194,7 +197,7 @@ export default workflow({
       }
       await post(findings);
       const approved = await github.pr.approve(params.pr);
-      if (!approved.ok) await gate(`The approve failed: ${approved.reason}`);
+      if (!approved.ok) await gate(`The approve failed: ${approved.reason}`, Ack);
       else view.event({ message: `Approved PR #${pr.number}` });
       return "approved";
     };

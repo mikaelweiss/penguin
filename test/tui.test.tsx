@@ -182,6 +182,7 @@ function optionGate(schema: Record<string, unknown>): ViewEvent[] {
 }
 
 const ONE_OF = { type: "string", enum: ["approve", "reject"] };
+const OPEN_OF = { anyOf: [{ type: "string", enum: ["approve", "revise"] }, { type: "string" }] };
 
 const nothing = (): void => {};
 
@@ -478,6 +479,27 @@ test("a gate with options draws one control whose last row types an answer", asy
   }
 });
 
+test("a gate that names options beside a string draws the options and the typing row", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate(OPEN_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    const frame = await setup.waitForFrame((text) => text.includes("type a different answer"));
+    const rows = frame.trimEnd().split("\n");
+    const approve = rows.findIndex((row) => row.includes("approve"));
+    const revise = rows.findIndex((row) => row.includes("revise"));
+    const typing = rows.findIndex((row) => row.includes("type a different answer"));
+    assert.equal(revise, approve + 1, "the options sit in order");
+    assert.equal(typing, revise + 1, "the typing row is the last row of the control");
+    await press(setup, ["RETURN"]);
+    assert.deepEqual(inbox(dir), [
+      { at: inbox(dir)[0]?.["at"], text: "approve", gate: "g-1" },
+    ]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("typing at a gate with options sends the text as the answer", async (t) => {
   const box = sandbox(t);
   const dir = box.run("review-1", optionGate(ONE_OF), { live: true });
@@ -762,6 +784,8 @@ test("with no terminal a run prints plain lines and the result", async (t) => {
     { type: "agent", session: "s1", kind: "tool", text: "Read", detail: "src/cli.ts" },
     { type: "message", text: "hurry up" },
     { type: "gate", phase: "asked", id: "g-1", question: "Ship it?" },
+    { type: "gate", phase: "asked", id: "g-2", question: "What now?", schema: OPEN_OF },
+    { type: "gate", phase: "asked", id: "g-3", question: "Which port?", schema: { type: "number" } },
     { type: "run", phase: "done", run: "plan-1", result: "shipped" },
   ]);
   const written: string[] = [];
@@ -783,6 +807,9 @@ test("with no terminal a run prints plain lines and the result", async (t) => {
     "[Read] src/cli.ts",
     "> hurry up",
     "gate: Ship it?",
+    "gate: What now?",
+    "  options: approve, revise",
+    "gate: Which port?",
     "shipped",
   ]);
 });
@@ -1430,6 +1457,8 @@ test("a gate shape picks the control the viewer draws", () => {
   assert.deepEqual(controlFor({ type: "boolean" }), { list: ["yes", "no"], many: false });
   assert.deepEqual(controlFor({ type: "string", format: "uri" }), { hint: "url" });
   assert.deepEqual(controlFor({ type: "number" }), { hint: "number" });
+  assert.deepEqual(controlFor(OPEN_OF), { list: ["approve", "revise"], many: false });
+  assert.deepEqual(controlFor({ anyOf: [{ type: "number" }, { type: "string" }] }), { hint: undefined });
 });
 
 test("a long paste shows as one token and sends its whole text", () => {

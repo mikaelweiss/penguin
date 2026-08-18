@@ -796,7 +796,7 @@ function coerce(shape: z.ZodType, text: string): { value: unknown } | { problem:
 
 function candidates(text: string): unknown[] {
   const trimmed = text.trim();
-  const list: unknown[] = [text, trimmed];
+  const list: unknown[] = [trimmed, text];
   const asNumber = Number(trimmed);
   if (trimmed !== "" && Number.isFinite(asNumber)) list.push(asNumber);
   const lowered = trimmed.toLowerCase();

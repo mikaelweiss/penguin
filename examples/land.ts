@@ -1,6 +1,7 @@
 import { workflow } from "penguin";
 import { z } from "zod";
 
+const Ack = z.union([z.enum(["ok"]), z.string()]);
 const Resolved = z.object({
   resolved: z.boolean(),
   notes: z.string().describe("what the conflict was, and what is left when it is not resolved"),
@@ -28,7 +29,7 @@ export default workflow({
 
     const checkout = await vcs.head();
     if (checkout.branch !== params.onto) {
-      await gate(`The checkout is on ${checkout.branch}, not ${params.onto}. Switch it, then answer.`);
+      await gate(`The checkout is on ${checkout.branch}, not ${params.onto}. Switch it.`, Ack);
       return nowhere(`the checkout is on ${checkout.branch}`);
     }
 
@@ -36,7 +37,7 @@ export default workflow({
       view.fact({ pass: `${pass}/${params.passes}` });
       const fetched = await vcs.fetch(params.onto, { cwd });
       if (!fetched.ok) {
-        await gate(`The fetch of ${params.onto} failed: ${fetched.reason}`);
+        await gate(`The fetch of ${params.onto} failed: ${fetched.reason}`, Ack);
         return nowhere(fetched.reason);
       }
 
@@ -44,7 +45,8 @@ export default workflow({
       const advanced = await vcs.merge(`origin/${params.onto}`, { ffOnly: true });
       if (!advanced.ok) {
         await gate(
-          `${params.onto} and origin/${params.onto} have diverged: ${advanced.reason}\n\nReconcile them, then answer.`,
+          `${params.onto} and origin/${params.onto} have diverged: ${advanced.reason}\n\nReconcile them.`,
+          Ack,
         );
         return nowhere(advanced.reason);
       }
@@ -54,7 +56,8 @@ export default workflow({
       while (state.conflicted) {
         if (turns === params.resolutions) {
           await gate(
-            `${params.resolutions} conflict resolutions, and the rebase is still open. Finish it yourself, then answer.`,
+            `${params.resolutions} conflict resolutions, and the rebase is still open. Finish it yourself.`,
+            Ack,
           );
           return nowhere("the resolution bound ran out");
         }
@@ -67,7 +70,8 @@ export default workflow({
         }))!;
         if (!fixed.resolved) {
           const answer = await gate(
-            `The conflicts are still open: ${fixed.notes}\n\nFix them and stage the files, then type continue. Type abort to drop the rebase.`,
+            `The conflicts are still open: ${fixed.notes}\n\nFix them and stage the files, or drop the rebase.`,
+            z.union([z.enum(["continue", "abort"]), z.string()]),
           );
           if (answer === "abort") {
             await vcs.rebase.abort({ cwd });
@@ -78,20 +82,20 @@ export default workflow({
       }
 
       if (!state.ok) {
-        await gate(`The rebase onto ${params.onto} failed: ${state.reason}`);
+        await gate(`The rebase onto ${params.onto} failed: ${state.reason}`, Ack);
         return nowhere(state.reason);
       }
       clean = !conflicted;
     }
 
     if (!clean) {
-      await gate(`${params.passes} rebase passes, and ${params.onto} keeps moving. Take a look.`);
+      await gate(`${params.passes} rebase passes, and ${params.onto} keeps moving. Take a look.`, Ack);
       return nowhere("the pass bound ran out");
     }
 
     const merged = await vcs.merge(params.branch, { ffOnly: true });
     if (!merged.ok) {
-      await gate(`${params.onto} did not fast-forward to ${params.branch}: ${merged.reason}`);
+      await gate(`${params.onto} did not fast-forward to ${params.branch}: ${merged.reason}`, Ack);
       return nowhere(merged.reason);
     }
 
@@ -103,7 +107,8 @@ export default workflow({
       const removed = await vcs.worktree.remove(cwd);
       if (!removed.ok) {
         await gate(
-          `${params.branch} is on ${params.onto}, but the worktree at ${cwd} stayed: ${removed.reason}\n\nRemove it yourself, then answer.`,
+          `${params.branch} is on ${params.onto}, but the worktree at ${cwd} stayed: ${removed.reason}\n\nRemove it yourself.`,
+          Ack,
         );
       }
     }

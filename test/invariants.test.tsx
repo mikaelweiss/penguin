@@ -684,7 +684,7 @@ export default workflow({
   assert.equal(box.ended("w-1")?.["result"], "the project shell");
 });
 
-test("invariant 11: a typed gate validates the answer and asks again on a mismatch", async (t) => {
+test("invariant 11: a typed gate asks again on a mismatch, and an open shape takes any answer", async (t) => {
   const box = sandbox(t);
   box.write(
     "w.ts",
@@ -696,7 +696,8 @@ export default workflow({
   params: z.object({}),
   async run({ gate }) {
     const port = await gate("Port?", z.number().min(1).max(65535));
-    return { port, kind: typeof port };
+    const answer = await gate("Ship it?", z.union([z.enum(["ship"]), z.string()]));
+    return { port, kind: typeof port, answer };
   },
 });
 `,
@@ -713,21 +714,25 @@ export default workflow({
   assert.equal(box.lastState("w-1")?.["detail"], "Port?");
 
   box.send("w-1", "8080");
+  await waitFor(() => asks(box.events("w-1")).length === 3);
+
+  box.send("w-1", "hold off");
   const ended = await box.waitForEnd("w-1");
 
-  assert.deepEqual(ended["result"], { port: 8080, kind: "number" });
+  assert.deepEqual(ended["result"], { port: 8080, kind: "number", answer: "hold off" });
   const events = box.events("w-1");
   assert.deepEqual(
     asks(events).map((event) => event["schema"]),
     [
       { type: "number", minimum: 1, maximum: 65535 },
       { type: "number", minimum: 1, maximum: 65535 },
+      { anyOf: [{ type: "string", enum: ["ship"] }, { type: "string" }] },
     ],
-    "every ask carries the shape",
+    "every ask carries the shape, and the open shape asks once",
   );
   assert.deepEqual(
     events.filter((event) => event["phase"] === "answered").map((event) => event["answer"]),
-    ["8080"],
+    ["8080", "hold off"],
     "only the answer that fits is an answer",
   );
 });
