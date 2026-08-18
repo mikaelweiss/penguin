@@ -1,5 +1,5 @@
+import { inboxPath } from "@mikaelweiss/penguin-engine/protocol";
 import fs from "node:fs";
-import { inboxPath } from "@mikaelweiss/penguin-engine";
 
 /** One message into the run, addressed to a gate, to a session, or to the run. */
 export function deliver(dir: string, text: string, to?: { session?: string; gate?: string }): void {

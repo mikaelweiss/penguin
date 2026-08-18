@@ -1,4 +1,4 @@
-import { Tail, type ViewEvent, eventsPath, holder } from "@mikaelweiss/penguin-engine";
+import { Tail, type ViewEvent, eventsPath, holder } from "@mikaelweiss/penguin-engine/protocol";
 import { controlFor } from "@mikaelweiss/penguin-viewer";
 
 const WATCH = 500;
@@ -28,7 +28,7 @@ export function resultLine(result: unknown): string | undefined {
  * A run watched without a terminal: the history as lines, then the live tail, and
  * the exit code the run ends with.
  */
-export function plainAttach(name: string, dir: string, agent: string): Promise<number> {
+export function watchAsLines(name: string, dir: string, agent: string): Promise<number> {
   const renderer = plainRenderer();
   let ended: number | undefined;
   let finish = (code: number): void => {

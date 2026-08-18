@@ -5,13 +5,13 @@ const GB = 1024 ** 3;
 const PAGES = /^Pages (free|inactive|speculative|purgeable):\s+(\d+)/;
 const PAGE_SIZE = /page size of (\d+) bytes/;
 
-export type Machine = { used: number; total: number; load: number; cores: number };
+export type Computer = { used: number; total: number; load: number; cores: number };
 
 /**
- * What the machine has left. `os.freemem` counts only unused pages, so on darwin it reads
+ * What this computer has left. `os.freemem` counts only unused pages, so on darwin it reads
  * near full on a healthy machine. `vm_stat` counts the pages the kernel can hand out.
  */
-export async function machine(): Promise<Machine> {
+export async function readComputer(): Promise<Computer> {
   const total = os.totalmem();
   const free = os.platform() === "darwin" ? await available(total) : os.freemem();
   return {
@@ -23,13 +23,13 @@ export async function machine(): Promise<Machine> {
 }
 
 /** The readout the dashboard prints, for example `ram 20/32 GB  load 8.5/10`. */
-export function machineLine(one: Machine): string {
+export function computerLine(one: Computer): string {
   const ram = `ram ${round(one.used)}/${round(one.total)} GB`;
   return `${ram}  load ${one.load.toFixed(1)}/${one.cores}`;
 }
 
-/** True when another run would oversubscribe the machine, which is what the readout warns about. */
-export function strained(one: Machine): boolean {
+/** True when another run would oversubscribe this computer, which is what the readout warns about. */
+export function strained(one: Computer): boolean {
   return one.load >= one.cores || one.used > one.total * 0.9;
 }
 

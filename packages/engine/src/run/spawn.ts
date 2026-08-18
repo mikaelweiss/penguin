@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { type ChildProcess, spawn } from "node:child_process";
-import type { CommandResult, ExecOptions, ShellOptions } from "./types.ts";
+import type { CommandResult, ExecOptions, ShellOptions } from "../author/host.ts";
 
 export type Children = Set<ChildProcess>;
 

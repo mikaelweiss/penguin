@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { NodeState, Projection } from "@mikaelweiss/penguin-viewer";
-import { cut } from "./text.ts";
-import { glyph, ink, stateColor } from "./theme.ts";
+import { cut } from "../text.ts";
+import { glyph, ink, stateColor } from "../theme.ts";
 
 export type TreeRow = {
   key: string;

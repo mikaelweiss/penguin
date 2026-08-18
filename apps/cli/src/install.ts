@@ -1,25 +1,25 @@
 import {
-  catalogsFile,
-  defaultsFile,
-  forScope,
-  homeCatalog,
-  installed,
-  linkSkills,
-  runsRoot,
-  sharedSkills,
-  skillSources,
-  skillsDir,
-  starterCatalog,
-  type Scope,
-  type SkillSource,
-  short,
-  userRoot,
-  writeEnv,
-} from "@mikaelweiss/penguin-engine";
+    catalogsFile,
+    defaultsFile,
+    forScope,
+    homeCatalog,
+    installed,
+    linkSkills,
+    runsRoot,
+    sharedSkills,
+    short,
+    skillSources,
+    skillsDir,
+    starterCatalog,
+    userRoot,
+    writeEnv,
+    type Scope,
+    type SkillSource,
+} from "@mikaelweiss/penguin-engine/catalog";
 import fs from "node:fs";
 import path from "node:path";
-import { intro } from "./animate.ts";
-import { interactive } from "./tui/tty.ts";
+import { intro } from "./intro.ts";
+import { interactive } from "./this-computer/tty.ts";
 
 const hint =
   "run `pn list workflows` to see what's available and then `pn run <workflow>` from a project directory to get started";

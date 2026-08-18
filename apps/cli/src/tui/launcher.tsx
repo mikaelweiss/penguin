@@ -1,29 +1,25 @@
+import {
+    coerce,
+    installed,
+    listed,
+    load,
+    messageOf,
+    PenguinError,
+    searchedWorkflows,
+    short,
+    unfilled,
+    validate,
+    writeEnv,
+    type Asked,
+    type ParamsSchema,
+    type WorkflowFound,
+} from "@mikaelweiss/penguin-engine/catalog";
+import { allocateRun, attachmentsDir, discardRun, finishRun, startRun } from "@mikaelweiss/penguin-engine/run";
 import { decodePasteBytes, type KeyEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
-import {
-  PenguinError,
-  type Asked,
-  type ParamsSchema,
-  type WorkflowFound,
-  allocateRun,
-  attachmentsDir,
-  coerce,
-  discardRun,
-  finishRun,
-  installed,
-  listed,
-  load,
-  messageOf,
-  searchedWorkflows,
-  short,
-  startRun,
-  unfilled,
-  validate,
-  writeEnv,
-} from "@mikaelweiss/penguin-engine";
-import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
-import { agentLine, started } from "./attach.ts";
-import { pasteImage } from "./clipboard.ts";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { pasteImage } from "../this-computer/clipboard.ts";
+import { agentLine, started } from "../watch-run/watch.ts";
 import { Editor } from "./editor.ts";
 import { Choices, InputBar } from "./input.tsx";
 import { cut } from "./text.ts";

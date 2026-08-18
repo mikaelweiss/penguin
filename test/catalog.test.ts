@@ -1,10 +1,11 @@
+import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "@mikaelweiss/penguin-engine";
+import { installed, load, loadAdapter, renderEnv } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { installed, load, loadAdapter, renderEnv, type AgentAdapter, type AgentTurn, type Host, type ViewEvent } from "@mikaelweiss/penguin-engine";
 import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
 const examples = fileURLToPath(new URL("../packages/engine/examples", import.meta.url));

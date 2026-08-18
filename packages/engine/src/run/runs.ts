@@ -1,8 +1,8 @@
 import fs from "node:fs";
-import { type RunRecord, readRun } from "./create.ts";
-import { holder } from "./lock.ts";
-import { eventsPath, runDir, runJsonPath, runsRoot, short } from "./paths.ts";
-import type { ViewEvent } from "./types.ts";
+import { eventsPath, runDir, runJsonPath, runsRoot, short } from "../paths.ts";
+import { holder } from "../protocol/lock.ts";
+import type { ViewEvent } from "../protocol/events.ts";
+import { type RunRecord, readRun } from "../protocol/record.ts";
 
 export type LiveRow = {
   run: string;

@@ -1,16 +1,13 @@
 import {
-  PenguinError,
-  type AdapterFound,
-  alive,
-  eventsPath,
-  installed,
-  pick,
-  readRun,
-  runDir,
-} from "@mikaelweiss/penguin-engine";
+    installed,
+    PenguinError,
+    pick,
+    type AdapterFound,
+} from "@mikaelweiss/penguin-engine/catalog";
+import { alive, eventsPath, readRun, runDir } from "@mikaelweiss/penguin-engine/protocol";
 import fs from "node:fs";
-import { plainAttach } from "./plain.ts";
-import { interactive } from "./tty.ts";
+import { interactive } from "../this-computer/tty.ts";
+import { watchAsLines } from "./plain.ts";
 
 const START_TIMEOUT = 10_000;
 
@@ -30,7 +27,7 @@ export function agentLabel(found: AdapterFound[]): string {
 }
 
 /** Watch one run: the full screen on a terminal, plain lines anywhere else. */
-export async function attach(name: string, pid?: number): Promise<number> {
+export async function watchRun(name: string, pid?: number): Promise<number> {
   const dir = runDir(name);
   if (!fs.existsSync(dir)) throw new PenguinError(`no run named ${name}`);
   const record = readRun(dir);
@@ -39,15 +36,9 @@ export async function attach(name: string, pid?: number): Promise<number> {
     process.stderr.write(`pn: the run process for ${name} died before it started\n`);
     return 1;
   }
-  if (!interactive()) return plainAttach(name, dir, agentLine(found));
-  const { mount } = await import("./app.tsx");
+  if (!interactive()) return watchAsLines(name, dir, agentLine(found));
+  const { mount } = await import("../tui/app.tsx");
   return mount({ kind: "run", name, agent: agentLabel(found) });
-}
-
-/** The dashboard: the live runs, the done ones under `d`, and everything waiting on the user. */
-export async function dashboard(): Promise<number> {
-  const { mount } = await import("./app.tsx");
-  return mount({ kind: "dashboard" });
 }
 
 /** True once the run process holds the run. A viewer that opens earlier reads it as dead. */

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PenguinError } from "../errors.ts";
 import { defaultsFile, envFile, type Scope } from "../paths.ts";
-import type { Adapter } from "../types.ts";
+import type { Adapter } from "../author/host.ts";
 import * as catalogs from "./catalogs.ts";
 import { importDefault } from "./loader.ts";
 

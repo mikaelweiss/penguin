@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PenguinError } from "./errors.ts";
+import { PenguinError } from "../errors.ts";
 
 export function lockPath(dir: string): string {
   return path.join(dir, "lock");

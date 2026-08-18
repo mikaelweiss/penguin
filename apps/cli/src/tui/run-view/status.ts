@@ -1,4 +1,4 @@
-import { cut, plain } from "./text.ts";
+import { cut, plain } from "../text.ts";
 
 const DETAIL = 44;
 

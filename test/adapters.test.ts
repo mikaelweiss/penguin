@@ -1,10 +1,11 @@
+import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "@mikaelweiss/penguin-engine";
+import { loadAdapter } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadAdapter, type AgentAdapter, type AgentTurn, type Host, type ViewEvent } from "@mikaelweiss/penguin-engine";
 import { runArgv } from "./helpers.ts";
 
 const cursorFile = fileURLToPath(new URL("../packages/engine/examples/adapters/cursor.ts", import.meta.url));

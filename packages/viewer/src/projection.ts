@@ -1,4 +1,4 @@
-import type { ViewEvent } from "@mikaelweiss/penguin-engine";
+import type { ViewEvent } from "@mikaelweiss/penguin-engine/protocol";
 
 export type NodeState = "running" | "blocked" | "idle" | "quiet" | "done" | "failed";
 

@@ -3,23 +3,34 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  COMPOSE,
   type AgentOptions,
   type AgentRunOptions,
   type AgentSession,
   type Ctx,
+  type Message,
   type Turn,
+  type View,
   type Workflow,
-} from "./ctx.ts";
+} from "../author/ctx.ts";
+import {
+  type AgentAdapter,
+  type AgentTurnResult,
+  type CredentialField,
+  type CredentialRequest,
+  type Host,
+} from "../author/host.ts";
+import * as adapters from "../catalog/adapters.ts";
+import { load } from "../catalog/loader.ts";
+import { resolve as resolveSkill } from "../catalog/skills.ts";
+import { messageOf, PenguinError } from "../errors.ts";
+import { inboxPath, runDir, transcriptsDir } from "../paths.ts";
+import * as credentials from "../protocol/credentials.ts";
+import type { ViewEvent } from "../protocol/events.ts";
+import { Tail } from "../protocol/follow.ts";
+import { acquire } from "../protocol/lock.ts";
+import { type RunRecord, readRun } from "../protocol/record.ts";
 import { Bus } from "./bus.ts";
-import * as adapters from "./catalog/adapters.ts";
-import { load } from "./catalog/loader.ts";
-import { resolve as resolveSkill } from "./catalog/skills.ts";
-import { readRun, type RunRecord } from "./create.ts";
-import * as credentials from "./credentials.ts";
-import { messageOf, PenguinError } from "./errors.ts";
-import { Tail } from "./follow.ts";
-import { acquire } from "./lock.ts";
-import { inboxPath, runDir, transcriptsDir } from "./paths.ts";
 import {
   type AnySchema,
   type ObjectSchema,
@@ -30,17 +41,6 @@ import {
   turnSchema,
 } from "./schema.ts";
 import { type Children, children, inScope, kill, killActive, runArgv, runCommand } from "./spawn.ts";
-import {
-  type AgentAdapter,
-  type AgentTurnResult,
-  COMPOSE,
-  type CredentialField,
-  type CredentialRequest,
-  type Host,
-  type Message,
-  type View,
-  type ViewEvent,
-} from "./types.ts";
 
 export async function execute(name: string): Promise<number> {
   const dir = runDir(name);

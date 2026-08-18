@@ -6,8 +6,20 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./src/author/index.ts",
+      "default": "./src/author/index.ts"
+    },
+    "./catalog": {
+      "types": "./src/catalog/index.ts",
+      "default": "./src/catalog/index.ts"
+    },
+    "./run": {
+      "types": "./src/run/index.ts",
+      "default": "./src/run/index.ts"
+    },
+    "./protocol": {
+      "types": "./src/protocol/index.ts",
+      "default": "./src/protocol/index.ts"
     }
   },
   "files": ["src", "examples"],

@@ -1,41 +1,43 @@
 #!/usr/bin/env bun
 import {
   PenguinError,
-  allocateRun,
-  attachmentsDir,
   availableSkills,
   choices,
   coerce,
-  createRun,
-  discardRun,
-  execute,
-  finishRun,
   installed,
-  liveRows,
+  listed,
   load,
   locate,
-  listed,
   messageOf,
   parseParams,
   searchedAdapters,
   searchedWorkflows,
-  startRun,
-  type Asked,
-  type ParamsSchema,
-  type Scope,
   short,
   unfilled,
   validate,
   writeEnv,
-} from "@mikaelweiss/penguin-engine";
+  type Asked,
+  type ParamsSchema,
+  type Scope,
+} from "@mikaelweiss/penguin-engine/catalog";
+import {
+  allocateRun,
+  attachmentsDir,
+  createRun,
+  discardRun,
+  execute,
+  finishRun,
+  liveRows,
+  startRun,
+} from "@mikaelweiss/penguin-engine/run";
 import fs from "node:fs";
 import path from "node:path";
-import { intro } from "./animate.ts";
 import { firstRun, install, syncSkills } from "./install.ts";
+import { intro } from "./intro.ts";
 import { adapterBlocks, liveRunTable, skillBlocks, workflowBlocks } from "./list.ts";
-import { pasteImage } from "./tui/clipboard.ts";
-import { agentLine, attach, dashboard } from "./tui/attach.ts";
-import { interactive } from "./tui/tty.ts";
+import { pasteImage } from "./this-computer/clipboard.ts";
+import { interactive } from "./this-computer/tty.ts";
+import { agentLine, watchRun } from "./watch-run/watch.ts";
 
 const usage = `penguin runs one workflow as a live process, and the terminal watches it.
 
@@ -179,7 +181,7 @@ async function runWorkflow(argv: string[]): Promise<number> {
     say(`run ${name} started, ${agentLine(installedAdapters)}`);
     return 0;
   }
-  return attach(name, pid);
+  return watchRun(name, pid);
 }
 
 /** The choice runs before any run directory is claimed, so Ctrl-C leaves nothing behind. */
@@ -282,6 +284,11 @@ async function runProcess(argv: string[]): Promise<number> {
   process.exit(await execute(name));
 }
 
+async function dashboard(): Promise<number> {
+  const { mount } = await import("./tui/app.tsx");
+  return mount({ kind: "dashboard" });
+}
+
 async function listRuns(): Promise<number> {
   if (interactive()) return dashboard();
   say(liveRunTable(liveRows(Date.now())));
@@ -291,7 +298,7 @@ async function listRuns(): Promise<number> {
 async function attachRun(argv: string[]): Promise<number> {
   const [name] = argv;
   if (name === undefined) throw new PenguinError(`pn attach needs a run name\n\n${usage}`);
-  return attach(name);
+  return watchRun(name);
 }
 
 function sourceOf(target: string): string {

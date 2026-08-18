@@ -1,5 +1,25 @@
 import type { z } from "zod";
-import type { Messages, View } from "./types.ts";
+
+export const COMPOSE: unique symbol = Symbol.for("penguin.compose");
+
+export type Message = {
+  text: string;
+  session?: string;
+  /** Which gate the message answers. Routing only: a delivered message never carries it. */
+  gate?: string;
+};
+
+export type Messages = {
+  next(): Promise<Message>;
+};
+
+export type View = {
+  activity<T>(label: string, body: () => Promise<T>): Promise<T>;
+  fact(values: Record<string, string | number | boolean>): void;
+  event(entry: { level?: "info" | "warn" | "error"; message: string; data?: unknown }): void;
+  artifact(entry: { title: string; path?: string; url?: string }): void;
+  watch(readouts: { elapsed?: boolean; diff?: string }): void;
+};
 
 export type AgentRunOptions = {
   input?: string;

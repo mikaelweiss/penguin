@@ -1,9 +1,9 @@
+import { catalogs, foundIn, installedIn, searchPathIn } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { catalogs, foundIn, installedIn, searchPathIn } from "@mikaelweiss/penguin-engine";
 
 const extraAdapter = `import { adapter } from "penguin";
 

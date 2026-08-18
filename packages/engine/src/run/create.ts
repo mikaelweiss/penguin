@@ -1,14 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PenguinError } from "./errors.ts";
-import { inboxPath, runDir, runJsonPath, runsRoot, transcriptsDir } from "./paths.ts";
-
-export type RunRecord = {
-  workflow: string;
-  cwd: string;
-  params: unknown;
-  createdAt: string;
-};
+import { type RunRecord } from "../protocol/record.ts";
+import { inboxPath, runDir, runJsonPath, runsRoot, transcriptsDir } from "../paths.ts";
 
 export function createRun(file: string, params: unknown): string {
   const { name, dir } = allocateRun(file);
@@ -49,10 +42,4 @@ export function finishRun(dir: string, file: string, params: unknown): void {
 export function discardRun(dir: string): void {
   if (fs.existsSync(runJsonPath(dir))) return;
   fs.rmSync(dir, { recursive: true, force: true });
-}
-
-export function readRun(dir: string): RunRecord {
-  const file = runJsonPath(dir);
-  if (!fs.existsSync(file)) throw new PenguinError(`no run at ${dir}`);
-  return JSON.parse(fs.readFileSync(file, "utf8")) as RunRecord;
 }

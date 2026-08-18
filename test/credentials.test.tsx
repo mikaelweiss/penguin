@@ -1,11 +1,13 @@
+import type { CredentialRequest, Host } from "@mikaelweiss/penguin-engine";
+import { loadAdapter } from "@mikaelweiss/penguin-engine/catalog";
+import { credentials } from "@mikaelweiss/penguin-engine/protocol";
+import type { TestRendererSetup } from "@opentui/core/testing";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { TestRendererSetup } from "@opentui/core/testing";
-import { credentials, loadAdapter, type CredentialRequest, type Host } from "@mikaelweiss/penguin-engine";
-import { type Left, RunView } from "../apps/cli/src/tui/run-view.tsx";
+import { type Left, RunView } from "../apps/cli/src/tui/run-view/run-view.tsx";
 import { frameWith, homed, press, screen, typeText } from "./drive.tsx";
 import { type Event, type Sandbox, sandbox, waitFor } from "./helpers.ts";
 

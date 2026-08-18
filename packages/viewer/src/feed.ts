@@ -1,4 +1,4 @@
-import { Tail, eventsPath, readRun } from "@mikaelweiss/penguin-engine";
+import { Tail, eventsPath, readRun } from "@mikaelweiss/penguin-engine/protocol";
 import { Projection } from "./projection.ts";
 
 const TICK = 60;

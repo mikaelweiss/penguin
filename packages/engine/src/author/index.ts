@@ -1,5 +1,6 @@
 export { adapter } from "./adapter.ts";
 export { workflow } from "./workflow.ts";
+export { PenguinError, messageOf } from "../errors.ts";
 export type {
   Adapters,
   AgentFactory,
@@ -7,7 +8,10 @@ export type {
   AgentRunOptions,
   AgentSession,
   Ctx,
+  Message,
+  Messages,
   Turn,
+  View,
   Workflow,
   WorkflowDefinition,
 } from "./ctx.ts";
@@ -21,9 +25,6 @@ export type {
   CredentialRequest,
   ExecOptions,
   Host,
-  Message,
-  Messages,
   ShellOptions,
-  View,
-  ViewEvent,
-} from "./types.ts";
+} from "./host.ts";
+export type { ViewEvent } from "../protocol/events.ts";

@@ -1,7 +1,8 @@
+import type { AgentAdapter, AgentTurn, ExecOptions, Host, ViewEvent } from "@mikaelweiss/penguin-engine";
+import { loadAdapter } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadAdapter, type AgentAdapter, type AgentTurn, type ExecOptions, type Host, type ViewEvent } from "@mikaelweiss/penguin-engine";
 
 const file = fileURLToPath(new URL("../packages/engine/examples/adapters/opencode.ts", import.meta.url));
 

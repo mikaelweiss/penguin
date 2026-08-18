@@ -1,4 +1,4 @@
-import { credentials } from "@mikaelweiss/penguin-engine";
+import { credentials } from "@mikaelweiss/penguin-engine/protocol";
 import type { Attention } from "@mikaelweiss/penguin-viewer";
 
 export type Ask = Extract<Attention, { kind: "credential" }>;

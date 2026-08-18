@@ -2,7 +2,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { type ReactNode, useState } from "react";
 import { Dashboard, type Open } from "./dashboard.tsx";
-import { type Left, RunView } from "./run-view.tsx";
+import { type Left, RunView } from "./run-view/run-view.tsx";
 
 export type Start = { kind: "dashboard" } | { kind: "run"; name: string; agent: string };
 

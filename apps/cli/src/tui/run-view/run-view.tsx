@@ -1,23 +1,23 @@
+import {
+    credentialFile,
+    credentials,
+    holder,
+    runDir,
+} from "@mikaelweiss/penguin-engine/protocol";
+import { attachmentsDir } from "@mikaelweiss/penguin-engine/run";
+import { type Attention, controlFor, deliver, Feed, provide } from "@mikaelweiss/penguin-viewer";
 import { decodePasteBytes, type KeyEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/react";
-import {
-  attachmentsDir,
-  credentialFile,
-  credentials,
-  holder,
-  runDir,
-} from "@mikaelweiss/penguin-engine";
-import { type Attention, controlFor, deliver, Feed, provide } from "@mikaelweiss/penguin-viewer";
 import { spawn } from "node:child_process";
 import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { pasteImage } from "./clipboard.ts";
+import { pasteImage } from "../../this-computer/clipboard.ts";
+import { openEditor } from "../../this-computer/open-editor.ts";
+import { Editor } from "../editor.ts";
+import { Choices, type Copying, CopyList, Fields, InputBar, useCopy } from "../input.tsx";
+import { cut, fit } from "../text.ts";
+import { ink } from "../theme.ts";
 import { type Ask, type Fix, fixes, notes, why } from "./credential.ts";
-import { Editor } from "./editor.ts";
-import { Choices, type Copying, CopyList, Fields, InputBar, useCopy } from "./input.tsx";
-import { openEditor } from "./open-editor.ts";
 import { brief, statusLine } from "./status.ts";
-import { cut, fit } from "./text.ts";
-import { ink } from "./theme.ts";
 import { Transcript } from "./transcript.tsx";
 import { type Selection, Tree, treeKeys, treeRows } from "./tree.tsx";
 

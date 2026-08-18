@@ -10,7 +10,7 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "penguin": ["./node_modules/@mikaelweiss/penguin/src/index.ts", "../src/author.ts"],
+      "penguin": ["./node_modules/@mikaelweiss/penguin/src/index.ts", "../src/author/index.ts"],
       "zod": [
         "../node_modules/zod",
         "../../../node_modules/zod",

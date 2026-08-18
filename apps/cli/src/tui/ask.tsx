@@ -1,9 +1,7 @@
-import { decodePasteBytes, type KeyEvent } from "@opentui/core";
-import { createCliRenderer } from "@opentui/core";
-import { createRoot } from "@opentui/react";
-import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
+import { createCliRenderer, decodePasteBytes, type KeyEvent } from "@opentui/core";
+import { createRoot, useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useState } from "react";
-import type { Attached } from "./clipboard.ts";
+import type { Attached } from "../this-computer/clipboard.ts";
 import { Editor } from "./editor.ts";
 import { Choices, InputBar } from "./input.tsx";
 import { ink } from "./theme.ts";

@@ -1,5 +1,5 @@
-import { PenguinError } from "./errors.ts";
-import type { Adapter } from "./types.ts";
+import { PenguinError } from "../errors.ts";
+import type { Adapter } from "./host.ts";
 
 export function adapter<A>(definition: Adapter<A>): Adapter<A> {
   for (const field of ["role", "name", "description"] as const) {

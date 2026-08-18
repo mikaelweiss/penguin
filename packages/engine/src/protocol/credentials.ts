@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PenguinError } from "./errors.ts";
-import { credentialFile, credentialsDir, short } from "./paths.ts";
+import { PenguinError } from "../errors.ts";
+import { credentialFile, credentialsDir, short } from "../paths.ts";
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 

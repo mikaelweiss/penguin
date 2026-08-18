@@ -1,9 +1,10 @@
+import { readRun } from "@mikaelweiss/penguin-engine/protocol";
+import { allocateRun, discardRun, finishRun, liveRows } from "@mikaelweiss/penguin-engine/run";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { allocateRun, discardRun, finishRun, readRun, rows } from "@mikaelweiss/penguin-engine";
-import { type Left, PANE, RunView } from "../apps/cli/src/tui/run-view.tsx";
+import { type Left, PANE, RunView } from "../apps/cli/src/tui/run-view/run-view.tsx";
 import { frameWith, homed, paste, press, screen } from "./drive.tsx";
 import { type Event, sandbox, waitFor } from "./helpers.ts";
 
@@ -797,7 +798,7 @@ test("invariant 14: an unfinished run directory is invisible, and discard spares
 
   const { name, dir } = allocateRun(file);
   assert.equal(name, "w-1");
-  assert.equal(rows(Date.now()).length, 0, "ps never lists an allocated directory");
+  assert.equal(liveRows(Date.now()).length, 0, "ps never lists an allocated directory");
   assert.throws(() => readRun(dir), /no run at/, "attach cannot open it");
 
   discardRun(dir);

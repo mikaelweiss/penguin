@@ -1,7 +1,6 @@
 import type { z } from "zod";
-import { type Ctx, type Workflow, type WorkflowDefinition } from "./ctx.ts";
-import { PenguinError } from "./errors.ts";
-import { COMPOSE } from "./types.ts";
+import { COMPOSE, type Ctx, type Workflow, type WorkflowDefinition } from "./ctx.ts";
+import { PenguinError } from "../errors.ts";
 
 type Composer = {
   [COMPOSE]?: (definition: unknown, params: unknown) => Promise<unknown>;

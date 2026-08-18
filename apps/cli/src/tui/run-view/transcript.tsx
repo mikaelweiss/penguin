@@ -1,9 +1,9 @@
+import type { ViewEvent } from "@mikaelweiss/penguin-engine/protocol";
+import type { Entry } from "@mikaelweiss/penguin-viewer";
 import { SyntaxStyle } from "@opentui/core";
 import type { ReactNode } from "react";
-import type { ViewEvent } from "@mikaelweiss/penguin-engine";
-import type { Entry } from "@mikaelweiss/penguin-viewer";
-import { cut } from "./text.ts";
-import { ink } from "./theme.ts";
+import { cut } from "../text.ts";
+import { ink } from "../theme.ts";
 
 let style: SyntaxStyle | undefined;
 

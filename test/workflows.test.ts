@@ -1,8 +1,8 @@
+import { choices } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { choices } from "@mikaelweiss/penguin-engine";
 import { sandbox } from "./helpers.ts";
 
 const writes = (text: string, params = "z.object({})") => `import { workflow } from "penguin";
