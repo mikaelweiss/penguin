@@ -180,8 +180,18 @@ export default workflow({
   const asked = box.invocations("prompts.txt");
   assert.equal(asked.length, 2);
   assert.match(asked[1] ?? "", /answer: postgres/);
-  const schema = JSON.parse(box.lines("schemas.txt")[0] ?? "null") as { anyOf?: unknown[] };
-  assert.equal(schema.anyOf?.length, 2, "the adapter got one schema that accepts either envelope");
+  const schema = JSON.parse(box.lines("schemas.txt")[0] ?? "null") as {
+    type?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  assert.equal(schema.type, "object", "the schema is one object, never a top-level union");
+  assert.deepEqual(
+    Object.keys(schema.properties ?? {}).sort(),
+    ["blocked", "result"],
+    "the adapter got one schema that accepts either envelope",
+  );
+  assert.equal(schema.required, undefined, "each envelope is optional, and validation picks one");
 });
 
 test("a session use option picks the named agent adapter over the default", (t) => {

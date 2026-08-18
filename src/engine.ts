@@ -340,7 +340,7 @@ class Execution {
     }
     const skillText = fs.readFileSync(found.file, "utf8");
     const envelope = envelopeOf(call);
-    const schema = envelope === undefined ? undefined : jsonSchema(envelope);
+    const schema = turnSchema(call);
     const label = `agent ${call.skill}`;
     const activity = this.als.getStore()?.id;
     this.bus.emit({ type: "step", phase: "start", id, label, activity });
@@ -715,6 +715,18 @@ function jsonSchema(shape: z.ZodType): Record<string, unknown> {
   const schema = z.toJSONSchema(shape) as Record<string, unknown>;
   delete schema["$schema"];
   return schema;
+}
+
+/** An agent CLI turns the schema into a tool schema, and a tool schema takes no union at its top level. */
+function turnSchema(call: TurnCall): Record<string, unknown> | undefined {
+  if (call.result === undefined) return undefined;
+  if (call.blocked === undefined) return jsonSchema(call.result);
+  return jsonSchema(
+    z.object({
+      result: call.result.optional().describe("fill this or blocked, and never both"),
+      blocked: call.blocked.optional().describe("fill this or result, and never both"),
+    }),
+  );
 }
 
 function coerce(shape: z.ZodType, text: string): { value: unknown } | { problem: string } {
