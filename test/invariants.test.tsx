@@ -585,7 +585,7 @@ test("invariant 9: the first penguin command installs, and sync keeps a skill yo
   );
 });
 
-test("invariant 10: a skill name resolves from the project before the home", (t) => {
+test("invariant 10: a skill name resolves from earlier catalog roots before later ones", (t) => {
   const box = sandbox(t);
   box.setAgent("none", "prompts.txt");
   box.write(
@@ -647,7 +647,7 @@ export default workflow({
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the craft next to the workflow/);
 });
 
-test("invariant 10: an adapter resolves from the project before the home", (t) => {
+test("invariant 10: an adapter resolves from earlier catalog roots before later ones", (t) => {
   const box = sandbox(t);
   box.withShell();
   box.writeAdapter(
