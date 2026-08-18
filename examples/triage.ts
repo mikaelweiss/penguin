@@ -6,6 +6,9 @@ const Triage = z.object({
   actionable: z.boolean(),
   reason: z.string(),
   tasks: z.array(z.string()).describe("the tasks that build the ticket, each one a vertical slice"),
+  context: z
+    .string()
+    .describe("the files read and what each one holds, so the planner reads them once, not twice"),
 });
 
 async function answered(

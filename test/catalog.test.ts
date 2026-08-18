@@ -14,6 +14,7 @@ const examples = fileURLToPath(new URL("../examples", import.meta.url));
 const codexFile = path.join(examples, "adapters", "codex.ts");
 
 const workflowFiles = [
+  "baseline.ts",
   "commit.ts",
   "implement.ts",
   "land.ts",
@@ -451,7 +452,7 @@ test("the catalog composes the pipelines out of the steps", async () => {
     "land",
     "work",
   ]);
-  assert.deepEqual(importsOf("work.ts"), ["implement", "plan", "triage"]);
+  assert.deepEqual(importsOf("work.ts"), ["baseline", "implement", "plan", "triage"]);
   assert.equal(typeof (await load(path.join(examples, "ship.ts"))), "function");
   assert.equal(
     typeof (await load(path.join(examples, "ship-local.ts"))),
@@ -463,7 +464,7 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","findings":"none"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none"}',
   );
   outsideReady(box);
 
@@ -489,9 +490,9 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   for (const file of [
     "work.ts",
     "triage.ts",
+    "baseline.ts",
     "plan.ts",
     "implement.ts",
-    "review.ts",
     "open-pr.ts",
   ]) {
     assert.ok(
@@ -500,12 +501,9 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
     );
   }
 
-  const reviews = await description("review.ts");
-  const reviewed = spans.find((span) => span.label === reviews);
-  assert.ok(reviewed !== undefined);
-  assert.ok(
-    ancestors(spans, reviewed).includes(await description("implement.ts")),
-  );
+  const round = spans.find((span) => span.label === "round 1 of 3");
+  assert.ok(round !== undefined);
+  assert.ok(ancestors(spans, round).includes(await description("implement.ts")));
 
   const worktree = path.join(box.project, "penguin-ABC-1");
   const dirs = box.sessions().map((line) => line.cwd);
@@ -579,7 +577,7 @@ test("the catalog plan workflow reads a github issue and its comments", async (t
 
 test("the catalog ship workflow stops at the triage gate", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"actionable":false,"reason":"no repro","tasks":[]}');
+  catalogReady(box, '{"actionable":false,"reason":"no repro","tasks":[],"context":""}');
 
   const started = box.penguin(
     "run",
@@ -605,7 +603,7 @@ test("the catalog triage workflow gates a split before returning it", async (t) 
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"two seams","tasks":["first slice","second slice"]}',
+    '{"actionable":true,"reason":"two seams","tasks":["first slice","second slice"],"context":"two files"}',
   );
 
   const started = box.penguin(
@@ -630,12 +628,13 @@ test("the catalog triage workflow gates a split before returning it", async (t) 
     actionable: true,
     reason: "two seams",
     tasks: ["first slice", "second slice"],
+    context: "two files",
   });
 });
 
 test("the catalog implement workflow runs alone in the invoking repository", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"verdict":"approved","findings":"none"}');
+  catalogReady(box, '{"verdict":"approved","blocking":"","notes":"none"}');
 
   const started = box.penguin(
     "run",
@@ -648,13 +647,13 @@ test("the catalog implement workflow runs alone in the invoking repository", asy
   const ended = await box.waitForEnd("implement-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
-  assert.deepEqual(ended["result"], { approved: true, findings: ["none"] });
+  assert.deepEqual(ended["result"], { approved: true, blocking: "", notes: "none" });
   assert.deepEqual(runNames(box), ["implement-1"]);
 
   const spans = activities(box, "implement-1");
   assert.deepEqual(
     spans.map((span) => span.label),
-    ["round 1 of 3", await description("review.ts")],
+    ["round 1 of 3"],
   );
 
   const sessions = box.sessions();
@@ -670,7 +669,7 @@ test("the catalog implement workflow stops after its round bound", async (t) => 
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"verdict":"changes_needed","findings":"the flag is still there"}',
+    '{"verdict":"changes_needed","blocking":"the flag is still there","notes":""}',
   );
 
   const started = box.penguin(
@@ -686,17 +685,19 @@ test("the catalog implement workflow stops after its round bound", async (t) => 
   const ended = await box.waitForEnd("implement-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
-  const result = ended["result"] as { approved: boolean; findings: string[] };
+  const result = ended["result"] as { approved: boolean; blocking: string };
   assert.equal(result.approved, false);
-  assert.equal(result.findings.length, 2);
-  assert.equal(box.sessions().length, 4);
+  assert.equal(result.blocking, "the flag is still there");
+  assert.equal(box.sessions().length, 4, "two rounds, each an implement turn and a review turn");
+  const conversations = new Set(box.sessions().map((line) => line.session));
+  assert.equal(conversations.size, 2, "one implementer and one reviewer, however many rounds run");
 });
 
 test("the catalog ship-local workflow commits, holds, then lands the branch on main", async (t) => {
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","findings":"none","message":"fix: pin the footer"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer"}',
   );
   outsideReady(box);
 

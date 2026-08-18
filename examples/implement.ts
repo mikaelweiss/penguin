@@ -1,11 +1,15 @@
 import { workflow } from "penguin";
 import { z } from "zod";
-import review from "./review.ts";
+import { checklist, Review } from "./review.ts";
 
-function brief(task: string, findings: string[]): string {
-  const last = findings.at(-1);
-  if (last === undefined) return task;
-  return `${task}\n\n# Review findings to address\n\n${last}`;
+function brief(task: string, blocking: string, baseline: string): string {
+  const parts = [task];
+  if (baseline !== "")
+    parts.push(
+      `# What the gates said before this change\n\nLeave these alone. Fix only what this change breaks.\n\n${baseline}`,
+    );
+  if (blocking !== "") parts.push(`# Review findings to fix\n\n${blocking}`);
+  return parts.join("\n\n");
 }
 
 export default workflow({
@@ -14,30 +18,42 @@ export default workflow({
     task: z.string(),
     acceptance: z.string().optional(),
     dir: z.string().optional(),
+    baseline: z.string().default(""),
+    base: z.string().default(""),
     rounds: z.number().int().min(1).default(3),
   }),
 
-  async run(ctx) {
-    const { params, agent, view } = ctx;
+  async run({ params, agent, view }) {
     view.watch({ elapsed: true, diff: params.dir ?? "." });
 
     const implementer = agent({ cwd: params.dir });
-    const findings: string[] = [];
+    // One reviewer across the rounds: round two reads the new diff, not the whole tree again.
+    const reviewer = agent({ cwd: params.dir });
+    let blocking = "";
+    let notes = "";
     let approved = false;
 
     for (let round = 1; round <= params.rounds && !approved; round++) {
       approved = await view.activity(`round ${round} of ${params.rounds}`, async () => {
         view.fact({ round: `${round}/${params.rounds}` });
-        await implementer.run("penguin-implement", { input: brief(params.task, findings) });
-        const reviewed = await review(ctx, {
-          acceptance: params.acceptance ?? params.task,
-          dir: params.dir,
-          findings: findings.join("\n\n"),
+        await implementer.run("penguin-implement", {
+          input: brief(params.task, blocking, params.baseline),
         });
-        findings.push(reviewed.findings);
+        const reviewed = (await reviewer.run("penguin-review", {
+          input: checklist({
+            acceptance: params.acceptance ?? params.task,
+            blocking,
+            baseline: params.baseline,
+            base: params.base,
+          }),
+          result: Review,
+        }))!;
+        view.fact({ verdict: reviewed.verdict });
+        blocking = reviewed.blocking;
+        notes = reviewed.notes;
         return reviewed.verdict === "approved";
       });
     }
-    return { approved, findings };
+    return { approved, blocking, notes };
   },
 });

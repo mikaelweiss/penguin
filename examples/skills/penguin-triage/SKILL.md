@@ -15,6 +15,7 @@ Decide if the ticket is ready to work on, and return the tasks that build it. Do
 4. If a question survives your own reading, return `blocked` with the questions and no verdict. The answers arrive in the next turn. Ask only what the repository cannot answer.
 5. Set `actionable` to true only if both answers are yes. Put the deciding fact in `reason`. Name the file, the missing detail, or the conflict. One or two sentences.
 6. When the ticket is actionable, return the work as `tasks`.
+7. Return what your reading found as `context`: each file you read, what it holds, and the line numbers that matter. The planner starts from this instead of reading the repository a second time. Facts only, no plan.
 
 ## The split
 

@@ -58,6 +58,9 @@ export default adapter({
       argv.push(turn.first ? "--session-id" : "--resume", turn.session);
       const model = turn.options["model"];
       if (typeof model === "string") argv.push("--model", model);
+      // A run has no one to ask, so a denied edit costs the turn. `permission` in the session options overrides it.
+      const permission = turn.options["permission"];
+      argv.push("--permission-mode", typeof permission === "string" ? permission : "acceptEdits");
 
       let buffer = "";
       let stderr = "";

@@ -36,6 +36,8 @@ export default workflow({
         task: answer,
         acceptance: worked.acceptance,
         dir: worked.path,
+        baseline: worked.gates,
+        base: worked.base,
         rounds: params.rounds,
       });
     }

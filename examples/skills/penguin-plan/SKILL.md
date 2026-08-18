@@ -24,6 +24,8 @@ The goal is the documents that govern this change, found by lookup rather than a
 
 Timebox this. When the matched docs and entry points are read, discovery is done; do not re-derive what the docs already state.
 
+The input may carry a section of what triage already read. Those facts are yours: start from them, and read a file again only to answer a question they leave open.
+
 ## 3. Definition of done
 
 From the matched rules and docs, enumerate every gate that applies to the touched surfaces: lint, required test surfaces, contract/consumer-provider chains, QA or walkthrough docs, feature-flag lockstep files, manual checklists. Each becomes an acceptance criterion in the plan. Deliberately skipping a documented gate is a scope decision: write it as an explicit out-of-scope line for the user to see, never omit it silently.

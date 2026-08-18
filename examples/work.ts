@@ -1,5 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import baseline from "./baseline.ts";
 import implement from "./implement.ts";
 import plan from "./plan.ts";
 import triage from "./triage.ts";
@@ -19,7 +20,7 @@ export default workflow({
 
   async run(ctx) {
     const { params, vcs, view, gate } = ctx;
-    const nothing = { done: false, path: "", branch: "", acceptance: "" };
+    const nothing = { done: false, path: "", branch: "", acceptance: "", gates: "", base: "" };
 
     const triaged = await triage(ctx, { ticket: params.ticket });
     if (!triaged.actionable) {
@@ -35,22 +36,36 @@ export default workflow({
     }
     view.watch({ elapsed: true, diff: ws.path });
 
+    // The fresh worktree is the base, so what the gates say here is what every review compares against.
+    const head = await vcs.head({ cwd: ws.path });
+    const before = await baseline(ctx, { dir: ws.path });
+
     const checks: string[] = [];
     const total = triaged.tasks.length;
     for (const [index, task] of triaged.tasks.entries()) {
       await view.activity(`task ${index + 1} of ${total}`, async () => {
-        const planned = await plan(ctx, { ticket: task, dir: ws.path });
+        const planned = await plan(ctx, { ticket: task, dir: ws.path, context: triaged.context });
         checks.push(planned.acceptance);
         const built = await implement(ctx, {
           task: planned.plan,
           acceptance: planned.acceptance,
           dir: ws.path,
+          baseline: before.gates,
+          base: head.sha,
           rounds: params.rounds,
         });
-        if (!built.approved) await gate("The review did not approve the change. Take a look.");
+        if (!built.approved)
+          await gate(`The review did not approve the change:\n\n${built.blocking}\n\nTake a look.`);
       });
     }
 
-    return { done: true, path: ws.path, branch, acceptance: checks.join("\n\n") };
+    return {
+      done: true,
+      path: ws.path,
+      branch,
+      acceptance: checks.join("\n\n"),
+      gates: before.gates,
+      base: head.sha,
+    };
   },
 });

@@ -34,7 +34,11 @@ async function answered(
 
 export default workflow({
   description: "plan a change with feedback and approval from the user",
-  params: z.object({ ticket: z.string(), dir: z.string().optional() }),
+  params: z.object({
+    ticket: z.string(),
+    dir: z.string().optional(),
+    context: z.string().default(""),
+  }),
 
   async run(ctx) {
     const { params, agent, view, gate } = ctx;
@@ -66,7 +70,7 @@ export default workflow({
     }
 
     const planner = agent({ cwd: params.dir });
-    let input = ticket;
+    let input = params.context === "" ? ticket : `${ticket}\n\n# What triage already read\n\n${params.context}`;
     for (;;) {
       const out = (await planner.run("penguin-plan", {
         input,
