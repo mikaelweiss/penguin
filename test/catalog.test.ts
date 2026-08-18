@@ -2,13 +2,15 @@ import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "@mikaelweiss/peng
 import { installed, load, loadAdapter, renderEnv } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
 const examples = fileURLToPath(new URL("../packages/engine/examples", import.meta.url));
+const workflows = path.join(examples, "workflows");
 
 const codexFile = path.join(examples, "adapters", "codex.ts");
 
@@ -214,6 +216,7 @@ export default adapter({
           isDraft: false,
           headRefOid: "abc123",
           url: "https://example.test/pr/" + ref,
+          isInMergeQueue: false,
         },
         reason: "",
       }),
@@ -253,6 +256,62 @@ export default adapter({
 });
 `;
 
+const mergeQueueGithub = fakeGithub
+  .replace(
+    'fs.writeFileSync(host.cwd + "/commented.txt", options.body ?? "");',
+    'fs.appendFileSync(host.cwd + "/commented.txt", (options.body ?? "") + "\\n");',
+  )
+  .replace(
+    `      changes: () => {
+        let sent = false;
+        return {
+          next: () =>
+            new Promise((resolve) => {
+              const timer = setInterval(() => {
+                if (!sent && fs.existsSync(host.cwd + "/commented.txt")) {
+                  sent = true;
+                  clearInterval(timer);
+                  resolve({ kind: "closed", state: "MERGED" });
+                }
+              }, 25);
+              if (sent) clearInterval(timer);
+            }),
+        };
+      },`,
+    `      changes: () => {
+        const steps = [
+          { file: "/commented.txt", change: { kind: "queued" } },
+          { file: "", change: { kind: "commits" } },
+          { file: "/dequeue.txt", change: { kind: "dequeued" } },
+          { file: "/close.txt", change: { kind: "closed", state: "MERGED" } },
+        ];
+        let at = 0;
+        return {
+          next: () =>
+            new Promise((resolve) => {
+              const step = steps[at];
+              if (step === undefined) return;
+              at += 1;
+              const tick = () => {
+                if (step.file === "" || fs.existsSync(host.cwd + step.file))
+                  return resolve(step.change);
+                setTimeout(tick, 25);
+              };
+              tick();
+            }),
+        };
+      },`,
+  );
+
+const startQueuedGithub = mergeQueueGithub
+  .replace("isInMergeQueue: false,", "isInMergeQueue: true,")
+  .replace(
+    `          { file: "/commented.txt", change: { kind: "queued" } },
+          { file: "", change: { kind: "commits" } },
+          { file: "/dequeue.txt", change: { kind: "dequeued" } },`,
+    `          { file: "/dequeue.txt", change: { kind: "dequeued" } },`,
+  );
+
 const queueGithub = `import fs from "node:fs";
 import { adapter } from "penguin";
 
@@ -276,6 +335,7 @@ export default adapter({
           isDraft: false,
           headRefOid: "abc123",
           url: "https://example.test/pr/" + ref,
+          isInMergeQueue: false,
         },
         reason: "",
       }),
@@ -402,6 +462,16 @@ function catalogReady(box: Sandbox, result: string): void {
   box.setDefaults("agent fake");
 }
 
+/** A gh on PATH that fails one way every time, whatever the machine's own gh would say. */
+function failingGh(t: TestContext, stderr: string): Record<string, string> {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-gh-")));
+  fs.writeFileSync(path.join(dir, "gh"), `#!/bin/sh\ncat >/dev/null\necho ${JSON.stringify(stderr)} >&2\nexit 1\n`, {
+    mode: 0o755,
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return { PATH: `${dir}${path.delimiter}${process.env["PATH"] ?? ""}` };
+}
+
 function outsideReady(box: Sandbox): void {
   box.writeAdapter("git", fakeVcs);
   box.writeAdapter("gh", fakeGithub);
@@ -451,22 +521,33 @@ function ancestors(spans: Span[], span: Span): string[] {
   return labels;
 }
 
+function facts(box: Sandbox, run: string): Record<string, unknown>[] {
+  return box
+    .events(run)
+    .filter((event) => event["type"] === "fact")
+    .map((event) => event["values"] as Record<string, unknown>);
+}
+
+function queuedFacts(box: Sandbox, run: string): number {
+  return facts(box, run).filter((values) => values["phase"] === "queued").length;
+}
+
 function runNames(box: Sandbox): string[] {
   return fs.readdirSync(box.runs).sort();
 }
 
 async function description(file: string): Promise<string> {
-  return (await load(path.join(examples, file))).description;
+  return (await load(path.join(workflows, file))).description;
 }
 
 test("every catalog workflow loads with a description and params", async () => {
   const files = fs
-    .readdirSync(examples)
+    .readdirSync(workflows)
     .filter((name) => name.endsWith(".ts") && !name.endsWith(".d.ts"));
   assert.deepEqual(files.sort(), workflowFiles);
 
   for (const file of files) {
-    const definition = await load(path.join(examples, file));
+    const definition = await load(path.join(workflows, file));
     assert.ok(
       definition.description.trim() !== "",
       `${file} has no description`,
@@ -513,7 +594,7 @@ test("the catalog composes the pipelines out of the steps", async () => {
   const importsOf = (file: string): string[] =>
     [
       ...fs
-        .readFileSync(path.join(examples, file), "utf8")
+        .readFileSync(path.join(workflows, file), "utf8")
         .matchAll(/from "\.\/([a-z-]+)\.ts"/g),
     ]
       .map((match) => match[1] ?? "")
@@ -528,9 +609,9 @@ test("the catalog composes the pipelines out of the steps", async () => {
   ]);
   assert.deepEqual(importsOf("work.ts"), ["baseline", "implement", "plan", "triage"]);
   assert.deepEqual(importsOf("pr-queue.ts"), ["review-pr"]);
-  assert.equal(typeof (await load(path.join(examples, "ship.ts"))), "function");
+  assert.equal(typeof (await load(path.join(workflows, "ship.ts"))), "function");
   assert.equal(
-    typeof (await load(path.join(examples, "ship-local.ts"))),
+    typeof (await load(path.join(workflows, "ship-local.ts"))),
     "function",
   );
 });
@@ -545,7 +626,7 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
 
   const started = box.penguin(
     "run",
-    path.join(examples, "ship.ts"),
+    path.join(workflows, "ship.ts"),
     "--ticket",
     "ABC-1",
     "--background",
@@ -588,6 +669,33 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   );
 });
 
+test("the catalog open-pr workflow holds at the gate when the pull request is already open", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, "none");
+  outsideReady(box);
+  box.writeAdapter(
+    "gh",
+    fakeGithub.replace(
+      'create: async () => ({ ok: true, url: "https://example.test/pr/7", reason: "" })',
+      'create: async () => ({ ok: true, url: "https://example.test/pr/7", existed: true, reason: "" })',
+    ),
+  );
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "open-pr.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "open-pr-1", "PR is up:", "done");
+  const ended = await box.waitForEnd("open-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
+  assert.equal(box.sessions().length, 0);
+});
+
 test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {
   const box = sandbox(t);
   catalogReady(
@@ -602,7 +710,7 @@ test("the catalog plan workflow reads a jira key and its comments, given by posi
 
   const started = box.penguin(
     "run",
-    path.join(examples, "plan.ts"),
+    path.join(workflows, "plan.ts"),
     "https://example.test/browse/ABC-1?atlOrigin=xyz",
     "--background",
   );
@@ -634,7 +742,7 @@ test("the catalog plan workflow reads a github issue and its comments", async (t
 
   const started = box.penguin(
     "run",
-    path.join(examples, "plan.ts"),
+    path.join(workflows, "plan.ts"),
     "https://github.com/acme/app/issues/12",
     "--background",
   );
@@ -653,10 +761,11 @@ test("the catalog plan workflow reads a github issue and its comments", async (t
 test("the catalog ship workflow stops at the triage gate", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"actionable":false,"reason":"no repro","tasks":[],"context":""}');
+  outsideReady(box);
 
   const started = box.penguin(
     "run",
-    path.join(examples, "ship.ts"),
+    path.join(workflows, "ship.ts"),
     "--ticket",
     "ABC-1",
     "--background",
@@ -680,10 +789,11 @@ test("the catalog triage workflow gates a split before returning it", async (t) 
     box,
     '{"actionable":true,"reason":"two seams","tasks":["first slice","second slice"],"context":"two files"}',
   );
+  outsideReady(box);
 
   const started = box.penguin(
     "run",
-    path.join(examples, "triage.ts"),
+    path.join(workflows, "triage.ts"),
     "--ticket",
     "ABC-1",
     "--background",
@@ -713,7 +823,7 @@ test("the catalog implement workflow runs alone in the invoking repository", asy
 
   const started = box.penguin(
     "run",
-    path.join(examples, "implement.ts"),
+    path.join(workflows, "implement.ts"),
     "--task",
     "rename the flag",
     "--background",
@@ -749,7 +859,7 @@ test("the catalog implement workflow stops after its round bound", async (t) => 
 
   const started = box.penguin(
     "run",
-    path.join(examples, "implement.ts"),
+    path.join(workflows, "implement.ts"),
     "--task",
     "rename the flag",
     "--rounds",
@@ -778,7 +888,7 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
 
   const started = box.penguin(
     "run",
-    path.join(examples, "ship-local.ts"),
+    path.join(workflows, "ship-local.ts"),
     "--ticket",
     "the footer scrolls",
     "--background",
@@ -823,7 +933,7 @@ test("the catalog land workflow gives a rebase conflict to an agent, then moves 
 
   const started = box.penguin(
     "run",
-    path.join(examples, "land.ts"),
+    path.join(workflows, "land.ts"),
     "--branch",
     "penguin-ABC-1",
     "--background",
@@ -857,7 +967,7 @@ test("the catalog land workflow lands on a target that is ahead of origin", asyn
 
   const started = box.penguin(
     "run",
-    path.join(examples, "land.ts"),
+    path.join(workflows, "land.ts"),
     "--branch",
     "penguin-ABC-1",
     "--dir",
@@ -881,7 +991,7 @@ test("the catalog land workflow gates when the checkout is on another branch", a
 
   const started = box.penguin(
     "run",
-    path.join(examples, "land.ts"),
+    path.join(workflows, "land.ts"),
     "--branch",
     "penguin-ABC-1",
     "--background",
@@ -908,7 +1018,7 @@ test("the catalog commit workflow writes nothing when the tree is clean", async 
 
   const started = box.penguin(
     "run",
-    path.join(examples, "commit.ts"),
+    path.join(workflows, "commit.ts"),
     "--background",
   );
   assert.equal(started.code, 0, started.output);
@@ -934,7 +1044,7 @@ test("the catalog review-pr workflow approves a clean PR and follows it to the c
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -953,6 +1063,88 @@ test("the catalog review-pr workflow approves a clean PR and follows it to the c
   assert.ok(box.exists("approved.txt"), "the PR was not approved");
 });
 
+test("the catalog review-pr workflow waits while the PR sits in the merge queue", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":["tiny nit"]}',
+  );
+  outsideReady(box);
+  box.writeAdapter("gh", mergeQueueGithub);
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  // The second queued fact proves the loop read the commits change and started no round.
+  await waitFor(() => queuedFacts(box, "review-pr-1") >= 2);
+
+  assert.equal(box.sessions().length, 2, "a round ran while the PR waited");
+  assert.equal(box.lines("commented.txt").length, 4);
+
+  box.write("dequeue.txt", "left");
+  await waitFor(() => box.lines("commented.txt").length === 8);
+
+  box.write("close.txt", "merged");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 2, posted: 2 });
+  assert.ok(box.exists("approved.txt"), "the PR was not approved");
+
+  const messages = box
+    .events("review-pr-1")
+    .filter((event) => event["type"] === "event")
+    .map((event) => String(event["message"]));
+  assert.ok(
+    messages.includes("PR #42 is queued to merge, the review waits"),
+    messages.join("\n"),
+  );
+  assert.ok(
+    messages.includes("PR #42 left the merge queue"),
+    messages.join("\n"),
+  );
+});
+
+test("the catalog review-pr workflow waits when the PR is queued before the run starts", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":["tiny nit"]}',
+  );
+  outsideReady(box);
+  box.writeAdapter("gh", startQueuedGithub);
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await waitFor(() => queuedFacts(box, "review-pr-1") >= 1);
+
+  assert.equal(box.sessions().length, 1, "a round ran on a queued PR");
+  assert.equal(box.exists("commented.txt"), false);
+
+  box.write("dequeue.txt", "left");
+  await waitFor(() => box.exists("commented.txt"));
+
+  box.write("close.txt", "merged");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.ok(box.exists("approved.txt"), "the PR was not approved");
+});
+
 test("the catalog review-pr workflow gates on blockers and posts without approving", async (t) => {
   const box = sandbox(t);
   catalogReady(
@@ -963,7 +1155,7 @@ test("the catalog review-pr workflow gates on blockers and posts without approvi
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -998,7 +1190,7 @@ test("the catalog review-pr workflow reviews in the worktree that is already the
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1026,7 +1218,7 @@ test("the catalog review-pr workflow replaces the worktree that is already there
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1053,7 +1245,7 @@ test("the catalog review-pr workflow stops when the user exits the worktree gate
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1075,9 +1267,10 @@ test("the catalog review-pr workflow gates when the PR does not read", async (t)
   const box = sandbox(t);
   catalogReady(box, "none");
 
-  const started = box.penguin(
+  const started = box.penguinWith(
+    failingGh(t, "no pull request found for 42"),
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1087,6 +1280,27 @@ test("the catalog review-pr workflow gates when the PR does not read", async (t)
   const question = await gateOf(box, "review-pr-1");
   assert.ok(question.startsWith("gh pr view 42 failed:"), question);
   box.send("review-pr-1", "ok");
+  assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
+});
+
+test("the catalog gh adapter holds a signed out gh before the workflow sees it", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, "none");
+
+  const started = box.penguinWith(
+    failingGh(t, "not logged in to github.com. use 'gh auth login' to authenticate with this host"),
+    "run",
+    path.join(workflows, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+
+  assert.equal(started.code, 0, started.output);
+  assert.match(await gateOf(box, "review-pr-1"), /gh auth login/);
+
+  box.send("review-pr-1", "skip");
+  await answerGate(box, "review-pr-1", "gh pr view 42 failed:", "ok");
   assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
 });
 
@@ -1100,7 +1314,7 @@ test("the catalog review-pr workflow hands a small PR back to the user", async (
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1127,7 +1341,7 @@ test("the catalog review-pr workflow reviews the small PR the user keeps", async
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1155,7 +1369,7 @@ test("the catalog pr-queue workflow reviews every request once, beside the watch
 
   const started = box.penguin(
     "run",
-    path.join(examples, "pr-queue.ts"),
+    path.join(workflows, "pr-queue.ts"),
     "--background",
   );
   assert.equal(started.code, 0, started.output);
@@ -1185,7 +1399,7 @@ test("the catalog make-workflow workflow designs, writes, and reviews the new wo
 
   const started = box.penguin(
     "run",
-    path.join(examples, "make-workflow.ts"),
+    path.join(workflows, "make-workflow.ts"),
     "--idea",
     "a triage bot",
     "--background",
@@ -1219,7 +1433,7 @@ test("the catalog make-workflow workflow stops after its round bound", async (t)
 
   const started = box.penguin(
     "run",
-    path.join(examples, "make-workflow.ts"),
+    path.join(workflows, "make-workflow.ts"),
     "--idea",
     "a triage bot",
     "--rounds",
@@ -1237,7 +1451,7 @@ test("the catalog make-workflow workflow stops after its round bound", async (t)
 });
 
 function skillsNamedBy(file: string): string[] {
-  const source = fs.readFileSync(path.join(examples, file), "utf8");
+  const source = fs.readFileSync(path.join(workflows, file), "utf8");
   return [...source.matchAll(/\.run\("([^"]+)"/g)]
     .map((match) => match[1] ?? "")
     .sort();
@@ -1327,6 +1541,7 @@ function codexHost(script: (argv: string[]) => Scripted): {
     emit: (event) => {
       events.push(event);
     },
+    gate: (async () => "") as Host["gate"],
     credential: (async () => ({})) as Host["credential"],
   };
   return { host, runs, events };

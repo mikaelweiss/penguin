@@ -50,9 +50,7 @@ export default workflow({
 
 /** A workflow in the sandbox home, which the launcher lists as a home entry. */
 function workflowIn(box: Sandbox, name: string, source: string): string {
-  const file = path.join(box.home, `${name}.ts`);
-  fs.writeFileSync(file, source);
-  return file;
+  return box.writeWorkflow(name, source, "home");
 }
 
 function oldRun(box: Sandbox, name: string): void {

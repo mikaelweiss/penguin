@@ -61,7 +61,7 @@ export function RunView({
   const renderer = useRenderer();
   const [editor] = useState(() => new Editor());
   const [selected, setSelected] = useState<Selection>({ kind: "node", id: node ?? "root" });
-  const [focus, setFocus] = useState<"input" | "tree">("input");
+  const [focus, setFocus] = useState<"input" | "tree">("tree");
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
   const held = useRef<{ pick: Pick; form: Form }>({ pick: NO_PICK, form: NO_FORM });
@@ -272,6 +272,13 @@ export function RunView({
     if (typed !== undefined) setForm({ ...state, buffer: state.buffer + typed });
   };
 
+  const fieldPaste = (text: string, wanted: Ask): void => {
+    const now = held.current.form;
+    const state = now.key === keyOf(wanted) ? now : { ...NO_FORM, key: keyOf(wanted), retype: now.retype };
+    if (wanted.fields[state.at] === undefined) return;
+    setForm({ ...state, buffer: state.buffer + text.replace(/[\r\n]+/g, "") });
+  };
+
   const choiceKey = (
     key: KeyEvent,
     what: string,
@@ -356,7 +363,9 @@ export function RunView({
   const typeKey = (key: KeyEvent): void => {
     if (!key.ctrl && !key.meta) {
       if (key.name === "return" || key.name === "enter") {
-        send(editor.take());
+        const text = editor.take();
+        send(text);
+        if (text !== "") setFocus("tree");
         return bump();
       }
       if (key.name === "escape") return setFocus("tree");
@@ -470,8 +479,13 @@ export function RunView({
   });
 
   usePaste((event) => {
-    if (ended || copying.isOpen() || asked !== undefined) return;
-    editor.paste(decodePasteBytes(event.bytes));
+    if (ended || copying.isOpen()) return;
+    const pasted = decodePasteBytes(event.bytes);
+    if (asked !== undefined) {
+      if (asked.phase === "rejected" && !(form.key === keyOf(asked) && form.retype)) return;
+      return fieldPaste(pasted, asked);
+    }
+    editor.paste(pasted);
     setFocus("input");
     if (list !== undefined && gate !== undefined) return startTyping(gate, list);
     bump();

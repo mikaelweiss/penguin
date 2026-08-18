@@ -373,7 +373,7 @@ test("run and list adapters write the penguin-env declaration", (t) => {
 test("run -i without a terminal is refused", (t) => {
   const box = sandbox(t);
   box.write("w.ts", quickWorkflow);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const named = box.penguin("run", "./w.ts", "-i");
 
@@ -391,7 +391,7 @@ test("run -i without a terminal is refused", (t) => {
 
 test("run -i picks a workflow, then fills the params the args did not", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const done = await box.tty(
     [
@@ -412,7 +412,7 @@ test("run -i picks a workflow, then fills the params the args did not", async (t
 
 test("a string param keeps the characters typed into it", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const done = await box.tty(
     [
@@ -431,7 +431,7 @@ test("a string param keeps the characters typed into it", async (t) => {
 
 test("an enum param draws a list, and a refused value keeps the skip note", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/pick.ts", pickWorkflow);
+  box.writeWorkflow("pick", pickWorkflow);
 
   const done = await box.tty(
     [
@@ -455,7 +455,7 @@ test("an enum param draws a list, and a refused value keeps the skip note", asyn
 
 test("run -i takes the params the args already filled", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const done = await box.tty(
     [
@@ -475,7 +475,7 @@ test("run -i takes the params the args already filled", async (t) => {
 
 test("an empty answer to a required param says it is required", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const done = await box.tty(
     [
@@ -495,9 +495,8 @@ test("an empty answer to a required param says it is required", async (t) => {
 
 test("the choice runs the file it listed, not the first workflow of that name", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
-  const installed = path.join(box.home, "count.ts");
-  fs.writeFileSync(installed, askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
+  const installed = box.writeWorkflow("count", askWorkflow, "home");
 
   const done = await box.tty(
     [
@@ -517,7 +516,7 @@ test("the choice runs the file it listed, not the first workflow of that name", 
 
 test("a workflow file gone by the time it is picked fails before a run is claimed", async (t) => {
   const box = sandbox(t);
-  const file = box.write(".penguin/count.ts", askWorkflow);
+  const file = box.writeWorkflow("count", askWorkflow);
 
   const done = await box.tty([{ await: "which workflow?", send: "\r", remove: file }], "run", "-i");
 
@@ -528,7 +527,7 @@ test("a workflow file gone by the time it is picked fails before a run is claime
 
 test("Ctrl-C at the workflow choice leaves no run behind", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const done = await box.tty([{ await: "which workflow?", send: "\x03" }], "run", "-i");
 
@@ -538,7 +537,7 @@ test("Ctrl-C at the workflow choice leaves no run behind", async (t) => {
 
 test("Ctrl-C during param entry removes the claimed directory", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const done = await box.tty(
     [
@@ -567,7 +566,7 @@ test("run -i with no workflow file says where they go, and draws no list", async
 
 test("two run -i processes on one workflow claim different directories", async (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
   const steps = [
     { await: "which workflow?", send: "\r" },
     { await: "--count <number>", send: "5\r" },
@@ -585,7 +584,7 @@ test("two run -i processes on one workflow claim different directories", async (
 
 test("run with params and no workflow lists the workflows", (t) => {
   const box = sandbox(t);
-  box.write(".penguin/count.ts", askWorkflow);
+  box.writeWorkflow("count", askWorkflow);
 
   const listed = box.penguin("run", "--tag", "x");
 

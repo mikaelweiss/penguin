@@ -44,7 +44,7 @@ export function catalogsFile(): string {
 }
 
 export function credentialsDir(): string {
-  return path.join(home(), "credentials");
+  return path.join(stateRoot(), "credentials");
 }
 
 export function credentialFile(name: string): string {

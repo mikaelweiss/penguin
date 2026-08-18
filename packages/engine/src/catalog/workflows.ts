@@ -12,7 +12,7 @@ export function found(cwd: string): Omit<WorkflowFound, keyof Details>[] {
 }
 
 export function foundIn(list: catalogs.Catalog[]): Omit<WorkflowFound, keyof Details>[] {
-  return list.flatMap((catalog) => scan(catalog.dir, catalog.scope));
+  return list.flatMap((catalog) => scan(catalogs.workflowsDir(catalog), catalog.scope));
 }
 
 export async function listed(cwd: string): Promise<WorkflowFound[]> {
@@ -26,7 +26,7 @@ export function locate(name: string, cwd: string): string | undefined {
 }
 
 export function searchedWorkflows(cwd: string): string[] {
-  return catalogs.roots(cwd).map((catalog) => catalog.dir);
+  return catalogs.roots(cwd).map(catalogs.workflowsDir);
 }
 
 /** One line per workflow to choose from. A name held by both scopes says which scope it is. */

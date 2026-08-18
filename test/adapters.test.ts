@@ -74,6 +74,9 @@ function stubHost(events: ViewEvent[]): Host {
     emit: (event) => {
       events.push(event);
     },
+    gate: (() => {
+      throw new Error("the cursor adapter asks no gate");
+    }) as Host["gate"],
     credential: (() => {
       throw new Error("the cursor adapter asks for no credential");
     }) as Host["credential"],
@@ -284,4 +287,130 @@ test("a result the CLI marks as an error fails with the text it gave", async (t)
   const outcome = await api.turn(turnOf({ cwd: fake.work, schema: { type: "object" } }));
 
   assert.deepEqual(outcome, { ok: false, error: "the model is over its rate limit" });
+});
+
+const ghFile = fileURLToPath(new URL("../packages/engine/examples/adapters/gh.ts", import.meta.url));
+
+type Shelled = { code: number; stdout?: string; stderr?: string };
+
+type Github = {
+  pr: {
+    create(options?: { cwd?: string }): Promise<{
+      ok: boolean;
+      url: string;
+      existed: boolean;
+      reason: string;
+    }>;
+    approve(pr: string): Promise<{ ok: boolean; reason: string }>;
+  };
+};
+
+type GhBox = { api: Github; commands: string[]; asked: string[] };
+
+/** A gh whose every call is scripted, and a user who answers each gate in turn. */
+async function gh(replies: Shelled[], answers: string[]): Promise<GhBox> {
+  const commands: string[] = [];
+  const asked: string[] = [];
+  const host: Host = {
+    cwd: process.cwd(),
+    shell: async (cmd) => {
+      commands.push(cmd);
+      const next = replies.shift() ?? { code: 0 };
+      return { code: next.code, stdout: next.stdout ?? "", stderr: next.stderr ?? "" };
+    },
+    exec: async () => 0,
+    wait: <T,>(_label: string, body: () => Promise<T>) => body(),
+    emit: () => {},
+    gate: (async (question: string) => {
+      asked.push(question);
+      return answers.shift() ?? "done";
+    }) as Host["gate"],
+    credential: (() => {
+      throw new Error("the gh adapter asks for no credential");
+    }) as Host["credential"],
+  };
+  const definition = await loadAdapter(ghFile);
+  return { api: definition.build(host) as Github, commands, asked };
+}
+
+test("a signed out gh holds the call at a gate and runs it again", async () => {
+  const box = await gh(
+    [
+      { code: 1, stderr: "not logged in to github.com. use 'gh auth login' to authenticate" },
+      { code: 0, stdout: "https://github.com/acme/app/pull/7\n" },
+    ],
+    ["done"],
+  );
+
+  const made = await box.api.pr.create();
+
+  assert.deepEqual(made, {
+    ok: true,
+    url: "https://github.com/acme/app/pull/7",
+    existed: false,
+    reason: "",
+  });
+  assert.equal(box.asked.length, 1);
+  assert.match(box.asked[0] ?? "", /gh auth login/);
+  assert.deepEqual(box.commands, ["gh pr create --fill", "gh pr create --fill"]);
+});
+
+test("a gh that is not on PATH names the install, and every method waits the same way", async () => {
+  const box = await gh([{ code: 127, stderr: "gh: command not found" }, { code: 0 }], ["done"]);
+
+  const done = await box.api.pr.approve("42");
+
+  assert.deepEqual(done, { ok: true, reason: "" });
+  assert.match(box.asked[0] ?? "", /not installed/);
+  assert.deepEqual(box.commands, ["gh pr review '42' --approve", "gh pr review '42' --approve"]);
+});
+
+test("skip at the readiness gate hands the failure back to the workflow", async () => {
+  const box = await gh([{ code: 1, stderr: "no git remotes found" }], ["skip"]);
+
+  const made = await box.api.pr.create();
+
+  assert.deepEqual(made, { ok: false, url: "", existed: false, reason: "no git remotes found" });
+  assert.equal(box.commands.length, 1);
+});
+
+test("a branch whose pull request is open already answers with the open one", async () => {
+  const box = await gh(
+    [
+      {
+        code: 1,
+        stderr: 'a pull request for branch "fix" into branch "main" already exists: https://x.test/pull/3',
+      },
+      { code: 0, stdout: '{"url":"https://github.com/acme/app/pull/3"}' },
+    ],
+    [],
+  );
+
+  const made = await box.api.pr.create({ cwd: "/work" });
+
+  assert.deepEqual(made, {
+    ok: true,
+    url: "https://github.com/acme/app/pull/3",
+    existed: true,
+    reason: "",
+  });
+  assert.deepEqual(box.asked, []);
+  assert.deepEqual(box.commands, ["gh pr create --fill", "gh pr view --json url"]);
+});
+
+test("a failure no person can fix stays a failure and asks nothing", async () => {
+  const box = await gh(
+    [{ code: 1, stderr: "could not compute title or body defaults: no commits" }],
+    [],
+  );
+
+  const made = await box.api.pr.create();
+
+  assert.deepEqual(made, {
+    ok: false,
+    url: "",
+    existed: false,
+    reason: "could not compute title or body defaults: no commits",
+  });
+  assert.deepEqual(box.asked, []);
 });

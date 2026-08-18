@@ -144,11 +144,30 @@ const creds = await host.credential({
 });
 ```
 
-The first time a workflow reaches that call, the run blocks and your terminal shows the link that makes the key, then takes one field at a time. A secret field echoes stars. The terminal writes the values to `~/.penguin/credentials/jira.json`, mode 0600, and tells the run only that the file now holds them, so nothing lands in `events.jsonl` or `inbox.jsonl`. Every run after that finds them and asks nothing.
+The first time a workflow reaches that call, the run blocks and your terminal shows the link that makes the key, then takes one field at a time. A secret field echoes stars. The terminal writes the values to `~/.local/state/penguin/credentials/jira.json`, mode 0600, and tells the run only that the file now holds them, so nothing lands in `events.jsonl` or `inbox.jsonl`. Every run after that finds them and asks nothing.
 
 An environment variable wins over the stored file, which is how a server or a cron job supplies the same values. `rejected: "<why>"` says the provider refused what penguin had: your terminal shows the reason and four fixes, try again, type every value again, open the file in your editor, or stop the run, and the adapter calls again with whatever you leave behind. The `jira` adapter does that whenever your site answers 401, 403, or 404.
 
 Workflow code writes none of this. `ctx.jira.issue.get("ABC-123")` is the whole story.
+
+### What only you can fix
+
+Some failures are nobody's to solve but yours: a CLI that is signed out, a tool that is not installed, a branch the remote does not have. `host.gate` hands the fix over and runs the call again:
+
+```typescript
+const Ready = z.union([z.enum(["done", "skip"]), z.string()]);
+
+async function gh(cmd: string): Promise<CommandResult> {
+  for (;;) {
+    const done = await host.shell(cmd);
+    const fix = blocking(done);
+    if (fix === undefined) return done;
+    if ((await host.gate(fix, Ready)) === "skip") return done;
+  }
+}
+```
+
+The run blocks with the line the adapter wrote, your terminal draws `done` and `skip`, and `done` runs the same command over. `skip` hands the failure back to the workflow. The `gh` adapter asks for gh absent, gh signed out, a checkout with no remote, and a branch that is not pushed. A workflow that calls `ctx.github.pr.create()` sees none of it.
 
 ## Watch a run
 
@@ -159,7 +178,7 @@ In a run view, the run's tree fills the left pane: each activity, session, and s
 - Select an open gate and the bar takes your answer, addressed to that gate, so ten parallel questions never collide. An enum gate draws a list instead.
 - Select a session and the bar sends to it.
 - Select anything else and the bar sends to the run. When the run is not blocked, the bar says the message queues.
-- The view opens with the input focused, and every key you type goes to the bar. `esc` moves focus to the tree and keeps your draft. `ctrl-u` empties it.
+- The view opens with the tree focused. `esc` moves focus to the input bar, where every key you type goes to the bar and `ctrl-u` empties the draft. Enter sends and hands the keyboard back to the tree. Enter on an empty draft sends nothing and keeps the keyboard in the bar.
 - With the tree focused, arrows move the selection and left and right fold a node. The pane scrolls to keep your selection in view. `esc` returns you to the bar. `q` goes to the dashboard.
 - With the tree focused, `y` copies the directory the selected node runs in. A node with several directories draws a list to pick one.
 - `Ctrl-C` stops the run. penguin kills the steps in flight and records the stop.
@@ -180,7 +199,7 @@ The call validates the arguments against the callee's params schema, runs the ca
 
 ## Where the state lives
 
-`~/.penguin/` holds your workflow files, `adapters/`, `skills/`, `credentials/`, `defaults`, and `runs/`. `~/.penguin/runs/<run>/` holds `run.json`, `events.jsonl`, `inbox.jsonl`, the session transcripts, and the lock. Every event the run emits appends to `events.jsonl`, so any other program tails the same file. To discard a run, delete the directory. Set `PENGUIN_HOME` to move the whole tree.
+`~/.penguin/` holds your workflow files, `adapters/`, `skills/`, `helpers/`, and `defaults`. Runs and credentials live under the state root `~/.local/state/penguin/`, so refreshing the catalog leaves them in place. `~/.local/state/penguin/runs/<run>/` holds `run.json`, `events.jsonl`, `inbox.jsonl`, the session transcripts, and the lock. Every event the run emits appends to `events.jsonl`, so any other program tails the same file. To discard a run, delete the directory. Set `PENGUIN_HOME` to move the catalog and `XDG_STATE_HOME` to move the state.
 
 `<repo>/.penguin/` holds the workflow files, skills, and adapters of one repository, and ships in git.
 

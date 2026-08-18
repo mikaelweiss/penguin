@@ -132,6 +132,7 @@ export type Sandbox = {
   home: string;
   state: string;
   runs: string;
+  credentials: string;
   userHome: string;
   project: string;
   writeSkill(dir: string, name: string, text: string): void;
@@ -140,6 +141,8 @@ export type Sandbox = {
   tty(steps: TtyStep[], ...args: string[]): Promise<Result>;
   start(...args: string[]): ChildProcess;
   write(relative: string, text: string): string;
+  writeWorkflow(name: string, text: string, scope?: "home" | "project"): string;
+  homeWorkflow(name: string): string;
   read(relative: string): string;
   exists(relative: string): boolean;
   lines(relative: string): string[];
@@ -166,6 +169,7 @@ export function sandbox(t: TestContext): Sandbox {
   const userHome = path.join(root, "user-home");
   const state = path.join(userHome, ".local", "state");
   const runs = path.join(state, "penguin", "runs");
+  const credentialsDir = path.join(state, "penguin", "credentials");
   const project = path.join(root, "project");
   fs.mkdirSync(home);
   fs.mkdirSync(userHome);
@@ -181,6 +185,7 @@ export function sandbox(t: TestContext): Sandbox {
     home,
     state,
     runs,
+    credentials: credentialsDir,
     userHome,
     project,
     writeSkill(dir, name, text) {
@@ -270,6 +275,19 @@ export function sandbox(t: TestContext): Sandbox {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, text);
       return file;
+    },
+    writeWorkflow(name, text, scope = "project") {
+      const dir =
+        scope === "home"
+          ? path.join(home, "workflows")
+          : path.join(project, ".penguin", "workflows");
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${name}.ts`);
+      fs.writeFileSync(file, text);
+      return file;
+    },
+    homeWorkflow(name) {
+      return path.join(home, "workflows", `${name}.ts`);
     },
     read(relative) {
       return fs.readFileSync(path.join(project, relative), "utf8");

@@ -21,6 +21,7 @@ import { frameWith } from "./drive.tsx";
 
 type Box = {
   home: string;
+  credentials: string;
   run(name: string, events: ViewEvent[], options?: { live?: boolean; workflow?: string }): string;
 };
 
@@ -45,6 +46,7 @@ function sandbox(t: TestContext): Box {
   });
   return {
     home,
+    credentials: path.join(state, "penguin", "credentials"),
     run(name, events, options) {
       const dir = path.join(runs, name);
       fs.mkdirSync(dir, { recursive: true });
@@ -157,10 +159,15 @@ async function chord(
   await settle(setup);
 }
 
-/** The tree pane after esc moved focus onto it. */
+/** The tree pane, which holds the keyboard from the first frame. */
 async function toTree(setup: TestRendererSetup): Promise<void> {
-  await escape(setup);
   await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
+}
+
+/** The input bar after esc moved focus onto it. */
+async function toInput(setup: TestRendererSetup): Promise<void> {
+  await escape(setup);
+  await frameWith(setup, (text) => text.includes("enter sends"));
 }
 
 async function type(setup: TestRendererSetup, text: string): Promise<void> {
@@ -872,7 +879,7 @@ test("a screen too short for both panes still keeps the status line to itself", 
       height,
     );
     try {
-      await setup.flush();
+      await escape(setup);
       const rows = setup.captureCharFrame().split("\n");
       assert.equal((rows[height - 1] ?? "").trimEnd(), "running: drafting", `${height} rows: the status stands alone`);
       for (const row of rows) {
@@ -900,6 +907,7 @@ test("typing a message sends it to the run", async (t) => {
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     await frameWith(setup, (text) => text.includes("to run"));
+    await toInput(setup);
     await type(setup, "wrap it up");
     await press(setup, ["RETURN"]);
     const sent = inbox(dir);
@@ -952,7 +960,7 @@ test("a credential goes to the store, and never to the screen or the inbox", asy
     assert.ok(!masked.includes("s3cr3t-value"), "the secret reached the screen");
     assert.match(masked, /\*{12}/);
     await press(setup, ["RETURN"]);
-    const stored = JSON.parse(fs.readFileSync(path.join(box.home, "credentials", "jira.json"), "utf8")) as Record<
+    const stored = JSON.parse(fs.readFileSync(path.join(box.credentials, "jira.json"), "utf8")) as Record<
       string,
       string
     >;
@@ -1129,6 +1137,7 @@ test("q types into the input instead of leaving the run", async (t) => {
   );
   try {
     await frameWith(setup, (text) => text.includes("to run"));
+    await toInput(setup);
     await type(setup, "q hello");
     const frame = await frameWith(setup, (text) => text.includes("q hello"));
     assert.match(frame, /to run > q hello/);
@@ -1151,6 +1160,7 @@ test("esc parks the draft on the tree, and esc brings it back to finish", async 
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
   try {
     await frameWith(setup, (text) => text.includes("to run"));
+    await toInput(setup);
     await type(setup, "hold the");
     await escape(setup);
     const parked = await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
@@ -1163,6 +1173,79 @@ test("esc parks the draft on the tree, and esc brings it back to finish", async 
     const sent = inbox(dir);
     assert.equal(sent.length, 1);
     assert.equal(sent[0]?.["text"], "hold the line");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the run view opens with the tree holding the keyboard", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "state", state: "running", detail: "drafting" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    const opened = await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
+    assert.match(opened, /q goes to the dashboard/, "the tree pane dropped a key from its list at open");
+    await type(setup, "x");
+    await idle(setup);
+    const quiet = setup
+      .captureCharFrame()
+      .split("\n")
+      .find((one) => one.includes("to run >"));
+    assert.ok(quiet?.trimEnd().endsWith("to run >"), `the key reached the draft: ${quiet}`);
+    await toInput(setup);
+    await type(setup, "hello");
+    const typed = await frameWith(setup, (text) => text.includes("hello"));
+    assert.match(typed, /to run > hello/, "the bar took the text after esc");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("enter sends and hands the keyboard back to the tree", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  const dir = box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "state", state: "blocked", detail: "what next?" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run >"));
+    await toInput(setup);
+    await type(setup, "wrap it up");
+    await press(setup, ["RETURN"]);
+    const sent = inbox(dir);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.["text"], "wrap it up");
+    await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied /work");
+    assert.equal(clip.file().trim(), "/work", "y reached the draft instead of the tree");
+    const quiet = setup
+      .captureCharFrame()
+      .split("\n")
+      .find((one) => one.includes("to run >"));
+    assert.ok(quiet?.trimEnd().endsWith("to run >"), `the key reached the draft: ${quiet}`);
+    await toInput(setup);
+    await press(setup, ["ARROW_UP"]);
+    const recalled = await frameWith(setup, (text) => text.includes("wrap it up"));
+    assert.match(recalled, /to run > wrap it up/, "the bar lost the sent message");
+    await chord(setup, "u", { ctrl: true });
+    await press(setup, ["RETURN"]);
+    const held = await frameWith(setup, (text) => text.includes("enter sends"));
+    assert.equal(inbox(dir).length, 1, "an empty enter sent a message");
+    assert.ok(!held.includes("arrows move, left and right fold"), "an empty enter moved the keyboard to the tree");
   } finally {
     setup.renderer.destroy();
   }
@@ -1309,7 +1392,7 @@ test("the tree key list never takes the status row, however short the screen", a
       height,
     );
     try {
-      await escape(setup);
+      await setup.flush();
       const rows = setup.captureCharFrame().split("\n");
       assert.equal((rows[height - 1] ?? "").trimEnd(), "running: drafting", `${height} rows: the status stands alone`);
       for (const row of rows.slice(0, height - 1)) {
@@ -1368,7 +1451,9 @@ test("the bar names its keys whole at an ordinary width", async (t) => {
       columns,
     );
     try {
-      const frame = await frameWith(setup, (text) => text.includes("to run >"));
+      await frameWith(setup, (text) => text.includes("to run >"));
+      await toInput(setup);
+      const frame = setup.captureCharFrame();
       const row = frame.split("\n").find((one) => one.includes("enter sends"));
       assert.ok(row !== undefined, `${columns} columns: the bar named no key`);
       for (const key of named) assert.ok(row.includes(key), `${columns} columns: the bar dropped ${key}`);
@@ -1391,7 +1476,9 @@ test("the bar keeps the queue note beside its key hints", async (t) => {
   );
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />, 80);
   try {
-    const typing = await frameWith(setup, (text) => text.includes("to run >"));
+    await frameWith(setup, (text) => text.includes("to run >"));
+    await escape(setup);
+    const typing = await frameWith(setup, (text) => !text.includes("arrows move, left and right fold"));
     assert.match(typing, /the run is busy: this message queues/, "the key hints pushed the queue note off the row");
     await escape(setup);
     const parked = await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
@@ -1520,6 +1607,7 @@ test("y types the letter while the input holds focus, and copies nothing", async
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     await setup.waitForFrame((text) => text.includes("to run"));
+    await toInput(setup);
     await type(setup, "ab");
     await press(setup, ["y"]);
     await idle(setup);
@@ -2000,6 +2088,7 @@ test("ctrl-u empties the draft from anywhere in the line", async (t) => {
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
   try {
     await frameWith(setup, (text) => text.includes("to run >"));
+    await toInput(setup);
     await type(setup, "hold the line");
     await press(setup, ["ARROW_LEFT", "ARROW_LEFT", "ARROW_LEFT"]);
     await chord(setup, "u", { ctrl: true });

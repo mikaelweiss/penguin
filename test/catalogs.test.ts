@@ -33,10 +33,11 @@ function catalogTree(t: TestContext): { project: string; extra: string; homeCata
   const project = path.join(root, "project", ".penguin");
   const extra = path.join(root, "extra");
   const homeCatalog = path.join(root, "home");
-  fs.mkdirSync(project, { recursive: true });
+  fs.mkdirSync(path.join(project, "workflows"), { recursive: true });
+  fs.mkdirSync(path.join(extra, "workflows"), { recursive: true });
   fs.mkdirSync(path.join(extra, "adapters"), { recursive: true });
   fs.mkdirSync(path.join(extra, "skills", "penguin-extra"), { recursive: true });
-  fs.mkdirSync(homeCatalog, { recursive: true });
+  fs.mkdirSync(path.join(homeCatalog, "workflows"), { recursive: true });
   return { project, extra, homeCatalog };
 }
 
@@ -74,10 +75,10 @@ test("a catalogs file path line is a catalog root", (t) => {
 
 test("a third catalog root is scanned for workflows, adapters, and skills", async (t) => {
   const { project, extra, homeCatalog } = catalogTree(t);
-  fs.writeFileSync(path.join(project, "local.ts"), "");
-  fs.writeFileSync(path.join(extra, "extra.ts"), "");
-  fs.writeFileSync(path.join(extra, "local.ts"), "");
-  fs.writeFileSync(path.join(homeCatalog, "global.ts"), "");
+  fs.writeFileSync(path.join(project, "workflows", "local.ts"), "");
+  fs.writeFileSync(path.join(extra, "workflows", "extra.ts"), "");
+  fs.writeFileSync(path.join(extra, "workflows", "local.ts"), "");
+  fs.writeFileSync(path.join(homeCatalog, "workflows", "global.ts"), "");
   fs.mkdirSync(path.join(homeCatalog, "adapters"), { recursive: true });
   fs.writeFileSync(path.join(extra, "adapters", "clock.ts"), extraAdapter);
   fs.writeFileSync(path.join(homeCatalog, "adapters", "clock.ts"), extraAdapter);
@@ -94,7 +95,7 @@ test("a third catalog root is scanned for workflows, adapters, and skills", asyn
     workflows.map((entry) => entry.name),
     ["local", "extra", "local", "global"],
   );
-  assert.equal(workflows[0]?.file, path.join(project, "local.ts"));
+  assert.equal(workflows[0]?.file, path.join(project, "workflows", "local.ts"));
 
   const extraCatalog = { dir: extra, scope: "catalog" as const };
   const adapters = await installedIn(list);

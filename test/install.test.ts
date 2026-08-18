@@ -13,7 +13,7 @@ test("a fresh install enables the starter catalog and does not copy it", (t) => 
 
   assert.equal(first.code, 0, first.output);
   assert.equal(fs.readFileSync(path.join(box.home, "catalogs"), "utf8"), "starter\n");
-  assert.equal(fs.existsSync(path.join(box.home, "ship.ts")), false);
+  assert.equal(fs.existsSync(path.join(box.home, "workflows", "ship.ts")), false);
   assert.equal(fs.existsSync(path.join(box.home, "skills", "penguin-triage", "SKILL.md")), false);
   assert.equal(fs.existsSync(path.join(box.home, "tsconfig.json")), true);
   for (const name of ["claude", "codex", "cursor", "opencode", "git", "gh"]) {
@@ -57,15 +57,19 @@ test("a fresh install leaves ship in the workflow list, from examples/", (t) => 
     listed.stdout,
     /^ship {2}--ticket <text> \[--rounds <number>\]\n {2}ticket to open pull request:/m,
   );
-  assert.match(listed.stdout, new RegExp(`starter  ${path.join(starterCatalog().dir, "ship.ts")}`));
+  assert.match(
+    listed.stdout,
+    new RegExp(`starter  ${path.join(starterCatalog().dir, "workflows", "ship.ts")}`),
+  );
 });
 
 test("a home workflow of the same name overlays the starter", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
   box.penguin("ps");
+  fs.mkdirSync(path.join(box.home, "workflows"), { recursive: true });
   fs.writeFileSync(
-    path.join(box.home, "ship.ts"),
+    path.join(box.home, "workflows", "ship.ts"),
     `import { workflow } from "penguin";
 import { z } from "zod";
 
@@ -81,7 +85,7 @@ export default workflow({
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(listed.stdout, /the home ship/);
-  assert.match(listed.stdout, new RegExp(path.join(box.home, "ship.ts")));
+  assert.match(listed.stdout, new RegExp(path.join(box.home, "workflows", "ship.ts")));
 });
 
 test("a run on a fresh install picks the default agent", (t) => {
@@ -117,7 +121,7 @@ test("install on a home that exists copies nothing and enables nothing", (t) => 
   assert.equal(again.code, 0, again.output);
   assert.match(again.stdout, /penguin home is/);
   assert.match(again.stdout, /pn list workflows/);
-  assert.equal(fs.existsSync(path.join(box.home, "ship.ts")), false);
+  assert.equal(fs.existsSync(path.join(box.home, "workflows", "ship.ts")), false);
   assert.equal(fs.existsSync(path.join(box.home, "catalogs")), false);
 });
 

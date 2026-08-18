@@ -47,6 +47,7 @@ async function pi(lines: unknown[], outcome: { code?: number; stderr?: string } 
     emit: (event) => {
       events.push(event);
     },
+    gate: (async () => "") as Host["gate"],
     credential: async () => ({}) as never,
   };
   const api = (await loadAdapter(file)).build(host) as AgentAdapter;

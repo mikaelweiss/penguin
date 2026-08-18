@@ -33,6 +33,10 @@ export function writableCatalog(cwd: string, which: WritableCatalog): Catalog {
   return which === "project" ? projectCatalog(cwd) : homeCatalog();
 }
 
+export function workflowsDir(catalog: Catalog): string {
+  return path.join(catalog.dir, "workflows");
+}
+
 export function adaptersDir(catalog: Catalog): string {
   return path.join(catalog.dir, "adapters");
 }
