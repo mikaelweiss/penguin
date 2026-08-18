@@ -1489,7 +1489,8 @@ test("a long paste shows as one token and sends its whole text", () => {
   assert.equal(editor.take(), pasted);
 });
 
-test("every agent header label fits the pane the run view cuts it to", () => {
+test("every agent header label fits the pane the run view cuts it to", (t) => {
+  const box = sandbox(t);
   const one = (name: string): Found => ({
     role: "agent",
     name,
@@ -1499,14 +1500,21 @@ test("every agent header label fits the pane the run view cuts it to", () => {
     definition: { role: "agent", name, description: "", build: () => ({}) },
   });
   const both = [one("claude"), one("opencode")];
+  const room = PANE - " w-1  ".length;
 
   assert.equal(agentLabel([one("claude")]), "agent claude");
   assert.equal(agentLabel([]), "no agent adapter");
   assert.equal(agentLabel(both), "agent: choose one");
 
-  const room = PANE - " w-1  ".length;
   for (const found of [[], [one("claude")], both]) {
     assert.ok(agentLabel(found).length <= room, agentLabel(found));
   }
   assert.ok(agentLine(both).length > room, "the full line is what the pane cannot hold");
+
+  fs.mkdirSync(box.home, { recursive: true });
+  fs.writeFileSync(path.join(box.home, "defaults"), "agent opencode\n");
+  const absent = agentLabel([one("claude")]);
+  assert.equal(absent, "agent: default missing");
+  assert.ok(absent.length <= room, absent);
+  assert.ok(agentLine([one("claude")]).length > room, "the full line is what the pane cannot hold");
 });
