@@ -1,6 +1,6 @@
 {
   "name": "@mikaelweiss/penguin",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "license": "Apache-2.0",
   "repository": {
