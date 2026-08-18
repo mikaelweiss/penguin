@@ -17,11 +17,6 @@ export default workflow({
 
     view.artifact({ title: "Pull request", url: pr.url });
 
-    if (pr.existed) {
-      await agent({ cwd: params.dir }).run("penguin-address-feedback");
-      return { url: pr.url };
-    }
-
     while ((await gate(`PR is up: ${pr.url}`, Feedback)) !== "done") {
       await agent({ cwd: params.dir }).run("penguin-address-feedback");
     }

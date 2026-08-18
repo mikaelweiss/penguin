@@ -673,6 +673,33 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   );
 });
 
+test("the catalog open-pr workflow holds at the gate when the pull request is already open", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, "none");
+  outsideReady(box);
+  box.writeAdapter(
+    "gh",
+    fakeGithub.replace(
+      'create: async () => ({ ok: true, url: "https://example.test/pr/7", reason: "" })',
+      'create: async () => ({ ok: true, url: "https://example.test/pr/7", existed: true, reason: "" })',
+    ),
+  );
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "open-pr.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "open-pr-1", "PR is up:", "done");
+  const ended = await box.waitForEnd("open-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
+  assert.equal(box.sessions().length, 0);
+});
+
 test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {
   const box = sandbox(t);
   catalogReady(
