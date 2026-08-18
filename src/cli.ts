@@ -23,7 +23,7 @@ import * as workflows from "./workflows.ts";
 const usage = `penguin runs one workflow as a live process, and the terminal watches it.
 
 usage:
-  pn                                              the dashboard: every run, and what needs you
+  pn                                              the dashboard: the live runs, and what needs you
   pn list workflows|skills|adapters [--verbose]   show what penguin can use
   pn run <workflow> [--param value ...]           start a run and watch it
   pn run <workflow> -i                            ask for the params the args did not fill

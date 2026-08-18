@@ -96,7 +96,7 @@ $ pn run implement --task "rename the flag"
 run implement-1 started, agent claude
 ```
 
-`--background` starts the run and gives the terminal back. Bare `pn` opens the dashboard: every run, live ones first with their state, and a needs-you list of every open question across them. Enter opens the run under the cursor, and entering from the needs-you list lands on the question. `ps` opens the same dashboard, or prints a plain table when piped. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw.
+`--background` starts the run and gives the terminal back. Bare `pn` opens the dashboard: the live runs with their state, and a needs-you list of every open question across them. Enter opens the run under the cursor, and entering from the needs-you list lands on the question. `d` reveals a done section under the live runs, every run that ended with how it ended, and enter opens one read-only. `ps` opens the same dashboard, or prints a plain table when piped. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw.
 
 ```
 $ pn list workflows

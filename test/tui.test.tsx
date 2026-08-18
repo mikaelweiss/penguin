@@ -6,7 +6,7 @@ import test, { type TestContext } from "node:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode } from "react";
-import { Dashboard } from "../src/tui/dashboard.tsx";
+import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
 import { Editor } from "../src/tui/editor.ts";
 import { controlFor } from "../src/tui/gate.ts";
 import { plainAttach } from "../src/tui/plain.ts";
@@ -94,7 +94,7 @@ async function type(setup: TestRendererSetup, text: string): Promise<void> {
 
 const nothing = (): void => {};
 
-test("the dashboard lists a live run and a done run with their states", async (t) => {
+test("the dashboard lists the live runs, and d reveals the done ones", async (t) => {
   const box = sandbox(t);
   box.run(
     "plan-1",
@@ -110,9 +110,136 @@ test("the dashboard lists a live run and a done run with their states", async (t
   ]);
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   try {
-    const frame = await setup.waitForFrame((text) => text.includes("plan-1") && text.includes("ticket-2"));
-    assert.match(frame, /plan-1 {2}\/work\/plan\.ts {2}running: drafting the plan/);
-    assert.match(frame, /ticket-2 {2}\/work\/ticket-2\.ts {2}done/);
+    const first = await setup.waitForFrame((text) => text.includes("plan-1"));
+    assert.match(first, /plan-1 {2}\/work\/plan\.ts {2}running: drafting the plan/);
+    assert.ok(!first.includes("ticket-2"), "a done run listed with the live ones");
+    await press(setup, ["d"]);
+    const revealed = await setup.waitForFrame((text) => text.includes("ticket-2"));
+    assert.match(revealed, /^ done *$/m);
+    assert.match(revealed, /ticket-2 {2}\/work\/ticket-2\.ts {2}done/);
+    await press(setup, ["d"]);
+    const hidden = await setup.waitForFrame((text) => !text.includes("ticket-2"));
+    assert.ok(!hidden.includes("ticket-2"), "d left the done run on the screen");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a run whose process died lists as done", async (t) => {
+  const box = sandbox(t);
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const dead = box.run("ticket-2", [
+    { type: "run", phase: "started", run: "ticket-2" },
+    { type: "state", state: "running", detail: "still going" },
+  ]);
+  fs.writeFileSync(path.join(dead, "lock"), "0");
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    const first = await setup.waitForFrame((text) => text.includes("plan-1"));
+    assert.ok(!first.includes("ticket-2"), "a run with a dead lock listed as live");
+    await press(setup, ["d"]);
+    const revealed = await setup.waitForFrame((text) => text.includes("ticket-2"));
+    assert.match(revealed, /ticket-2 {2}\/work\/ticket-2\.ts {2}done/);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("enter on a revealed done run opens it", async (t) => {
+  const box = sandbox(t);
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  box.run("ticket-2", [
+    { type: "run", phase: "started", run: "ticket-2" },
+    { type: "run", phase: "done", run: "ticket-2", result: "merged" },
+  ]);
+  const opened: Open[] = [];
+  const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await press(setup, ["d"]);
+    await setup.waitForFrame((text) => text.includes("ticket-2"));
+    await press(setup, ["ARROW_DOWN", "RETURN"]);
+    assert.deepEqual(opened, [{ name: "ticket-2" }]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("right jumps to the first needs-you line, and a hidden done run does not shift it", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "review-1",
+    [
+      { type: "run", phase: "started", run: "review-1" },
+      { type: "gate", phase: "asked", id: "g-1", question: "Ship these findings?" },
+      { type: "gate", phase: "asked", id: "g-2", question: "Land the branch?" },
+      { type: "state", state: "blocked", detail: "Ship these findings?" },
+    ],
+    { live: true },
+  );
+  box.run("ticket-2", [
+    { type: "run", phase: "started", run: "ticket-2" },
+    { type: "run", phase: "done", run: "ticket-2", result: "merged" },
+  ]);
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("Land the branch?"));
+    await press(setup, ["l"]);
+    const frame = await setup.waitForFrame((text) => / > review-1 {2}review-1 {2}Ship these findings\?/.test(text));
+    assert.match(frame, / > review-1 {2}review-1 {2}Ship these findings\?/);
+    assert.ok(!/ > review-1 {2}review-1 {2}Land the branch\?/.test(frame), "right skipped the first need");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("right jumps to the needs-you list with the done section open", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "review-1",
+    [
+      { type: "run", phase: "started", run: "review-1" },
+      { type: "gate", phase: "asked", id: "g-1", question: "Ship these findings?" },
+      { type: "gate", phase: "asked", id: "g-2", question: "Land the branch?" },
+      { type: "state", state: "blocked", detail: "Ship these findings?" },
+    ],
+    { live: true },
+  );
+  box.run("ticket-2", [
+    { type: "run", phase: "started", run: "ticket-2" },
+    { type: "run", phase: "done", run: "ticket-2", result: "merged" },
+  ]);
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("Land the branch?"));
+    await press(setup, ["d"]);
+    await setup.waitForFrame((text) => text.includes("ticket-2"));
+    await press(setup, ["l"]);
+    const frame = await setup.waitForFrame((text) => / > review-1 {2}review-1 {2}Ship these findings\?/.test(text));
+    assert.match(frame, / > review-1 {2}review-1 {2}Ship these findings\?/);
+    assert.ok(!/ > .*ticket-2 {2}/.test(frame), "right stopped on a done run");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("d with no live run selects the first done run", async (t) => {
+  const box = sandbox(t);
+  box.run("ticket-1", [
+    { type: "run", phase: "started", run: "ticket-1" },
+    { type: "run", phase: "done", run: "ticket-1", result: "merged" },
+  ]);
+  box.run("ticket-2", [
+    { type: "run", phase: "started", run: "ticket-2" },
+    { type: "run", phase: "done", run: "ticket-2", result: "merged" },
+  ]);
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("no live run"));
+    await press(setup, ["d"]);
+    const revealed = await setup.waitForFrame((text) => text.includes("ticket-1"));
+    assert.match(revealed, / > .*ticket-1 {2}/);
+    assert.ok(!/ > .*ticket-2 {2}/.test(revealed), "d selected the last done run");
   } finally {
     setup.renderer.destroy();
   }

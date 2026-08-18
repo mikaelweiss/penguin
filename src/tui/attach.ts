@@ -30,7 +30,7 @@ export async function attach(name: string, pid?: number): Promise<number> {
   return mount({ kind: "run", name, agent });
 }
 
-/** The dashboard: every run penguin knows, and everything waiting on the user. */
+/** The dashboard: the live runs, the done ones under `d`, and everything waiting on the user. */
 export async function dashboard(): Promise<number> {
   const { mount } = await import("./app.tsx");
   return mount({ kind: "dashboard" });

@@ -5,7 +5,7 @@ import test from "node:test";
 import { allocateRun, discardRun, finishRun, readRun } from "../src/create.ts";
 import { rows } from "../src/runs.ts";
 import { type Left, RunView } from "../src/tui/run-view.tsx";
-import { homed, paste, press, screen } from "./drive.tsx";
+import { frameWith, homed, paste, press, screen } from "./drive.tsx";
 import { type Event, sandbox, waitFor } from "./helpers.ts";
 
 const gateWorkflow = `import { workflow } from "penguin";
@@ -830,9 +830,7 @@ test("invariant 16: the status line holds one line, however long the question", 
   homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await setup.waitForFrame(
-      (text) => text.includes("blocked: Blockers") && text.includes(SENTINEL),
-    );
+    const frame = await frameWith(setup, (text) => text.includes("blocked: Blockers") && text.includes(SENTINEL));
     const status = frame.split("\n").filter((row) => row.includes("blocked: Blockers"));
     assert.equal(status.length, 1, "the status prints once, one line");
     assert.ok((status[0] ?? "").length <= 100, "the status stays inside the width");

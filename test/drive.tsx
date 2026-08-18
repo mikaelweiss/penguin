@@ -24,6 +24,22 @@ export async function screen(node: ReactNode, width = 100, height = 24): Promise
   return setup;
 }
 
+/** A markdown block parses off the main thread, so its frame needs real time, not render passes. */
+export async function frameWith(
+  setup: TestRendererSetup,
+  predicate: (frame: string) => boolean,
+  timeoutMs = 10_000,
+): Promise<string> {
+  const started = Date.now();
+  for (;;) {
+    await setup.flush();
+    const frame = setup.captureCharFrame();
+    if (predicate(frame)) return frame;
+    if (Date.now() - started > timeoutMs) throw new Error(`timed out waiting for a frame\n${frame}`);
+    await new Promise((done) => setTimeout(done, 20));
+  }
+}
+
 export async function press(setup: TestRendererSetup, keys: string[]): Promise<void> {
   for (const key of keys) {
     await act(async () => {

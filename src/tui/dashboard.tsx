@@ -15,7 +15,7 @@ type Need = { run: string; item: Attention };
 
 type Line = { kind: "run"; row: RunRow } | { kind: "need"; need: Need };
 
-/** Every run penguin knows, and everything that waits on the user. */
+/** The live runs, the done ones when revealed, and everything that waits on the user. */
 export function Dashboard({
   onOpen,
   onExit,
@@ -29,6 +29,11 @@ export function Dashboard({
   const [, bump] = useReducer((count: number) => count + 1, 0);
   const [cursor, setCursor] = useState(0);
   const [frame, setFrame] = useState(0);
+  const [showDone, setShowDone] = useState(false);
+
+  const live = rows.filter((row) => row.live);
+  const done = rows.filter((row) => !row.live);
+  const shown = showDone ? [...live, ...done] : live;
 
   useEffect(() => {
     const scan = (): void => {
@@ -50,13 +55,13 @@ export function Dashboard({
 
   useEffect(() => {
     const offs: (() => void)[] = [];
-    const wanted = new Set(rows.map((row) => row.name));
+    const wanted = new Set(shown.map((row) => row.name));
     for (const [name, feed] of feeds.current) {
       if (wanted.has(name)) continue;
       feed.stop();
       feeds.current.delete(name);
     }
-    for (const row of rows) {
+    for (const row of shown) {
       let feed = feeds.current.get(row.name);
       if (feed === undefined) {
         feed = new Feed(row.name, row.dir);
@@ -70,17 +75,16 @@ export function Dashboard({
     return () => {
       for (const off of offs) off();
     };
-  }, [rows]);
+  }, [rows, showDone]);
 
   const needs: Need[] = [];
-  for (const row of rows) {
-    if (!row.live) continue;
+  for (const row of live) {
     const feed = feeds.current.get(row.name);
     if (feed === undefined) continue;
     for (const item of feed.projection.attention()) needs.push({ run: row.name, item });
   }
   const lines: Line[] = [
-    ...rows.map((row) => ({ kind: "run" as const, row })),
+    ...shown.map((row) => ({ kind: "run" as const, row })),
     ...needs.map((need) => ({ kind: "need" as const, need })),
   ];
   const at = Math.max(0, Math.min(lines.length - 1, cursor));
@@ -91,7 +95,15 @@ export function Dashboard({
     if (key.name === "up" || key.name === "k") return setCursor(Math.max(0, at - 1));
     if (key.name === "down" || key.name === "j") return setCursor(Math.min(lines.length - 1, at + 1));
     if (key.name === "left" || key.name === "h") return setCursor(0);
-    if (key.name === "right" || key.name === "l") return setCursor(rows.length);
+    if (key.name === "right" || key.name === "l") return setCursor(shown.length);
+    if (key.name === "d") {
+      setCursor(
+        showDone
+          ? afterHide(at, live.length, done.length, needs.length)
+          : afterReveal(at, live.length, done.length, needs.length),
+      );
+      return setShowDone(!showDone);
+    }
     if (key.name === "return" || key.name === "enter") {
       const line = lines[at];
       if (line === undefined) return;
@@ -105,8 +117,8 @@ export function Dashboard({
     <box style={{ flexDirection: "column", width: size.width, height: size.height }}>
       <box style={{ flexDirection: "column", flexGrow: 1, border: ["bottom"], borderColor: ink.border }}>
         <text fg={ink.dim}>{" runs"}</text>
-        {rows.length === 0 ? <text fg={ink.faint}>{"  no run yet. pn run <workflow> starts one"}</text> : null}
-        {rows.map((row, index) => (
+        {live.length === 0 ? <text fg={ink.faint}>{"  no live run. pn run <workflow> starts one"}</text> : null}
+        {live.map((row, index) => (
           <RunLine
             key={row.name}
             row={row}
@@ -117,6 +129,21 @@ export function Dashboard({
             width={size.width}
           />
         ))}
+        {showDone ? <text fg={ink.dim}>{" done"}</text> : null}
+        {showDone && done.length === 0 ? <text fg={ink.faint}>{"  no done run yet"}</text> : null}
+        {showDone
+          ? done.map((row, index) => (
+              <RunLine
+                key={row.name}
+                row={row}
+                feed={feeds.current.get(row.name)}
+                selected={live.length + index === at}
+                frame={frame}
+                now={now}
+                width={size.width}
+              />
+            ))
+          : null}
       </box>
       <box style={{ flexDirection: "column", flexShrink: 0 }}>
         <text fg={ink.dim}>{" needs you"}</text>
@@ -125,11 +152,13 @@ export function Dashboard({
           <NeedLine
             key={`${need.run}:${keyOf(need.item)}`}
             need={need}
-            selected={rows.length + index === at}
+            selected={shown.length + index === at}
             width={size.width}
           />
         ))}
-        <text fg={ink.faint}>{"  arrows or hjkl move, enter opens, q quits"}</text>
+        <text fg={ink.faint}>
+          {`  arrows or hjkl move, enter opens, d ${showDone ? "hides" : "shows"} done, q quits`}
+        </text>
       </box>
     </box>
   );
@@ -174,6 +203,17 @@ function NeedLine({ need, selected, width }: { need: Need; selected: boolean; wi
       <span fg={selected ? ink.text : ink.dim}>{cut(`${need.run}  ${path}  ${first(what)}`, width - 4)}</span>
     </text>
   );
+}
+
+function afterReveal(at: number, live: number, done: number, needs: number): number {
+  if (needs === 0 || at < live) return at;
+  return at + done;
+}
+
+function afterHide(at: number, live: number, done: number, needs: number): number {
+  if (at < live) return at;
+  const last = Math.max(0, live + needs - 1);
+  return Math.min(at >= live + done ? at - done : live, last);
 }
 
 function first(text: string): string {
