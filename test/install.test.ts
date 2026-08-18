@@ -2,26 +2,22 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { generated } from "../scripts/gen-catalog.ts";
+import { starterCatalog } from "../src/catalogs.ts";
 import { sandbox } from "./helpers.ts";
 
-test("the embedded catalog matches examples/", () => {
-  const current = fs.readFileSync(new URL("../src/catalog.gen.ts", import.meta.url), "utf8");
-  assert.ok(current === generated(), "examples/ changed: run `bun scripts/gen-catalog.ts`");
-});
-
-test("a fresh install fills the home with the catalog", (t) => {
+test("a fresh install enables the starter catalog and does not copy it", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
 
   const first = box.penguin("ps");
 
   assert.equal(first.code, 0, first.output);
-  assert.equal(fs.existsSync(path.join(box.home, "workflows", "ship.ts")), true);
-  assert.equal(fs.existsSync(path.join(box.home, "skills", "penguin-triage", "SKILL.md")), true);
+  assert.equal(fs.readFileSync(path.join(box.home, "catalogs"), "utf8"), "starter\n");
+  assert.equal(fs.existsSync(path.join(box.home, "workflows", "ship.ts")), false);
+  assert.equal(fs.existsSync(path.join(box.home, "skills", "penguin-triage", "SKILL.md")), false);
   assert.equal(fs.existsSync(path.join(box.home, "tsconfig.json")), true);
   for (const name of ["claude", "codex", "cursor", "opencode", "git", "gh"]) {
-    assert.equal(fs.existsSync(path.join(box.home, "adapters", `${name}.ts`)), true, name);
+    assert.equal(fs.existsSync(path.join(box.home, "adapters", `${name}.ts`)), false, name);
   }
   assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent claude\n");
   const env = fs.readFileSync(path.join(box.home, "penguin-env.d.ts"), "utf8");
@@ -49,18 +45,44 @@ test("install keeps the defaults file a home already has", (t) => {
   assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent mine\n");
 });
 
-test("a fresh install leaves ship in the workflow list", (t) => {
+test("a fresh install leaves ship in the workflow list, from examples/", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
   box.penguin("ps");
 
-  const listed = box.penguin("list", "workflows");
+  const listed = box.penguin("list", "workflows", "--verbose");
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(
     listed.stdout,
     /^ship {2}--ticket <text> \[--rounds <number>\]\n {2}ticket to open pull request:/m,
   );
+  assert.match(listed.stdout, new RegExp(path.join(starterCatalog().dir, "workflows", "ship.ts")));
+});
+
+test("a home workflow of the same name overlays the starter", (t) => {
+  const box = sandbox(t);
+  fs.rmSync(box.home, { recursive: true });
+  box.penguin("ps");
+  fs.mkdirSync(path.join(box.home, "workflows"), { recursive: true });
+  fs.writeFileSync(
+    path.join(box.home, "workflows", "ship.ts"),
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "the home ship",
+  params: z.object({}),
+  async run() {},
+});
+`,
+  );
+
+  const listed = box.penguin("list", "workflows", "--verbose");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /the home ship/);
+  assert.match(listed.stdout, new RegExp(path.join(box.home, "workflows", "ship.ts")));
 });
 
 test("a run on a fresh install picks the default agent", (t) => {
@@ -88,7 +110,7 @@ export default workflow({
   assert.match(done.stdout, /^run w-1 started, agent claude$/m);
 });
 
-test("install on a home that exists copies nothing", (t) => {
+test("install on a home that exists copies nothing and enables nothing", (t) => {
   const box = sandbox(t);
 
   const again = box.penguin("install");
@@ -97,6 +119,7 @@ test("install on a home that exists copies nothing", (t) => {
   assert.match(again.stdout, /penguin home is/);
   assert.match(again.stdout, /pn list workflows/);
   assert.equal(fs.existsSync(path.join(box.home, "workflows", "ship.ts")), false);
+  assert.equal(fs.existsSync(path.join(box.home, "catalogs")), false);
 });
 
 test("a fresh install prints the two lines and no skills report", (t) => {

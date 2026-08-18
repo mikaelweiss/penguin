@@ -9,8 +9,8 @@ You design a penguin workflow: one TypeScript file with a params schema and a ru
 
 1. Read the idea in the input.
 2. Learn what already exists:
-   - Run `pn list workflows` and `pn list skills`.
-   - Read two or three workflow files in `~/.penguin/workflows/` for the idiom.
+   - Run `pn list workflows --verbose` and `pn list skills`.
+   - Read two or three of the workflow files the verbose listing names, for the idiom.
    - Read `~/.penguin/penguin-env.d.ts` for the ctx types.
 3. Write the design to `workflow-design.md` in the current folder:
    - the description, one line

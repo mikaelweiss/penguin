@@ -17,24 +17,8 @@ export function runsRoot(): string {
   return path.join(stateRoot(), "runs");
 }
 
-export function homeSkills(): string {
-  return path.join(home(), "skills");
-}
-
 export function projectHome(cwd: string): string {
   return path.join(cwd, ".penguin");
-}
-
-export function projectSkills(cwd: string): string {
-  return path.join(projectHome(cwd), "skills");
-}
-
-export function homeWorkflows(): string {
-  return path.join(home(), "workflows");
-}
-
-export function projectWorkflows(cwd: string): string {
-  return path.join(projectHome(cwd), "workflows");
 }
 
 export type Scope = "local" | "global";
@@ -53,16 +37,12 @@ export function runDir(name: string): string {
   return path.join(runsRoot(), name);
 }
 
-export function homeAdapters(): string {
-  return path.join(home(), "adapters");
-}
-
-export function projectAdapters(cwd: string): string {
-  return path.join(projectHome(cwd), "adapters");
-}
-
 export function defaultsFile(): string {
   return path.join(home(), "defaults");
+}
+
+export function catalogsFile(): string {
+  return path.join(home(), "catalogs");
 }
 
 export function credentialsDir(): string {

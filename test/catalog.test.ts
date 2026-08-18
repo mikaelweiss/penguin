@@ -575,7 +575,7 @@ test("the shipped defaults pick claude when a second agent adapter is installed"
 test("a default naming an agent that is not installed fails the run and names the file", (t) => {
   const box = sandbox(t);
   freshHome(box);
-  fs.rmSync(path.join(box.home, "adapters", "claude.ts"));
+  fs.rmSync(path.join(box.home, "catalogs"));
   box.setAgent("none");
   box.write("skill.md", "do the thing\n");
   box.write("w.ts", agentWorkflow);
@@ -583,10 +583,7 @@ test("a default naming an agent that is not installed fails the run and names th
   const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1, failed.output);
-  assert.match(
-    failed.stdout,
-    /no agent adapter named claude\. Installed: codex, cursor, fake, opencode, pi\./,
-  );
+  assert.match(failed.stdout, /no agent adapter named claude\. Installed: fake\./);
   assert.ok(
     failed.stdout.includes(`Edit ${path.join(box.home, "defaults")} to choose one.`),
     failed.output,
@@ -1078,7 +1075,7 @@ test("the catalog review-pr workflow waits while the PR sits in the merge queue"
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1126,7 +1123,7 @@ test("the catalog review-pr workflow waits when the PR is queued before the run 
 
   const started = box.penguin(
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",
@@ -1294,7 +1291,7 @@ test("the catalog gh adapter holds a signed out gh before the workflow sees it",
   const started = box.penguinWith(
     failingGh(t, "not logged in to github.com. use 'gh auth login' to authenticate with this host"),
     "run",
-    path.join(examples, "review-pr.ts"),
+    path.join(workflows, "review-pr.ts"),
     "--pr",
     "42",
     "--background",

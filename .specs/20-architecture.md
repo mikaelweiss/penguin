@@ -12,15 +12,18 @@
 
 Plain files.
 
-- `~/.penguin/workflows/*.ts`: the personal workflow files. `pn run` and `pn list workflows` derive the workflow list from this directory alone.
+- `~/.penguin/workflows/*.ts`: the personal workflow files.
 - `~/.penguin/helpers/*.ts`: the shared TypeScript a workflow imports by relative path. penguin never scans it as a workflow.
-- `~/.penguin/adapters/*.ts`: the personal adapter files. Install copies the shipped ones here.
+- `~/.penguin/adapters/*.ts`: the personal adapter files.
 - `~/.penguin/skills/`: the skills every workflow can name. A skill directly inside it is penguin's own. A symlink inside it points at a whole skill directory the user already keeps, and `.order` holds those link names, most preferred first.
-- `~/.penguin/defaults`: one line per role, `<role> <name>`, choosing among installed implementations. Only a role with more than one implementation needs a line. The catalog ships this file with one line, `agent claude`, and install copies it with the rest (`30-defaults.md`). A home that exists keeps the file it has.
-- `~/.penguin/penguin-env.d.ts`: generated. It types `ctx` from the installed adapters, so workflow files autocomplete with zero imports. penguin rewrites it on install, on every `pn run`, and on `pn list adapters`. A stale copy misleads the editor only: the engine resolves adapters when it runs.
+- `~/.penguin/catalogs`: enabled catalog directories, one line each. `starter` is the `examples/` directory in the penguin package. Any other line is a path. Install writes `starter` into a fresh home. A home that exists keeps the file it has, or has none.
+- `~/.penguin/defaults`: one line per role, `<role> <name>`, choosing among installed implementations. Only a role with more than one implementation needs a line. The starter catalog ships this file with one line, `agent claude`, and install writes it into a fresh home. A home that exists keeps the file it has.
+- `~/.penguin/penguin-env.d.ts`: generated. It types `ctx` from the installed adapters, so workflow files autocomplete with zero imports. penguin writes it into the home and into `<project>/.penguin/` when that folder exists, on install, on every `pn run`, and on `pn list adapters`. A stale copy misleads the editor only: the engine resolves adapters when it runs.
 - `~/.local/state/penguin/runs/<name>/`: one flat directory per run, the run name as the directory name. `run.json` (the params, the workflow file path, the invoking folder, the creation time), `events.jsonl` (every emitted event, append-only), `inbox.jsonl` (every message sent in, append-only), `transcripts/` (one file per agent session), `attachments/` (the images a viewer pastes in, named `paste-<n>.png`), `lock` (held by the run process). A directory without a `run.json` is not a run: no command sees it.
 - `~/.local/state/penguin/credentials/<name>.json`: one file per credential an adapter needs, mode 0600 inside a 0700 directory (credentials below). It lives under the state root, not the catalog, so a reinstall that refreshes `~/.penguin/` never touches it.
 - `<project>/.penguin/`: the same definition places for one repository: `workflows/`, `helpers/`, `adapters/`, and `skills/`. It ships in git. It holds no runs.
+
+penguin scans catalog directories in order: `<project>/.penguin/` first, then `~/.penguin/`, then each catalog enabled in `~/.penguin/catalogs`. An earlier catalog wins when both hold the same workflow name, adapter role and name, or skill name.
 
 `PENGUIN_HOME` moves the definition tree. `XDG_STATE_HOME` moves the run state. Run state lives outside `~/.penguin/` so a user can keep the definition tree in a dotfiles repository.
 
@@ -38,7 +41,7 @@ The engine shows every adapter method call as one step in the view: role plus me
 
 An adapter asks `host.gate(question, shape?)` when only a person can clear the way: a CLI that is signed out, a tool that is not installed, a branch that is not pushed. It is the gate a workflow asks, so the run shows blocked with the question and the answer shape draws the options. The adapter loops on it and calls again, so a workflow never handles a failure a person can fix.
 
-**Discovery** is the skills rule: `<project>/.penguin/adapters/*.ts` is local and ships in git, `~/.penguin/adapters/*.ts` is personal, and local wins when both hold the same role and name. **Selection** within a role: a session's `use` option first, then the `defaults` file, then the only implementation installed. More than one implementation with no default fails the run and names the fix. A default that names an implementation that is not installed fails the run, names the installed ones, and names the file to edit.
+**Discovery** scans an ordered list of catalog directories: `<project>/.penguin/`, then `~/.penguin/`, then catalogs enabled in `~/.penguin/catalogs`. Adapters live in each catalog's `adapters/` directory. An earlier catalog wins when two hold the same role and name. **Selection** within a role: a session's `use` option first, then the `defaults` file, then the only implementation installed. More than one implementation with no default fails the run and names the fix. A default that names an implementation that is not installed fails the run, names the installed ones, and names the file to edit.
 
 One role the engine treats specially:
 
@@ -103,16 +106,16 @@ Sync writes symlinks and `.order`, nothing else. A skill the user wrote into the
 
 `pn sync-skills` prints the links it wrote. Install syncs silently.
 
-A turn's skill name resolves against an ordered list of roots: the project skills directory, then its links in `.order` order, then the home skills directory, then its links. The first root that holds the name wins. penguin's own skills carry a `penguin-` prefix, so they never take the name of a skill the user already has.
+A turn's skill name resolves against an ordered list of roots: for each catalog directory (the project, then the home, then enabled catalogs), that catalog's skills directory, then its links in `.order` order. The first root that holds the name wins. penguin's own skills carry a `penguin-` prefix, so they never take the name of a skill the user already has.
 
 ## Commands
 
 `install`, `intro`, `list`, `run`, `ps`, `attach`, `sync-skills`, and no command.
 
-- `install`: draw the penguin wordmark, create `~/.penguin/` and `~/.local/state/penguin/runs/`, copy the catalog (`30-defaults.md`) into `~/.penguin/`, which carries the `defaults` file that chooses claude for the agent role, write `penguin-env.d.ts`, then sync the global skills (skills above). The first penguin command runs it, except `intro`.
+- `install`: draw the penguin wordmark, create `~/.penguin/` and `~/.local/state/penguin/runs/`, enable the starter catalog in `~/.penguin/catalogs`, write the `defaults` file that chooses claude for the agent role, copy `tsconfig.json` for editor types, write `penguin-env.d.ts`, then sync the global skills (skills above). It does not copy workflows, adapters, or skills. The first penguin command runs it, except `intro`.
 - `intro`: draw the penguin wordmark. It needs a terminal. It writes nothing, and it never installs.
-- `list`: what penguin can use, as one block per entry. The first line is the name, then the params a workflow takes. The next lines are the description, indented two spaces and wrapped to the terminal width. `--verbose` adds a last line: scope and file, and for skills, source. A param prints as `--name <text>`, a boolean as `--name`, an enum as `--name <one|two>`, and an optional param in brackets. `list workflows` is the workflow files: `<project>/.penguin/workflows/*.ts` is local, `~/.penguin/workflows/*.ts` is global. The description and the params are the workflow export. `list skills` is the skills a turn can name, in resolution order, one block per name. The description is the skill frontmatter. `list adapters` is the installed adapters: the first line is the role and the implementation name, then the description. It also rewrites `penguin-env.d.ts`. The verbose file line prints the real path, through any symlink. A bare `list` fails and names the three targets.
-- `run`: validate params + create + start + attach (run lifecycle above). It takes a workflow name from the list, local before global, or a path to any workflow file. `-i` asks for the params the args did not fill (run lifecycle above). With no workflow it lists them (the same blocks, plus the one line that runs one), and `-i` asks which one instead. It rewrites `penguin-env.d.ts` first.
+- `list`: what penguin can use, as one block per entry. The first line is the name, then the params a workflow takes. The next lines are the description, indented two spaces and wrapped to the terminal width. `--verbose` adds a last line: scope and file, and for skills, source. A param prints as `--name <text>`, a boolean as `--name`, an enum as `--name <one|two>`, and an optional param in brackets. `list workflows` is the workflow files in each catalog directory: `<project>/.penguin/workflows/*.ts` is local, `~/.penguin/workflows/*.ts` is personal, and enabled catalogs after that. The description and the params are the workflow export. `list skills` is the skills a turn can name, in resolution order, one block per name. The description is the skill frontmatter. `list adapters` is the installed adapters: the first line is the role and the implementation name, then the description. It also rewrites `penguin-env.d.ts`. The verbose file line prints the real path, through any symlink. A bare `list` fails and names the three targets.
+- `run`: validate params + create + start + attach (run lifecycle above). It takes a workflow name from the list, earlier catalogs before later (project, then home, then enabled catalogs), or a path to any workflow file. `-i` asks for the params the args did not fill (run lifecycle above). With no workflow it lists them (the same blocks, plus the one line that runs one), and `-i` asks which one instead. It rewrites `penguin-env.d.ts` first.
 - `ps`: on a TTY, the dashboard (components above): the live runs, `d` reveals the done ones under them, arrows or hjkl move, enter opens the run view, `n` opens the workflow launcher, `q` leaves. `y` copies the directory of the run or the item under the cursor: a run line answers with the directories of its whole tree, and a needs-you line with the directories of the node that waits. One directory copies at once. Several draw the same list control the run view draws. The hint line reports the copy, or why it failed. Piped, it is a plain table of the live runs: run, workflow file, state, current step or pending question, age, run directory. Done runs never list in the table: their directories stay on disk, and `pn attach` still opens them.
 - `attach`: join a run by name: the run view, with the whole history in it. For a done run, read-only.
 - `sync-skills`: choose the skill directories again (skills above).
@@ -132,8 +135,8 @@ Each one line, each pinned by a test:
 6. `turn.stop()` kills the agent process, and the session's next turn continues the same conversation.
 7. A workflow call validates the callee's params before the callee runs, and a composed call creates no run.
 8. The engine depends on no adapter and no definition. The engine test suite passes with an empty `~/.penguin/`, and a workflow that names a missing role or agent fails plainly.
-9. The first penguin command installs. Sync links whole directories, and never removes a skill the user put in the target.
-10. A skill name resolves from the project roots before the home roots, and from the preferred link before the other. A skill path resolves against the workflow file. An adapter resolves from the project before the home.
+9. The first penguin command installs. Install enables the starter catalog without copying it. A home that exists is left alone. Sync links whole directories, and never removes a skill the user put in the target.
+10. A skill name resolves from earlier catalog roots before later ones (project, then home, then enabled catalogs), and from the preferred link before the other. A skill path resolves against the workflow file. An adapter resolves from earlier catalog roots before later ones.
 11. A gate with a shape validates the answer against it, and asks the same question again until an answer fits. A shape that names options beside a string takes any answer at the first ask.
 12. penguin never writes a credential value to `events.jsonl`, `inbox.jsonl`, or the screen. A viewer writes it to the store, and the run reads it from there.
 13. A turn with a blocked schema resolves to exactly one envelope: a value that fills both, or neither, is a mismatch, corrected once, then gated.

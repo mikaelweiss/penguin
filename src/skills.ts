@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as catalogs from "./catalogs.ts";
 import { blocks } from "./layout.ts";
-import { homeSkills, projectSkills, type Scope, short } from "./paths.ts";
+import { type Scope, short } from "./paths.ts";
 
 export type Source = { name: string; dir: string };
 
@@ -59,7 +60,11 @@ export function roots(dir: string, scope: Scope): Root[] {
 }
 
 export function searchPath(cwd: string): Root[] {
-  return [...roots(projectSkills(cwd), "local"), ...roots(homeSkills(), "global")];
+  return searchPathIn(catalogs.roots(cwd));
+}
+
+export function searchPathIn(list: catalogs.Catalog[]): Root[] {
+  return list.flatMap((catalog) => roots(catalogs.skillsDir(catalog), catalog.scope));
 }
 
 export type Skill = {

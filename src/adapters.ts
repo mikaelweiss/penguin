@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as catalogs from "./catalogs.ts";
 import { PenguinError } from "./errors.ts";
 import { importDefault } from "./loader.ts";
-import { defaultsFile, envFile, home, homeAdapters, projectAdapters, projectHome, type Scope } from "./paths.ts";
+import { defaultsFile, envFile, type Scope } from "./paths.ts";
 import type { Adapter } from "./types.ts";
 
 export type Found = {
@@ -15,14 +16,25 @@ export type Found = {
 };
 
 export async function installed(cwd: string): Promise<Found[]> {
-  const local = await scan(projectAdapters(cwd), "local");
-  const global = await scan(homeAdapters(), "global");
-  const seen = new Set(local.map((entry) => `${entry.role}\n${entry.name}`));
-  return [...local, ...global.filter((entry) => !seen.has(`${entry.role}\n${entry.name}`))];
+  return installedIn(catalogs.roots(cwd));
+}
+
+export async function installedIn(list: catalogs.Catalog[]): Promise<Found[]> {
+  const seen = new Set<string>();
+  const found: Found[] = [];
+  for (const catalog of list) {
+    for (const entry of await scan(catalogs.adaptersDir(catalog), catalog.scope)) {
+      const key = `${entry.role}\n${entry.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push(entry);
+    }
+  }
+  return found;
 }
 
 export function searched(cwd: string): string[] {
-  return [projectAdapters(cwd), homeAdapters()];
+  return catalogs.roots(cwd).map(catalogs.adaptersDir);
 }
 
 export async function loadAdapter(file: string): Promise<Adapter> {
@@ -83,9 +95,9 @@ export function pick(list: Found[], role: string, name?: string): Picked {
 }
 
 export function writeEnv(cwd: string, list: Found[]): void {
-  writeEnvFile(home(), list);
-  const project = projectHome(cwd);
-  if (fs.existsSync(project)) writeEnvFile(project, list);
+  for (const catalog of [catalogs.projectCatalog(cwd), catalogs.homeCatalog()]) {
+    if (fs.existsSync(catalog.dir)) writeEnvFile(catalog.dir, list);
+  }
 }
 
 export function renderEnv(dir: string, list: Found[]): string {

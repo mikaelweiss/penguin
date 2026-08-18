@@ -12,7 +12,7 @@ bun install -g @mikaelweiss/penguin
 
 penguin needs Bun 1.3 or newer, and it runs on Bun only. Your repository needs no install of its own.
 
-The first penguin command sets up `~/.penguin/` and copies the starter catalog into it:
+The first penguin command sets up `~/.penguin/` and enables the starter catalog. It does not copy workflows into the home:
 
 ```
 created ~/.penguin
@@ -30,7 +30,7 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.penguin/` with fourteen workflows, their skills, eight adapters, a `defaults` file that picks the agent, and a tsconfig for editor types. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
+Install enables the starter catalog (`examples/` in the penguin package) and writes a `defaults` file that picks the agent, plus a tsconfig for editor types. `pn list workflows` shows those workflows. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
 
 - `pn run ship --ticket ABC-123`: ticket to open PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
 - `pn run ship-local --ticket "the footer scrolls"`: the same work, landed instead of proposed. It commits, holds until you answer done, then rebases onto main and moves main to it.

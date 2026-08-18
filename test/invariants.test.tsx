@@ -566,7 +566,8 @@ test("invariant 9: the first penguin command installs, and sync keeps a skill yo
   assert.equal(first.code, 0, first.output);
   assert.match(first.stdout, new RegExp(`created ${box.home}`));
   assert.equal(fs.existsSync(box.runs), true);
-  assert.equal(fs.existsSync(path.join(box.home, "adapters", "claude.ts")), true);
+  assert.equal(fs.readFileSync(path.join(box.home, "catalogs"), "utf8"), "starter\n");
+  assert.equal(fs.existsSync(path.join(box.home, "adapters", "claude.ts")), false);
   assert.equal(fs.readlinkSync(path.join(box.home, "skills", "claude")), claude);
 
   const second = box.penguin("ps");
@@ -584,7 +585,7 @@ test("invariant 9: the first penguin command installs, and sync keeps a skill yo
   );
 });
 
-test("invariant 10: a skill name resolves from the project before the home", (t) => {
+test("invariant 10: a skill name resolves from earlier catalog roots before later ones", (t) => {
   const box = sandbox(t);
   box.setAgent("none", "prompts.txt");
   box.write(
@@ -646,7 +647,7 @@ export default workflow({
   assert.match(box.invocations("prompts.txt")[0] ?? "", /the craft next to the workflow/);
 });
 
-test("invariant 10: an adapter resolves from the project before the home", (t) => {
+test("invariant 10: an adapter resolves from earlier catalog roots before later ones", (t) => {
   const box = sandbox(t);
   box.withShell();
   box.writeAdapter(

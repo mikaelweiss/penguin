@@ -2,45 +2,46 @@ import fs from "node:fs";
 import path from "node:path";
 import { installed, writeEnv } from "./adapters.ts";
 import { intro } from "./animate.ts";
-import { catalog } from "./catalog.gen.ts";
-import { home, homeSkills, projectSkills, runsRoot, type Scope, short, userRoot } from "./paths.ts";
-import { interactive } from "./tui/tty.ts";
+import * as catalogs from "./catalogs.ts";
+import { catalogsFile, defaultsFile, runsRoot, type Scope, short, userRoot } from "./paths.ts";
 import { link, shared, type Source, sources } from "./skills.ts";
+import { interactive } from "./tui/tty.ts";
 
 const hint =
   "run `pn list workflows` to see what's available and then `pn run <workflow>` from a project directory to get started";
 
 export async function install(): Promise<void> {
-  const fresh = !fs.existsSync(home());
+  const dir = catalogs.homeCatalog().dir;
+  const fresh = !fs.existsSync(dir);
   if (interactive()) await intro();
-  fs.mkdirSync(home(), { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(runsRoot(), { recursive: true });
   if (fresh) {
-    copyCatalog();
+    enableStarter(dir);
     writeEnv(process.cwd(), await installed(process.cwd()));
   }
   await syncSkills("global", true);
-  say(fresh ? `\ncreated ${short(home())}` : `\npenguin home is ${short(home())}`);
+  say(fresh ? `\ncreated ${short(dir)}` : `\npenguin home is ${short(dir)}`);
   say(hint);
 }
 
-function copyCatalog(): void {
-  for (const [name, content] of Object.entries(catalog)) {
-    const target = path.join(home(), name);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, content);
-  }
+function enableStarter(dir: string): void {
+  fs.writeFileSync(catalogsFile(), "starter\n");
+  const shipped = catalogs.starterCatalog().dir;
+  const defaults = fs.readFileSync(path.join(shipped, "defaults"), "utf8");
+  fs.writeFileSync(defaultsFile(), defaults.endsWith("\n") ? defaults : `${defaults}\n`);
+  fs.copyFileSync(path.join(shipped, "tsconfig.json"), path.join(dir, "tsconfig.json"));
 }
 
 export async function firstRun(): Promise<boolean> {
-  if (fs.existsSync(home())) return false;
+  if (fs.existsSync(catalogs.homeCatalog().dir)) return false;
   await install();
   return true;
 }
 
 export async function syncSkills(scope: Scope, quiet = false): Promise<void> {
   const root = scope === "global" ? userRoot() : process.cwd();
-  const target = scope === "global" ? homeSkills() : projectSkills(process.cwd());
+  const target = catalogs.skillsDir(catalogs.forScope(process.cwd(), scope));
   const found = sources(root);
   if (found.length === 0) {
     if (fs.existsSync(target)) link(target, []);
