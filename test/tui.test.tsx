@@ -10,6 +10,7 @@ import { Ask, Pick } from "../src/tui/ask.tsx";
 import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
 import { Editor } from "../src/tui/editor.ts";
 import { controlFor } from "../src/tui/gate.ts";
+import { Choices } from "../src/tui/input.tsx";
 import { machineLine, strained } from "../src/tui/memory.ts";
 import { plainAttach } from "../src/tui/plain.ts";
 import { type Left, RunView } from "../src/tui/run-view.tsx";
@@ -157,6 +158,30 @@ async function shown(setup: TestRendererSetup, want: string): Promise<string> {
   }
   throw new Error(`the frame never held ${want}`);
 }
+
+/** A later event on disk, and the frame the viewer draws once it reads it. */
+async function arrive(
+  setup: TestRendererSetup,
+  dir: string,
+  events: ViewEvent[],
+  until: (frame: string) => boolean,
+): Promise<void> {
+  fs.appendFileSync(
+    path.join(dir, "events.jsonl"),
+    events.map((event) => `${JSON.stringify(event)}\n`).join(""),
+  );
+  await frameWith(setup, until);
+}
+
+function optionGate(schema: Record<string, unknown>): ViewEvent[] {
+  return [
+    { type: "run", phase: "started", run: "review-1" },
+    { type: "gate", phase: "asked", id: "g-1", question: "What now?", schema },
+    { type: "state", state: "blocked", detail: "What now?" },
+  ];
+}
+
+const ONE_OF = { type: "string", enum: ["approve", "reject"] };
 
 const nothing = (): void => {};
 
@@ -382,6 +407,30 @@ test("the run tree draws nested activities with their state glyphs", async (t) =
   }
 });
 
+test("enter on an empty input bar opens and closes the selected node", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "activity", phase: "start", id: "a1", label: "plan the work" },
+      { type: "state", state: "running", detail: "drafting" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan the work"));
+    await press(setup, ["RETURN"]);
+    assert.ok(!setup.captureCharFrame().includes("plan the work"), "enter left the node open");
+    await press(setup, ["RETURN"]);
+    assert.match(setup.captureCharFrame(), /plan the work/);
+    assert.deepEqual(inbox(dir), [], "enter sent an empty message");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("an enum gate draws a list, and the choice sends one gate-addressed message", async (t) => {
   const box = sandbox(t);
   const dir = box.run(
@@ -406,6 +455,212 @@ test("an enum gate draws a list, and the choice sends one gate-addressed message
     assert.deepEqual(inbox(dir), [
       { at: inbox(dir)[0]?.["at"], text: "reject", gate: "g-1" },
     ]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a gate with options draws one control whose last row types an answer", async (t) => {
+  const box = sandbox(t);
+  box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    const frame = await setup.waitForFrame((text) => text.includes("type a different answer"));
+    const rows = frame.trimEnd().split("\n");
+    const approve = rows.findIndex((row) => row.includes("approve"));
+    const reject = rows.findIndex((row) => row.includes("reject"));
+    const typing = rows.findIndex((row) => row.includes("type a different answer"));
+    assert.equal(reject, approve + 1, "the options sit in order");
+    assert.equal(typing, reject + 1, "the typing row is the last row of the control");
+    assert.match(rows[typing + 1] ?? "", /the last row types an answer/);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("typing at a gate with options sends the text as the answer", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("approve"));
+    await type(setup, "ask me again");
+    assert.match(setup.captureCharFrame(), /> +ask me again/, "the text landed on the typing row");
+    await press(setup, ["RETURN"]);
+    const sent = inbox(dir);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.["text"], "ask me again");
+    assert.equal(sent[0]?.["gate"], "g-1");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a key that types nothing leaves the cursor on its option", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("approve"));
+    await press(setup, ["ARROW_DOWN", "BACKSPACE", "END", "RETURN"]);
+    assert.deepEqual(inbox(dir), [
+      { at: inbox(dir)[0]?.["at"], text: "reject", gate: "g-1" },
+    ]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the typing row moves by words, the way the input bar does", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("approve"));
+    await type(setup, "two words");
+    await act(async () => {
+      setup.mockInput.pressKey("ARROW_LEFT", { ctrl: true });
+    });
+    await setup.flush();
+    await type(setup, "many ");
+    await press(setup, ["RETURN"]);
+    assert.equal(inbox(dir)[0]?.["text"], "two many words");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("enter on an empty typing row sends nothing and keeps the control", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("approve"));
+    await press(setup, ["ARROW_DOWN", "ARROW_DOWN", "RETURN"]);
+    assert.deepEqual(inbox(dir), []);
+    assert.match(setup.captureCharFrame(), /approve/, "the control left the screen");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a multi-select gate sends every checked option as one message", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate({ type: "array", items: { enum: ["docs", "tests", "bench"] } }), {
+    live: true,
+  });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("docs"));
+    await press(setup, [" ", "ARROW_DOWN", " ", "RETURN"]);
+    assert.deepEqual(inbox(dir), [
+      { at: inbox(dir)[0]?.["at"], text: "docs, tests", gate: "g-1" },
+    ]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a typed answer ignores the toggles of a multi-select gate", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate({ type: "array", items: { enum: ["docs", "tests"] } }), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("docs"));
+    await press(setup, [" "]);
+    assert.match(setup.captureCharFrame(), /\[x\] docs/, "space toggled the option under the cursor");
+    await type(setup, "neither one");
+    await press(setup, ["RETURN"]);
+    const sent = inbox(dir);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.["text"], "neither one");
+    assert.equal(sent[0]?.["gate"], "g-1");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a re-ask with other options resets the cursor and the toggles", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate({ type: "array", items: { enum: ["docs", "tests"] } }), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("docs"));
+    await press(setup, ["ARROW_DOWN", " "]);
+    assert.match(setup.captureCharFrame(), /\[x\] tests/);
+    await arrive(setup, dir, [
+      {
+        type: "gate",
+        phase: "asked",
+        id: "g-1",
+        question: "What now?",
+        schema: { type: "array", items: { enum: ["ship", "hold"] } },
+      },
+    ], (frame) => frame.includes("ship"));
+    const frame = setup.captureCharFrame();
+    assert.match(frame, /> \[ \] ship/, "the cursor went back to the first option");
+    assert.ok(!frame.includes("[x]"), "a toggle outlived the options it belonged to");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("an answer from elsewhere closes the control and keeps the typed text", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("approve"));
+    await type(setup, "half a thought");
+    await arrive(setup, dir, [
+      { type: "gate", phase: "answered", id: "g-1", question: "What now?", answer: "approve" },
+    ], (frame) => frame.includes("to run >"));
+    const frame = setup.captureCharFrame();
+    assert.ok(!frame.includes("type a different answer"), "the control stayed after the answer");
+    assert.match(frame, /to run > half a thought/, "the text moved to the next target");
+    assert.deepEqual(inbox(dir), [], "closing the control sent an answer");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a paste at a gate with options lands on the typing row", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("approve"));
+    await act(async () => {
+      await setup.mockInput.pasteBracketedText("a third way");
+    });
+    await setup.flush();
+    assert.match(setup.captureCharFrame(), /> +a third way/);
+    await press(setup, ["RETURN"]);
+    assert.equal(inbox(dir)[0]?.["text"], "a third way");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a cursor past the last option draws as the typing row", async () => {
+  const editor = new Editor();
+  editor.insert("mine");
+  const setup = await screen(
+    <Choices
+      title="What now?"
+      choices={[{ label: "approve" }, { label: "reject" }]}
+      cursor={9}
+      chosen={[]}
+      many={false}
+      editor={editor}
+      width={40}
+    />,
+  );
+  try {
+    const frame = setup.captureCharFrame();
+    const rows = frame.split("\n").map((row) => row.trimEnd());
+    assert.ok(!rows.some((row) => row.startsWith("> (")), "an option row took the cursor");
+    assert.match(frame, /> +mine/);
   } finally {
     setup.renderer.destroy();
   }

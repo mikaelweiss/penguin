@@ -7,6 +7,54 @@ import { ink } from "./theme.ts";
 
 export type Choice = { label: string; note?: string };
 
+const LABEL_COLUMN = 6;
+
+/** One editable line: the text, the cursor when the line has the keys, and its prompt. */
+export function EditorLine({
+  editor,
+  prompt,
+  focused,
+  placeholder,
+}: {
+  editor: Editor;
+  prompt: string;
+  focused: boolean;
+  placeholder?: string;
+}): ReactNode {
+  const { text, cursor } = editor.shown;
+  const before = text.slice(0, cursor);
+  const under = text.slice(cursor, cursor + 1);
+  const after = text.slice(cursor + 1);
+  const body = focused ? ink.text : ink.dim;
+  if (text === "" && placeholder !== undefined) {
+    return (
+      <text>
+        <span fg={ink.accent}>{`${prompt} `}</span>
+        {focused ? (
+          <span fg={ink.cursor} bg={ink.cursorBack}>
+            {" "}
+          </span>
+        ) : null}
+        <span fg={ink.dim}>{placeholder}</span>
+      </text>
+    );
+  }
+  return (
+    <text>
+      <span fg={ink.accent}>{`${prompt} `}</span>
+      <span fg={body}>{before}</span>
+      {focused ? (
+        <span fg={ink.cursor} bg={ink.cursorBack}>
+          {under === "" ? " " : under}
+        </span>
+      ) : (
+        <span fg={body}>{under}</span>
+      )}
+      <span fg={body}>{after}</span>
+    </text>
+  );
+}
+
 /** The line the user types into, with what it sends named in front of it. */
 export function InputBar({
   editor,
@@ -19,26 +67,18 @@ export function InputBar({
   hint: string;
   width: number;
 }): ReactNode {
-  const { text, cursor } = editor.shown;
-  const before = text.slice(0, cursor);
-  const under = text.slice(cursor, cursor + 1);
-  const after = text.slice(cursor + 1);
   return (
     <box style={{ flexDirection: "column", flexShrink: 0 }}>
-      <text>
-        <span fg={ink.accent}>{`${prompt} `}</span>
-        <span fg={ink.text}>{before}</span>
-        <span fg={ink.cursor} bg={ink.cursorBack}>
-          {under === "" ? " " : under}
-        </span>
-        <span fg={ink.text}>{after}</span>
-      </text>
+      <EditorLine editor={editor} prompt={prompt} focused={true} />
       <text fg={ink.faint}>{cut(hint, width)}</text>
     </box>
   );
 }
 
-/** A list the user moves through: one choice, or many with checkboxes. */
+/**
+ * A list the user moves through: one choice, or many with checkboxes. An editor adds
+ * a last row, so an answer the list does not hold is one row away.
+ */
 export function Choices({
   title,
   notes,
@@ -47,6 +87,7 @@ export function Choices({
   chosen,
   many,
   keys,
+  editor,
   width,
 }: {
   title: string;
@@ -56,9 +97,13 @@ export function Choices({
   chosen: number[];
   many: boolean;
   keys?: string;
+  editor?: Editor;
   width: number;
 }): ReactNode {
   const help = keys ?? (many ? "arrows move, space toggles, enter confirms" : "arrows move, enter confirms");
+  const rows = choices.length + (editor === undefined ? 0 : 1);
+  const at = Math.min(cursor, rows - 1);
+  const typing = editor !== undefined && at === choices.length;
   return (
     <box style={{ flexDirection: "column", flexShrink: 0 }}>
       <text fg={ink.warn}>{cut(title, width)}</text>
@@ -66,7 +111,7 @@ export function Choices({
         <text key={note} fg={ink.dim}>{cut(`  ${note}`, width)}</text>
       ))}
       {choices.map((choice, index) => {
-        const here = index === cursor;
+        const here = index === at;
         const box = many ? (chosen.includes(index) ? "[x]" : "[ ]") : here ? "(o)" : "( )";
         const note = choice.note === undefined ? "" : `  ${choice.note}`;
         return (
@@ -75,6 +120,14 @@ export function Choices({
           </text>
         );
       })}
+      {editor === undefined ? null : (
+        <EditorLine
+          editor={editor}
+          prompt={(typing ? ">" : " ").padEnd(LABEL_COLUMN - 1)}
+          focused={typing}
+          placeholder="type a different answer"
+        />
+      )}
       <text fg={ink.faint}>{cut(`  ${help}`, width)}</text>
     </box>
   );

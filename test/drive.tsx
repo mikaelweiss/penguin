@@ -35,11 +35,13 @@ export async function frameWith(
 ): Promise<string> {
   const started = Date.now();
   for (;;) {
-    await setup.flush();
     const frame = setup.captureCharFrame();
     if (predicate(frame)) return frame;
     if (Date.now() - started > timeoutMs) throw new Error(`no frame took the predicate:\n${frame}`);
-    await new Promise((done) => setTimeout(done, 20));
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 20));
+    });
+    await setup.flush();
   }
 }
 

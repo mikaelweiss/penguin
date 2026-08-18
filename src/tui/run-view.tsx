@@ -296,9 +296,13 @@ export function RunView({
     }
   };
 
-  const typeKey = (key: KeyEvent): void => {
+  /** True when the key only changed the text. */
+  const editKey = (key: KeyEvent): boolean => {
     if (key.ctrl) {
-      if (key.name === "v") return void takeImage();
+      if (key.name === "v") {
+        void takeImage();
+        return true;
+      }
       if (key.name === "a") editor.head();
       else if (key.name === "e") editor.tail();
       else if (key.name === "u") editor.killLeft();
@@ -306,67 +310,126 @@ export function RunView({
       else if (key.name === "w") editor.killWord();
       else if (key.name === "left" || key.name === "b") editor.wordLeft();
       else if (key.name === "right" || key.name === "f") editor.wordRight();
-      else return;
-      return bump();
+      else return false;
+      bump();
+      return true;
     }
     if (key.meta) {
       if (key.name === "b" || key.name === "left") editor.wordLeft();
       else if (key.name === "f" || key.name === "right") editor.wordRight();
       else if (key.name === "backspace") editor.killWord();
-      else return;
-      return bump();
+      else return false;
+      bump();
+      return true;
     }
-    if (key.name === "return" || key.name === "enter") {
-      const text = editor.take();
-      send(text);
-      return bump();
+    if (key.name === "backspace") editor.backspace();
+    else if (key.name === "delete") editor.delete();
+    else if (key.name === "home") editor.head();
+    else if (key.name === "end") editor.tail();
+    else {
+      const typed = printable(key);
+      if (typed === undefined) return false;
+      editor.insert(typed);
+    }
+    bump();
+    return true;
+  };
+
+  const typeKey = (key: KeyEvent): void => {
+    if (!key.ctrl && !key.meta) {
+      if (key.name === "return" || key.name === "enter") {
+        if (editor.empty) return fold(closed.has(selected.id));
+        send(editor.take());
+        return bump();
+      }
+      if (key.name === "escape") {
+        editor.clear();
+        return bump();
+      }
+      if (!editor.empty) {
+        if (key.name === "left") {
+          editor.left();
+          return bump();
+        }
+        if (key.name === "right") {
+          editor.right();
+          return bump();
+        }
+        if (key.name === "up" || key.name === "down") {
+          editor.recall(key.name === "up" ? -1 : 1);
+          return bump();
+        }
+      } else {
+        if (key.name === "up") return move(-1);
+        if (key.name === "down") return move(1);
+        if (key.name === "left") return fold(false);
+        if (key.name === "right") return fold(true);
+        if (key.name === "y") return startCopy();
+        if (key.name === "q") return leave({ back: true, code: 0 });
+      }
+    }
+    editKey(key);
+  };
+
+  const pickState = (wanted: Attention, options: { list: string[] }): Pick => {
+    const what = pickKey(wanted, options);
+    const now = held.current.pick;
+    return now.key === what ? now : { ...NO_PICK, key: what };
+  };
+
+  const startTyping = (wanted: Attention, options: { list: string[] }): void => {
+    setPick({ ...pickState(wanted, options), cursor: options.list.length });
+  };
+
+  const gateKey = (key: KeyEvent, wanted: Attention, options: { list: string[]; many: boolean }): void => {
+    const state = pickState(wanted, options);
+    const rows = options.list.length + 1;
+    const cursor = Math.min(state.cursor, rows - 1);
+    const typing = cursor === options.list.length;
+    if (key.name === "up" || key.name === "down") {
+      const step = key.name === "up" ? -1 : 1;
+      return setPick({ ...state, cursor: (cursor + rows + step) % rows });
     }
     if (key.name === "escape") {
-      editor.clear();
-      return bump();
-    }
-    if (key.name === "backspace") {
-      editor.backspace();
-      return bump();
-    }
-    if (key.name === "delete") {
-      editor.delete();
-      return bump();
-    }
-    if (key.name === "home") {
-      editor.head();
-      return bump();
-    }
-    if (key.name === "end") {
-      editor.tail();
-      return bump();
-    }
-    if (!editor.empty) {
-      if (key.name === "left") {
-        editor.left();
+      if (typing && !editor.empty) {
+        editor.clear();
         return bump();
       }
-      if (key.name === "right") {
-        editor.right();
-        return bump();
-      }
-      if (key.name === "up" || key.name === "down") {
-        editor.recall(key.name === "up" ? -1 : 1);
-        return bump();
-      }
-    } else {
-      if (key.name === "up") return move(-1);
-      if (key.name === "down") return move(1);
-      if (key.name === "left") return fold(false);
-      if (key.name === "right") return fold(true);
-      if (key.name === "return") return fold(closed.has(selected.id));
-      if (key.name === "y") return startCopy();
-      if (key.name === "q") return leave({ back: true, code: 0 });
+      setPick(NO_PICK);
+      return drop();
     }
-    const typed = printable(key);
-    if (typed === undefined) return;
-    editor.insert(typed);
-    bump();
+    if (key.name === "return" || key.name === "enter") {
+      if (typing) {
+        if (editor.empty) return;
+        send(editor.take());
+        return setPick(NO_PICK);
+      }
+      answerFrom(options.list, options.many ? state.chosen : [cursor]);
+      return setPick(NO_PICK);
+    }
+    if (typing) {
+      if (!key.ctrl && !key.meta) {
+        if (key.name === "left") {
+          editor.left();
+          return bump();
+        }
+        if (key.name === "right") {
+          editor.right();
+          return bump();
+        }
+      }
+      editKey(key);
+      return;
+    }
+    if (key.name === "space" && options.many) {
+      const chosen = state.chosen.includes(cursor)
+        ? state.chosen.filter((index) => index !== cursor)
+        : [...state.chosen, cursor].sort((left, right) => left - right);
+      return setPick({ ...state, chosen, cursor });
+    }
+    if (!inserts(key)) return;
+    editKey(key);
+    startTyping(wanted, options);
   };
 
   useKeyboard((key: KeyEvent) => {
@@ -398,15 +461,14 @@ export function RunView({
       }
       return fieldKey(key, asked);
     }
-    if (list !== undefined) {
-      return choiceKey(key, keyOf(gate as Attention), list.list, list.many, (chosen) => answerFrom(list.list, chosen));
-    }
+    if (list !== undefined && gate !== undefined) return gateKey(key, gate, list);
     typeKey(key);
   });
 
   usePaste((event) => {
-    if (ended || copying.isOpen() || asked !== undefined || list !== undefined) return;
+    if (ended || copying.isOpen() || asked !== undefined) return;
     editor.paste(decodePasteBytes(event.bytes));
+    if (list !== undefined && gate !== undefined) return startTyping(gate, list);
     bump();
   });
 
@@ -528,19 +590,24 @@ function Bottom({
     );
   }
   if (list !== undefined && gate !== undefined) {
-    const key = keyOf(gate);
+    const key = pickKey(gate, list);
+    const mine = pick.key === key;
+    const cursor = Math.min(mine ? pick.cursor : 0, list.list.length);
+    const keys =
+      cursor === list.list.length
+        ? "type an answer, enter sends, arrows go back to the options"
+        : list.many
+          ? "arrows move, space toggles, enter answers, the last row types an answer"
+          : "arrows move, enter answers, the last row types an answer";
     return (
       <Choices
         title={brief(gate.question)}
         choices={list.list.map((label) => ({ label }))}
-        cursor={pick.key === key ? pick.cursor : 0}
-        chosen={pick.key === key ? pick.chosen : []}
+        cursor={cursor}
+        chosen={mine ? pick.chosen : []}
         many={list.many}
-        keys={
-          list.many
-            ? "arrows move, space toggles, enter answers, esc types the answer"
-            : "arrows move, enter answers, esc types the answer"
-        }
+        keys={keys}
+        editor={editor}
         width={width}
       />
     );
@@ -563,6 +630,17 @@ function Bottom({
 function keyOf(one: Attention): string {
   if (one.kind === "gate") return `gate:${one.gate ?? one.question}`;
   return `credential:${one.name}:${one.phase}`;
+}
+
+/** The options belong to the key, so a re-ask with other labels starts clean. */
+function pickKey(one: Attention, options: { list: string[] }): string {
+  return `${keyOf(one)}:${JSON.stringify(options.list)}`;
+}
+
+/** The keys that put text in the editor, and so start an answer of their own. */
+function inserts(key: KeyEvent): boolean {
+  if (key.ctrl && key.name === "v") return true;
+  return printable(key) !== undefined;
 }
 
 function printable(key: KeyEvent): string | undefined {
