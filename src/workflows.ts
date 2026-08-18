@@ -1,15 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as catalogs from "./catalogs.ts";
 import { blocks } from "./layout.ts";
 import { load } from "./loader.ts";
 import { usage } from "./params.ts";
-import { homeWorkflows, projectWorkflows, type Scope, short } from "./paths.ts";
+import { type Scope, short } from "./paths.ts";
 
 export type Details = { description: string; params: string[] };
 export type Found = { name: string; scope: Scope; file: string } & Details;
 
 export function found(cwd: string): Omit<Found, keyof Details>[] {
-  return [...scan(projectWorkflows(cwd), "local"), ...scan(homeWorkflows(), "global")];
+  return foundIn(catalogs.roots(cwd));
+}
+
+export function foundIn(list: catalogs.Catalog[]): Omit<Found, keyof Details>[] {
+  return list.flatMap((catalog) => scan(catalogs.workflowsDir(catalog), catalog.scope));
 }
 
 export async function listed(cwd: string): Promise<Found[]> {
@@ -23,7 +28,7 @@ export function locate(name: string, cwd: string): string | undefined {
 }
 
 export function searched(cwd: string): string[] {
-  return [projectWorkflows(cwd), homeWorkflows()];
+  return catalogs.roots(cwd).map(catalogs.workflowsDir);
 }
 
 export function render(list: Found[], verbose = false): string {

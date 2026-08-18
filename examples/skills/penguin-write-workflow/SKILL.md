@@ -19,5 +19,5 @@ File rules:
 - The file default-exports `workflow({description, params, run})`. `description` is one non-empty line.
 - Module top level is side-effect-free: schema constants and pure helpers only.
 - Import `penguin`, `zod`, other workflow files, and shared TypeScript files by relative path. Nothing else.
-- Match the idiom of the files in `~/.penguin/workflows/`: result schemas at the top, pure helpers next, the workflow export last.
+- Match the idiom of the workflow files `pn list workflows --verbose` names: result schemas at the top, pure helpers next, the workflow export last.
 - Every skill name the file uses must resolve: reuse an installed name, or write the new skill in this same change.
