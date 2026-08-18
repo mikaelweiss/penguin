@@ -153,7 +153,10 @@ test("a run starts by naming the run and the agent adapter", (t) => {
 
   const bare = box.penguin("run", "./w.ts");
   assert.equal(bare.code, 0, bare.output);
-  assert.match(bare.stdout, /^run w-1 started, no agent adapter is installed$/m);
+  assert.match(
+    bare.stdout,
+    /^run w-1 started, no agent adapter is installed\. pn list adapters shows what penguin found\.$/m,
+  );
 
   box.setAgent("none");
   const watched = box.penguin("run", "./w.ts");
@@ -162,6 +165,36 @@ test("a run starts by naming the run and the agent adapter", (t) => {
   const background = box.penguin("run", "./w.ts", "--background");
   assert.equal(background.code, 0, background.output);
   assert.equal(background.stdout, "run w-3 started, agent fake\n");
+});
+
+test("a run with two agent adapters and no default names the conflict", (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", quickWorkflow);
+  box.setAgent("none");
+  box.setAgent("none", undefined, "other");
+
+  const started = box.penguin("run", "./w.ts");
+
+  assert.equal(started.code, 0, started.output);
+  assert.match(
+    started.stdout,
+    /^run w-1 started, 2 agent adapters are installed \(fake, other\)\. Write "agent <name>" to \S+defaults to choose one\.$/m,
+  );
+});
+
+test("a run whose default names an agent that is not installed says which one", (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", quickWorkflow);
+  box.setAgent("none");
+  box.setDefaults("agent opencode");
+
+  const started = box.penguin("run", "./w.ts");
+
+  assert.equal(started.code, 0, started.output);
+  assert.match(
+    started.stdout,
+    /^run w-1 started, no agent adapter named opencode\. Installed: fake\. Edit \S+defaults to choose one\.$/m,
+  );
 });
 
 test("ps lists the live runs as a table, and never a done one", async (t) => {

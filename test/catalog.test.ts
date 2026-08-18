@@ -426,7 +426,7 @@ test("a default naming an agent that is not installed fails the run and names th
   assert.equal(failed.code, 1, failed.output);
   assert.match(
     failed.stdout,
-    /no agent adapter named claude\. Installed: codex, cursor, fake, pi\./,
+    /no agent adapter named claude\. Installed: codex, cursor, fake, opencode, pi\./,
   );
   assert.ok(
     failed.stdout.includes(`Edit ${path.join(box.home, "defaults")} to choose one.`),
@@ -1393,7 +1393,7 @@ test("a failed codex turn keeps the thread id, so the next turn resumes", async 
 });
 
 test("the catalog adapters and tsconfig are ready to copy", () => {
-  for (const name of ["claude", "codex", "cursor", "git", "gh", "jira", "pi"]) {
+  for (const name of ["claude", "codex", "cursor", "git", "gh", "jira", "opencode", "pi"]) {
     assert.ok(
       fs.existsSync(path.join(examples, "adapters", `${name}.ts`)),
       name,

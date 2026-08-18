@@ -6,14 +6,16 @@ import test, { type TestContext } from "node:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode } from "react";
+import type { Found } from "../src/adapters.ts";
 import { Ask, Pick } from "../src/tui/ask.tsx";
+import { agentLabel, agentLine } from "../src/tui/attach.ts";
 import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
 import { Editor } from "../src/tui/editor.ts";
 import { controlFor } from "../src/tui/gate.ts";
 import { Choices } from "../src/tui/input.tsx";
 import { machineLine, strained } from "../src/tui/memory.ts";
 import { plainAttach } from "../src/tui/plain.ts";
-import { type Left, RunView } from "../src/tui/run-view.tsx";
+import { type Left, PANE, RunView } from "../src/tui/run-view.tsx";
 import type { ViewEvent } from "../src/types.ts";
 import { frameWith } from "./drive.tsx";
 
@@ -1485,4 +1487,26 @@ test("a long paste shows as one token and sends its whole text", () => {
   editor.paste(pasted);
   assert.match(editor.shown.text, /^\[pasted #1, 7 lines\]$/);
   assert.equal(editor.take(), pasted);
+});
+
+test("every agent header label fits the pane the run view cuts it to", () => {
+  const one = (name: string): Found => ({
+    role: "agent",
+    name,
+    description: "",
+    scope: "global",
+    file: `/adapters/${name}.ts`,
+    definition: { role: "agent", name, description: "", build: () => ({}) },
+  });
+  const both = [one("claude"), one("opencode")];
+
+  assert.equal(agentLabel([one("claude")]), "agent claude");
+  assert.equal(agentLabel([]), "no agent adapter");
+  assert.equal(agentLabel(both), "agent: choose one");
+
+  const room = PANE - " w-1  ".length;
+  for (const found of [[], [one("claude")], both]) {
+    assert.ok(agentLabel(found).length <= room, agentLabel(found));
+  }
+  assert.ok(agentLine(both).length > room, "the full line is what the pane cannot hold");
 });

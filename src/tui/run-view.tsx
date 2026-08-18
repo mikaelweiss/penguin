@@ -22,7 +22,7 @@ import { Feed } from "./watch.ts";
 const WATCHDOG = 500;
 const SPIN = 200;
 const SAMPLE = 1000;
-const PANE = 34;
+export const PANE = 34;
 
 export type Left = { back: boolean; code: number; note?: string };
 
