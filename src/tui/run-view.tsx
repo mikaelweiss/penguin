@@ -13,7 +13,7 @@ import { deliver, provide } from "./inbox.ts";
 import { Choices, type Copying, CopyList, Fields, InputBar, useCopy } from "./input.tsx";
 import type { Attention } from "./projection.ts";
 import { brief, statusLine } from "./status.ts";
-import { cut } from "./text.ts";
+import { cut, fit } from "./text.ts";
 import { ink } from "./theme.ts";
 import { Transcript } from "./transcript.tsx";
 import { type Selection, Tree, treeKeys, treeRows } from "./tree.tsx";
@@ -145,6 +145,9 @@ export function RunView({
   const entries =
     selected.kind === "session" ? projection.sessionTranscript(selected.id) : projection.transcript(selected.id);
   const width = Math.max(20, size.width - PANE - 3);
+  const control = asked !== undefined || list !== undefined;
+  const keys = !ended && place === "tree" && !control ? treeKeys(PANE) : [];
+  const room = Math.max(1, size.height - 2 - keys.length);
 
   const leave = (left: Left): void => {
     onLeave(left);
@@ -498,11 +501,11 @@ export function RunView({
             {cut(` ${name}  ${agent}`, PANE)}
           </text>
           <box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, minHeight: 1, overflow: "hidden" }}>
-            <Tree rows={rows} selected={selected} frame={frame} width={PANE - 1} />
+            <Tree rows={rows} selected={selected} frame={frame} width={PANE - 1} height={room} />
           </box>
-          {!ended && place === "tree" ? (
+          {keys.length > 0 ? (
             <box style={{ flexDirection: "column", flexShrink: 0 }}>
-              {treeKeys(PANE).map((line) => (
+              {keys.map((line) => (
                 <text key={line} fg={ink.faint}>
                   {line}
                 </text>
@@ -643,8 +646,9 @@ function Bottom({
   const hints: string[] = [];
   if (note !== "") hints.push(note);
   if (!blocked) hints.push("the run is busy: this message queues");
-  hints.push(focused ? "enter sends, esc moves to the tree, ctrl-u clears, ctrl-v pastes an image" : "esc types");
-  return <InputBar editor={editor} prompt={`${prompt} >`} hint={hints.join("  ")} focused={focused} width={width} />;
+  if (focused) hints.push("enter sends", "esc to the tree", "ctrl-u clears", "ctrl-v pastes an image");
+  else hints.push("esc types");
+  return <InputBar editor={editor} prompt={`${prompt} >`} hint={fit(hints, width)} focused={focused} width={width} />;
 }
 
 function keyOf(one: Attention): string {

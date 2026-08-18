@@ -66,19 +66,29 @@ export function Tree({
   selected,
   frame,
   width,
+  height,
 }: {
   rows: TreeRow[];
   selected: Selection;
   frame: number;
   width: number;
+  height: number;
 }): ReactNode {
   return (
     <box style={{ flexDirection: "column" }}>
-      {rows.map((row) => (
+      {inView(rows, selected, height).map((row) => (
         <TreeLine key={row.key} row={row} selected={isSelected(row, selected)} frame={frame} width={width} />
       ))}
     </box>
   );
+}
+
+/** The rows the pane has room for, the selected row among them. */
+function inView(rows: TreeRow[], selected: Selection, height: number): TreeRow[] {
+  if (rows.length <= height) return rows;
+  const at = Math.max(0, rows.findIndex((row) => isSelected(row, selected)));
+  const start = Math.max(0, Math.min(rows.length - height, at - Math.floor(height / 2)));
+  return rows.slice(start, start + height);
 }
 
 export function isSelected(row: TreeRow, selected: Selection): boolean {

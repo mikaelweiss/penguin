@@ -1349,6 +1349,36 @@ test("esc closes the copy list and copies nothing", async (t) => {
   }
 });
 
+test("the bar names its keys whole at an ordinary width", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "state", state: "blocked", detail: "what next?" },
+    ],
+    { live: true },
+  );
+  for (const [columns, named] of [
+    [80, ["enter sends", "esc to the tree", "ctrl-u clears"]],
+    [120, ["enter sends", "esc to the tree", "ctrl-u clears", "ctrl-v pastes an image"]],
+  ] as [number, string[]][]) {
+    const setup = await screen(
+      <RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />,
+      columns,
+    );
+    try {
+      const frame = await frameWith(setup, (text) => text.includes("to run >"));
+      const row = frame.split("\n").find((one) => one.includes("enter sends"));
+      assert.ok(row !== undefined, `${columns} columns: the bar named no key`);
+      for (const key of named) assert.ok(row.includes(key), `${columns} columns: the bar dropped ${key}`);
+      assert.ok(!row.includes("…"), `${columns} columns: the bar cut a key name in half`);
+    } finally {
+      setup.renderer.destroy();
+    }
+  }
+});
+
 test("the bar keeps the queue note beside its key hints", async (t) => {
   const box = sandbox(t);
   box.run(
@@ -1359,7 +1389,7 @@ test("the bar keeps the queue note beside its key hints", async (t) => {
     ],
     { live: true },
   );
-  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />, 80);
   try {
     const typing = await frameWith(setup, (text) => text.includes("to run >"));
     assert.match(typing, /the run is busy: this message queues/, "the key hints pushed the queue note off the row");
@@ -1887,6 +1917,71 @@ test("esc on a gate list drops the gate and returns to typing", async (t) => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0]?.["text"], "later");
     assert.equal(sent[0]?.["gate"], undefined);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the pane names no tree key while a control owns the keyboard", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "review-1",
+    [
+      { type: "run", phase: "started", run: "review-1" },
+      { type: "activity", phase: "start", id: "a1", label: "review round 1" },
+      {
+        type: "gate",
+        phase: "asked",
+        id: "g-1",
+        question: "Ship it?",
+        activity: "a1",
+        schema: { type: "string", enum: ["approve", "reject"] },
+      },
+      { type: "state", state: "blocked", detail: "Ship it?" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("review round 1"));
+    await toTree(setup);
+    await press(setup, ["ARROW_DOWN"]);
+    const asking = await frameWith(setup, (text) => text.includes("(o) approve"));
+    assert.ok(!asking.includes("arrows move, left and right fold"), "the pane named the fold keys under a control");
+    assert.ok(!asking.includes("q goes to the dashboard"), "the pane named q while the control took every key");
+    await escape(setup);
+    await frameWith(setup, (text) => text.includes("to run >"));
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the tree scrolls to keep the selection in the pane", async (t) => {
+  const box = sandbox(t);
+  const many: ViewEvent[] = Array.from({ length: 30 }, (_, index) => ({
+    type: "activity",
+    phase: "start",
+    id: `a${index}`,
+    label: `task ${index}`,
+  }));
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      ...many,
+      { type: "state", state: "running", detail: "drafting" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("task 0"));
+    await toTree(setup);
+    for (let step = 0; step < 25; step++) await press(setup, ["ARROW_DOWN"]);
+    const frame = await frameWith(setup, (text) => text.includes("task 24"));
+    const row = frame.split("\n").find((one) => one.includes("task 24"));
+    assert.ok(row?.startsWith(">"), `the selected row lost its marker: ${row}`);
+    assert.ok(!frame.includes("task 0 "), "the pane never scrolled past its first rows");
   } finally {
     setup.renderer.destroy();
   }

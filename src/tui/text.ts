@@ -31,6 +31,17 @@ export function cut(text: string, columns: number): string {
   return `${out}…${styled ? RESET : ""}`;
 }
 
+/** The parts that fit one row, two spaces apart. The first part that does not fit ends the row. */
+export function fit(parts: string[], columns: number): string {
+  let row = "";
+  for (const part of parts) {
+    const next = row === "" ? part : `${row}  ${part}`;
+    if (wide(next) > columns) break;
+    row = next;
+  }
+  return row === "" ? cut(parts[0] ?? "", columns) : row;
+}
+
 /** One line of markdown as the words alone: no syntax, no styling, no runs of space. */
 export function plain(line: string): string {
   return line
