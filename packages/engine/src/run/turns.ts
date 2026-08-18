@@ -54,9 +54,12 @@ type Attempt =
 
 /** Agent sessions and the turn loop: skill, prompt, retry once, then gate. */
 export class Turns {
+  private run: LiveRun;
   private named = new Map<string, number>();
 
-  constructor(private readonly run: LiveRun) {}
+  constructor(run: LiveRun) {
+    this.run = run;
+  }
 
   session(options: AgentOptions): AgentSession {
     const { use, cwd, name, ...rest } = options;

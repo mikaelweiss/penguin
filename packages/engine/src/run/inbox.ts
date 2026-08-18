@@ -21,13 +21,16 @@ type Reader = {
 type Want = { name: string; label: string; resolve(): void };
 
 export class Inbox {
+  private run: LiveRun;
   private tail: Tail | undefined;
   private gateCounter = 0;
   private readers: Reader[] = [];
   private queued: Message[] = [];
   private wants: Want[] = [];
 
-  constructor(private readonly run: LiveRun) {}
+  constructor(run: LiveRun) {
+    this.run = run;
+  }
 
   open(dir: string): void {
     this.tail = new Tail(inboxPath(dir), (line) => this.ingest(line));

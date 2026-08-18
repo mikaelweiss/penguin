@@ -10,6 +10,18 @@ export {
 } from "../paths.ts";
 
 export * as catalogs from "./catalogs.ts";
+export {
+  adaptersDir,
+  homeCatalog,
+  projectCatalog,
+  roots,
+  skillsDir,
+  starterCatalog,
+  writableCatalog,
+  type Catalog,
+  type CatalogScope,
+  type WritableCatalog,
+} from "./catalogs.ts";
 
 export {
     defaults,
