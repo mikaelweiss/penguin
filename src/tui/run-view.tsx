@@ -296,12 +296,11 @@ export function RunView({
     }
   };
 
-  /** True when the key only changed the text. */
-  const editKey = (key: KeyEvent): boolean => {
+  const editKey = (key: KeyEvent): void => {
     if (key.ctrl) {
       if (key.name === "v") {
         void takeImage();
-        return true;
+        return;
       }
       if (key.name === "a") editor.head();
       else if (key.name === "e") editor.tail();
@@ -310,17 +309,17 @@ export function RunView({
       else if (key.name === "w") editor.killWord();
       else if (key.name === "left" || key.name === "b") editor.wordLeft();
       else if (key.name === "right" || key.name === "f") editor.wordRight();
-      else return false;
+      else return;
       bump();
-      return true;
+      return;
     }
     if (key.meta) {
       if (key.name === "b" || key.name === "left") editor.wordLeft();
       else if (key.name === "f" || key.name === "right") editor.wordRight();
       else if (key.name === "backspace") editor.killWord();
-      else return false;
+      else return;
       bump();
-      return true;
+      return;
     }
     if (key.name === "backspace") editor.backspace();
     else if (key.name === "delete") editor.delete();
@@ -328,11 +327,10 @@ export function RunView({
     else if (key.name === "end") editor.tail();
     else {
       const typed = printable(key);
-      if (typed === undefined) return false;
+      if (typed === undefined) return;
       editor.insert(typed);
     }
     bump();
-    return true;
   };
 
   const typeKey = (key: KeyEvent): void => {
