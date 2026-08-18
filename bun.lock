@@ -17,7 +17,6 @@
     },
     "apps/cli": {
       "name": "@mikaelweiss/penguin",
-      "version": "0.0.6",
       "bin": {
         "pn": "./src/cli.ts",
       },
@@ -31,14 +30,12 @@
     },
     "packages/engine": {
       "name": "@mikaelweiss/penguin-engine",
-      "version": "0.0.6",
       "dependencies": {
         "zod": "^4.4.3",
       },
     },
     "packages/viewer": {
       "name": "@mikaelweiss/penguin-viewer",
-      "version": "0.0.6",
       "dependencies": {
         "@mikaelweiss/penguin-engine": "workspace:*",
       },

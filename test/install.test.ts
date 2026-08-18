@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { sandbox } from "./helpers.ts";
 
-test("a fresh install enables the starter catalog and does not copy it", (t) => {
+test("a fresh install enables the starter catalog and writes nothing of the user's own", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });
 
