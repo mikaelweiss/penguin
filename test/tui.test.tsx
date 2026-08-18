@@ -10,6 +10,7 @@ import { Ask, Pick } from "../src/tui/ask.tsx";
 import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
 import { Editor } from "../src/tui/editor.ts";
 import { controlFor } from "../src/tui/gate.ts";
+import { machineLine, strained } from "../src/tui/memory.ts";
 import { plainAttach } from "../src/tui/plain.ts";
 import { type Left, RunView } from "../src/tui/run-view.tsx";
 import type { ViewEvent } from "../src/types.ts";
@@ -125,6 +126,30 @@ test("the dashboard lists the live runs, and d reveals the done ones", async (t)
   } finally {
     setup.renderer.destroy();
   }
+});
+
+test("the runs header carries what the machine has left", async (t) => {
+  const box = sandbox(t);
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    const frame = await frameWith(setup, (text) => text.includes("ram "));
+    const header = frame.split("\n").find((row) => row.includes("ram ")) ?? "";
+    assert.match(header, /^ runs {2,}ram \d+\/\d+ GB {2}load \d+\.\d\/\d+ *$/);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the readout warns only when another run would oversubscribe the machine", () => {
+  const total = 32 * 1024 ** 3;
+  assert.equal(strained({ used: total / 2, total, load: 2, cores: 10 }), false);
+  assert.equal(strained({ used: total / 2, total, load: 10, cores: 10 }), true);
+  assert.equal(strained({ used: total * 0.95, total, load: 1, cores: 10 }), true);
+  assert.equal(
+    machineLine({ used: 20 * 1024 ** 3, total, load: 8.53, cores: 10 }),
+    "ram 20/32 GB  load 8.5/10",
+  );
 });
 
 test("a run whose process died lists as done", async (t) => {

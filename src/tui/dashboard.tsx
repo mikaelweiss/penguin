@@ -2,6 +2,7 @@ import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import { Launcher } from "./launcher.tsx";
+import { machine, machineLine, type Machine, strained } from "./memory.ts";
 import type { Attention } from "./projection.ts";
 import { cut } from "./text.ts";
 import { glyph, ink, stateColor } from "./theme.ts";
@@ -31,6 +32,7 @@ export function Dashboard({
   const [cursor, setCursor] = useState(0);
   const [frame, setFrame] = useState(0);
   const [showDone, setShowDone] = useState(false);
+  const [host, setHost] = useState<Machine | undefined>(undefined);
   const [launching, setLaunching] = useState(false);
 
   const live = rows.filter((row) => row.live);
@@ -41,7 +43,9 @@ export function Dashboard({
     const scan = (): void => {
       const found = runRows();
       setRows((was) => (same(was, found) ? was : found));
+      void machine().then(setHost);
     };
+    scan();
     const timer = setInterval(scan, RESCAN);
     timer.unref?.();
     const spin = setInterval(() => setFrame((count) => count + 1), SPIN);
@@ -132,7 +136,7 @@ export function Dashboard({
   return (
     <box style={{ flexDirection: "column", width: size.width, height: size.height }}>
       <box style={{ flexDirection: "column", flexGrow: 1, border: ["bottom"], borderColor: ink.border }}>
-        <text fg={ink.dim}>{" runs"}</text>
+        <Header host={host} width={size.width} />
         {live.length === 0 ? <text fg={ink.faint}>{"  no live run. pn run <workflow> starts one"}</text> : null}
         {live.map((row, index) => (
           <RunLine
@@ -177,6 +181,20 @@ export function Dashboard({
         </text>
       </box>
     </box>
+  );
+}
+
+/** The section title, and what the machine has left on the right of the same line. */
+function Header({ host, width }: { host: Machine | undefined; width: number }): ReactNode {
+  const title = " runs";
+  const readout = host === undefined ? "" : machineLine(host);
+  const gap = width - title.length - readout.length - 1;
+  if (readout === "" || gap < 2) return <text fg={ink.dim}>{title}</text>;
+  return (
+    <text>
+      <span fg={ink.dim}>{`${title}${" ".repeat(gap)}`}</span>
+      <span fg={host !== undefined && strained(host) ? ink.warn : ink.faint}>{readout}</span>
+    </text>
   );
 }
 
