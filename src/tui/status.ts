@@ -10,7 +10,7 @@ export type Status = {
   facts: Record<string, string | number | boolean>;
 };
 
-/** The one line under the transcript: what the run is doing, and its live numbers. */
+/** The one line on the last row of the screen: what the run is doing, and its live numbers. */
 export function statusLine(status: Status): string {
   const parts: string[] = [];
   if (status.state !== "") {

@@ -496,24 +496,24 @@ export function RunView({
         </box>
         <box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 1 }}>
           <Transcript entries={entries} live={!ended} width={width} />
+          <Bottom
+            ended={ended}
+            asked={asked}
+            form={form}
+            gate={gate}
+            list={list}
+            pick={pick}
+            copy={copying}
+            editor={editor}
+            selected={selected}
+            sessionName={selected.kind === "session" ? (projection.sessionName(selected.id) ?? selected.id) : undefined}
+            blocked={state.state === "blocked"}
+            note={note}
+            width={width}
+          />
         </box>
       </box>
       <text fg={ink.dim}>{cut(status === "" ? " " : status, size.width)}</text>
-      <Bottom
-        ended={ended}
-        asked={asked}
-        form={form}
-        gate={gate}
-        list={list}
-        pick={pick}
-        copy={copying}
-        editor={editor}
-        selected={selected}
-        sessionName={selected.kind === "session" ? (projection.sessionName(selected.id) ?? selected.id) : undefined}
-        blocked={state.state === "blocked"}
-        note={note}
-        width={size.width}
-      />
     </box>
   );
 }
@@ -552,9 +552,11 @@ function Bottom({
   }
   if (ended) {
     return (
-      <text fg={ink.faint}>
-        {cut(note === "" ? "this run is done. y copies the directory, q goes to the dashboard" : note, width)}
-      </text>
+      <box style={{ flexDirection: "column", flexShrink: 0 }}>
+        <text fg={ink.faint}>
+          {cut(note === "" ? "this run is done. y copies the directory, q goes to the dashboard" : note, width)}
+        </text>
+      </box>
     );
   }
   if (asked !== undefined) {

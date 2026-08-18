@@ -154,7 +154,7 @@ Workflow code writes none of this. `ctx.jira.issue.get("ABC-123")` is the whole 
 
 A run is in one of four states. **running**: a step is executing. **blocked**: the run waits on you, at a gate or at `ctx.messages.next()`. **idle**: the run waits on the outside world. **done**: the run function returned, you stopped it, or an error ended it. Done is final. To act again, start a new run.
 
-In a run view, the run's tree fills the left pane: each activity, session, and sub-workflow call, with a glyph for its state. The right pane shows the transcript of whatever you select. The input bar at the bottom names its target:
+In a run view, the run's tree fills the left pane: each activity, session, and sub-workflow call, with a glyph for its state. The right pane shows the transcript of whatever you select. The input bar sits under the transcript, at the same width, and names its target:
 
 - Select an open gate and the bar takes your answer, addressed to that gate, so ten parallel questions never collide. An enum gate draws a list instead.
 - Select a session and the bar sends to it.

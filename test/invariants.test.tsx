@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { allocateRun, discardRun, finishRun, readRun } from "../src/create.ts";
 import { rows } from "../src/runs.ts";
-import { type Left, RunView } from "../src/tui/run-view.tsx";
+import { type Left, PANE, RunView } from "../src/tui/run-view.tsx";
 import { frameWith, homed, paste, press, screen } from "./drive.tsx";
 import { type Event, sandbox, waitFor } from "./helpers.ts";
 
@@ -835,12 +835,15 @@ test("invariant 16: the status line holds one line, however long the question", 
   homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await frameWith(setup, (text) => text.includes("blocked: Blockers"));
-    const status = frame.split("\n").filter((row) => row.includes("blocked: Blockers"));
+    const frame = await frameWith(setup, (text) => text.includes("blocked: Blockers") && text.includes(SENTINEL));
+    const screenRows = frame.trimEnd().split("\n");
+    const status = screenRows.filter((row) => row.includes("blocked: Blockers"));
     assert.equal(status.length, 1, "the status prints once, one line");
     assert.ok((status[0] ?? "").length <= 100, "the status stays inside the width");
     assert.match(status[0] ?? "", /round 1/, "the status carries the facts");
     assert.doesNotMatch(status[0] ?? "", new RegExp(SENTINEL), "the status cuts the question, never wraps it");
+    assert.match(screenRows.at(-1) ?? "", /blocked: Blockers/, "the status is the last row of the screen");
+    assert.equal((screenRows.at(-1) ?? "").indexOf("blocked: Blockers"), 0, "the status starts at column 0");
   } finally {
     setup.renderer.destroy();
   }
@@ -848,7 +851,7 @@ test("invariant 16: the status line holds one line, however long the question", 
   await box.waitForEnd("w-1");
 });
 
-test("invariant 16: the input bar holds the bottom of the screen", async (t) => {
+test("invariant 16: the input bar holds the bottom of the output column", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", watchingWorkflow);
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
@@ -857,11 +860,20 @@ test("invariant 16: the input bar holds the bottom of the screen", async (t) => 
   homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await frameWith(setup, (text) => text.includes("answer: Blockers"));
+    const frame = await frameWith(
+      setup,
+      (text) => text.includes("answer: Blockers") && text.includes("── gate"),
+    );
     const rows = frame.trimEnd().split("\n");
-    assert.match(rows.at(-1) ?? "", /enter sends|type to send/, "the input hint is the last row");
-    assert.match(rows.at(-2) ?? "", /answer: Blockers/, "the input bar sits above it");
-    assert.match(rows.at(-3) ?? "", /blocked: Blockers/, "the status sits above the input");
+    assert.match(rows.at(-1) ?? "", /blocked: Blockers/, "the status is the last row");
+    assert.match(rows.at(-2) ?? "", /arrows move|enter sends/, "the input hint sits above the status");
+    const bar = rows.at(-3) ?? "";
+    assert.match(bar, /answer: Blockers/, "the input bar sits above the hint");
+
+    const column = (rows.find((row) => row.includes("── gate")) ?? "").indexOf("─");
+    assert.ok(column > PANE, "the transcript starts right of the tree pane");
+    assert.equal(bar.indexOf("answer: Blockers"), column, "the input bar starts at the transcript's left edge");
+    assert.equal(bar.slice(0, column).trim().length <= 1, true, "only the tree border sits left of the bar");
   } finally {
     setup.renderer.destroy();
   }

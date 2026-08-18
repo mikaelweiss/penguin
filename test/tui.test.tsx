@@ -186,6 +186,13 @@ function optionGate(schema: Record<string, unknown>): ViewEvent[] {
 const ONE_OF = { type: "string", enum: ["approve", "reject"] };
 const OPEN_OF = { anyOf: [{ type: "string", enum: ["approve", "revise"] }, { type: "string" }] };
 
+/** Where a control line starts on the screen, so a test can place it against the tree pane. */
+function column(frame: string, pattern: RegExp): number {
+  const row = frame.split("\n").find((line) => pattern.test(line));
+  assert.ok(row !== undefined, `no row matched ${pattern}`);
+  return row.search(pattern);
+}
+
 const nothing = (): void => {};
 
 test("the dashboard lists the live runs, and d reveals the done ones", async (t) => {
@@ -453,7 +460,8 @@ test("an enum gate draws a list, and the choice sends one gate-addressed message
   );
   const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
-    await frameWith(setup, (text) => text.includes("approve") && text.includes("reject"));
+    const frame = await frameWith(setup, (text) => text.includes("approve") && text.includes("reject"));
+    assert.ok(column(frame, /[(][ o][)] approve/) > PANE, "the choice list draws in the output column");
     await press(setup, ["ARROW_DOWN", "RETURN"]);
     assert.deepEqual(inbox(dir), [
       { at: inbox(dir)[0]?.["at"], text: "reject", gate: "g-1" },
@@ -756,7 +764,8 @@ test("a credential goes to the store, and never to the screen or the inbox", asy
   );
   const setup = await screen(<RunView name="ticket-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
-    await frameWith(setup, (text) => text.includes("Jira needs a credential"));
+    const asking = await frameWith(setup, (text) => text.includes("your Jira site"));
+    assert.ok(column(asking, /your Jira site/) > PANE, "the credential form draws in the output column");
     await type(setup, "acme.atlassian.net");
     await press(setup, ["RETURN"]);
     await frameWith(setup, (text) => text.includes("the API token"));
@@ -791,6 +800,7 @@ test("a done run opens read-only, with no input bar", async (t) => {
   try {
     const frame = await frameWith(setup, (text) => text.includes("this run is done"));
     assert.ok(!frame.includes("to run >"), "a done run offered an input bar");
+    assert.ok(column(frame, /this run is done/) > PANE, "the read-only line draws in the output column");
   } finally {
     setup.renderer.destroy();
   }
