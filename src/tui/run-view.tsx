@@ -16,7 +16,7 @@ import { brief, statusLine } from "./status.ts";
 import { cut } from "./text.ts";
 import { ink } from "./theme.ts";
 import { Transcript } from "./transcript.tsx";
-import { type Selection, Tree, treeRows } from "./tree.tsx";
+import { type Selection, Tree, treeKeys, treeRows } from "./tree.tsx";
 import { Feed } from "./watch.ts";
 
 const WATCHDOG = 500;
@@ -59,6 +59,7 @@ export function RunView({
   const renderer = useRenderer();
   const [editor] = useState(() => new Editor());
   const [selected, setSelected] = useState<Selection>({ kind: "node", id: node ?? "root" });
+  const [focus, setFocus] = useState<"input" | "tree">("input");
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
   const held = useRef<{ pick: Pick; form: Form }>({ pick: NO_PICK, form: NO_FORM });
@@ -132,6 +133,7 @@ export function RunView({
 
   const phase = projection.phase();
   const ended = phase !== "live" || !alive;
+  const place = ended ? "tree" : focus;
   const rows = treeRows(projection, closed);
   const nodeId = selected.kind === "node" ? selected.id : projection.sessionNode(selected.id);
   const attention = projection.attention();
@@ -296,6 +298,17 @@ export function RunView({
     }
   };
 
+  const treeKey = (key: KeyEvent): void => {
+    if (key.name === "q") return leave({ back: true, code: 0 });
+    if (key.name === "escape") return setFocus("input");
+    if (key.name === "up" || key.name === "k") return move(-1);
+    if (key.name === "down" || key.name === "j") return move(1);
+    if (key.name === "left" || key.name === "h") return fold(false);
+    if (key.name === "right" || key.name === "l") return fold(true);
+    if (key.name === "y") return startCopy();
+    if (key.name === "return" || key.name === "enter") return fold(closed.has(selected.id));
+  };
+
   const editKey = (key: KeyEvent): void => {
     if (key.ctrl) {
       if (key.name === "v") {
@@ -336,34 +349,21 @@ export function RunView({
   const typeKey = (key: KeyEvent): void => {
     if (!key.ctrl && !key.meta) {
       if (key.name === "return" || key.name === "enter") {
-        if (editor.empty) return fold(closed.has(selected.id));
         send(editor.take());
         return bump();
       }
-      if (key.name === "escape") {
-        editor.clear();
+      if (key.name === "escape") return setFocus("tree");
+      if (key.name === "left") {
+        editor.left();
         return bump();
       }
-      if (!editor.empty) {
-        if (key.name === "left") {
-          editor.left();
-          return bump();
-        }
-        if (key.name === "right") {
-          editor.right();
-          return bump();
-        }
-        if (key.name === "up" || key.name === "down") {
-          editor.recall(key.name === "up" ? -1 : 1);
-          return bump();
-        }
-      } else {
-        if (key.name === "up") return move(-1);
-        if (key.name === "down") return move(1);
-        if (key.name === "left") return fold(false);
-        if (key.name === "right") return fold(true);
-        if (key.name === "y") return startCopy();
-        if (key.name === "q") return leave({ back: true, code: 0 });
+      if (key.name === "right") {
+        editor.right();
+        return bump();
+      }
+      if (key.name === "up" || key.name === "down") {
+        editor.recall(key.name === "up" ? -1 : 1);
+        return bump();
       }
     }
     editKey(key);
@@ -434,38 +434,37 @@ export function RunView({
     if (key.eventType === "release") return;
     if (key.ctrl && key.name === "c") return stopRun();
     if (copying.isOpen()) return copying.key(key);
-    if (ended) {
-      if (key.name === "q") leave({ back: true, code: 0 });
-      else if (key.name === "y") startCopy();
-      else if (key.name === "up" || key.name === "k") move(-1);
-      else if (key.name === "down" || key.name === "j") move(1);
-      else if (key.name === "left" || key.name === "h") fold(false);
-      else if (key.name === "right" || key.name === "l") fold(true);
-      return;
-    }
-    if (asked !== undefined) {
-      if (asked.phase === "rejected" && !(form.key === keyOf(asked) && form.retype)) {
-        const list = fixes(asked.name);
-        return choiceKey(
-          key,
-          keyOf(asked),
-          list.map((one) => one.label),
-          false,
-          (chosen) => {
-            const fix = list[chosen[0] ?? 0]?.fix;
-            if (fix !== undefined) void applyFix(fix, asked);
-          },
-        );
+    if (!ended) {
+      if (asked !== undefined) {
+        if (asked.phase === "rejected" && !(form.key === keyOf(asked) && form.retype)) {
+          const list = fixes(asked.name);
+          return choiceKey(
+            key,
+            keyOf(asked),
+            list.map((one) => one.label),
+            false,
+            (chosen) => {
+              const fix = list[chosen[0] ?? 0]?.fix;
+              if (fix !== undefined) void applyFix(fix, asked);
+            },
+          );
+        }
+        return fieldKey(key, asked);
       }
-      return fieldKey(key, asked);
+      if (list !== undefined && gate !== undefined) return gateKey(key, gate, list);
+      if (key.ctrl && key.name === "v") {
+        setFocus("input");
+        return void takeImage();
+      }
     }
-    if (list !== undefined && gate !== undefined) return gateKey(key, gate, list);
-    typeKey(key);
+    if (place === "input") return typeKey(key);
+    treeKey(key);
   });
 
   usePaste((event) => {
     if (ended || copying.isOpen() || asked !== undefined) return;
     editor.paste(decodePasteBytes(event.bytes));
+    setFocus("input");
     if (list !== undefined && gate !== undefined) return startTyping(gate, list);
     bump();
   });
@@ -492,8 +491,21 @@ export function RunView({
             overflow: "hidden",
           }}
         >
-          <text fg={ink.dim}>{cut(` ${name}  ${agent}`, PANE)}</text>
-          <Tree rows={rows} selected={selected} frame={frame} width={PANE - 1} />
+          <text fg={ink.dim} style={{ flexShrink: 0 }}>
+            {cut(` ${name}  ${agent}`, PANE)}
+          </text>
+          <box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, minHeight: 1, overflow: "hidden" }}>
+            <Tree rows={rows} selected={selected} frame={frame} width={PANE - 1} />
+          </box>
+          {!ended && place === "tree" ? (
+            <box style={{ flexDirection: "column", flexShrink: 0 }}>
+              {treeKeys(PANE).map((line) => (
+                <text key={line} fg={ink.faint}>
+                  {line}
+                </text>
+              ))}
+            </box>
+          ) : null}
         </box>
         <box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 1, overflow: "hidden" }}>
           <Transcript entries={entries} live={!ended} width={width} />
@@ -506,6 +518,7 @@ export function RunView({
             pick={pick}
             copy={copying}
             editor={editor}
+            focused={place === "input"}
             selected={selected}
             sessionName={selected.kind === "session" ? (projection.sessionName(selected.id) ?? selected.id) : undefined}
             blocked={state.state === "blocked"}
@@ -514,7 +527,9 @@ export function RunView({
           />
         </box>
       </box>
-      <text fg={ink.dim}>{cut(status === "" ? " " : status, size.width)}</text>
+      <text fg={ink.dim} style={{ flexShrink: 0 }}>
+        {cut(status === "" ? " " : status, size.width)}
+      </text>
     </box>
   );
 }
@@ -528,6 +543,7 @@ function Bottom({
   pick,
   copy,
   editor,
+  focused,
   selected,
   sessionName,
   blocked,
@@ -542,6 +558,7 @@ function Bottom({
   pick: Pick;
   copy: Copying;
   editor: Editor;
+  focused: boolean;
   selected: Selection;
   sessionName: string | undefined;
   blocked: boolean;
@@ -622,11 +639,9 @@ function Bottom({
         : "to run";
   const hints: string[] = [];
   if (note !== "") hints.push(note);
-  if (editor.empty)
-    hints.push("arrows move, enter opens, y copies the directory, q goes to the dashboard, type to send");
-  else hints.push("enter sends, esc clears, ctrl-v pastes an image");
+  hints.push(focused ? "enter sends, esc moves to the tree, ctrl-u clears, ctrl-v pastes an image" : "esc types");
   if (!blocked) hints.push("the run is busy: this message queues");
-  return <InputBar editor={editor} prompt={`${prompt} >`} hint={hints.join("  ")} width={width} />;
+  return <InputBar editor={editor} prompt={`${prompt} >`} hint={hints.join("  ")} focused={focused} width={width} />;
 }
 
 function keyOf(one: Attention): string {

@@ -328,6 +328,7 @@ function Bottom({
           editor={editor}
           prompt=">"
           hint={warn === "" ? "esc cancels, ctrl-u clears the line" : warn}
+          focused={true}
           width={width}
         />
       </box>

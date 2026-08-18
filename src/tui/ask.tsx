@@ -131,7 +131,7 @@ export function Ask({
       {(options.notes ?? []).map((note) => (
         <text key={note} fg={ink.dim}>{`  ${note}`}</text>
       ))}
-      <InputBar editor={editor} prompt=">" hint={hint} width={size.width} />
+      <InputBar editor={editor} prompt=">" hint={hint} focused={true} width={size.width} />
     </box>
   );
 }

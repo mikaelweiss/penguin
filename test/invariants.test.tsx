@@ -104,6 +104,8 @@ test("invariant 3: q goes to the dashboard and the run continues", async (t) => 
   try {
     const shown = await frameWith(setup, (text) => text.includes("keep going?"));
     assert.match(shown, /keep going\?/);
+    await press(setup, ["ESCAPE"]);
+    await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
     await press(setup, ["q"]);
   } finally {
     setup.renderer.destroy();

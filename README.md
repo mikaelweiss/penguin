@@ -159,8 +159,9 @@ In a run view, the run's tree fills the left pane: each activity, session, and s
 - Select an open gate and the bar takes your answer, addressed to that gate, so ten parallel questions never collide. An enum gate draws a list instead.
 - Select a session and the bar sends to it.
 - Select anything else and the bar sends to the run. When the run is not blocked, the bar says the message queues.
-- With the input empty, arrows move through the tree. `q` goes to the dashboard.
-- `y` copies the directory the selected node runs in. A node with several directories draws a list to pick one.
+- The view opens with the input focused, and every key you type goes to the bar. `esc` moves focus to the tree and keeps your draft.
+- With the tree focused, arrows move the selection and left and right fold a node. `esc` returns you to the bar. `q` goes to the dashboard.
+- With the tree focused, `y` copies the directory the selected node runs in. A node with several directories draws a list to pick one.
 - `Ctrl-C` stops the run. penguin kills the steps in flight and records the stop.
 
 Closing the terminal never touches the run.

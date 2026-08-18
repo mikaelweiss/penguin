@@ -60,16 +60,18 @@ export function InputBar({
   editor,
   prompt,
   hint,
+  focused,
   width,
 }: {
   editor: Editor;
   prompt: string;
   hint: string;
+  focused: boolean;
   width: number;
 }): ReactNode {
   return (
     <box style={{ flexDirection: "column", flexShrink: 0 }}>
-      <EditorLine editor={editor} prompt={prompt} focused={true} />
+      <EditorLine editor={editor} prompt={prompt} focused={focused} />
       <text fg={ink.faint}>{cut(hint, width)}</text>
     </box>
   );

@@ -54,6 +54,13 @@ export function treeRows(projection: Projection, closed: Set<string>): TreeRow[]
   return rows;
 }
 
+/** The keys the tree answers to, drawn at the foot of the pane while it holds focus. */
+export function treeKeys(width: number): string[] {
+  return ["arrows move, left and right fold", "enter opens, y copies, esc types", "q goes to the dashboard"].map(
+    (line) => cut(` ${line}`, width),
+  );
+}
+
 export function Tree({
   rows,
   selected,
