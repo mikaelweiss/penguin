@@ -3,11 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+import type { TestRendererSetup } from "@opentui/core/testing";
 import { loadAdapter } from "../src/adapters.ts";
 import * as credentials from "../src/credentials.ts";
+import { type Left, RunView } from "../src/tui/run-view.tsx";
 import type { CredentialRequest, Host } from "../src/types.ts";
-import { attach } from "../src/viewer.ts";
-import { type Event, type Sandbox, sandbox, type Screen, terminal, waitFor } from "./helpers.ts";
+import { homed, press, screen, typeText } from "./drive.tsx";
+import { type Event, type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
 const jiraFile = fileURLToPath(new URL("../examples/adapters/jira.ts", import.meta.url));
 
@@ -18,7 +20,7 @@ function stubHost(credential: Host["credential"]): Host {
     cwd: process.cwd(),
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: async () => 0,
-    wait: <T>(_label: string, body: () => Promise<T>) => body(),
+    wait: <T,>(_label: string, body: () => Promise<T>) => body(),
     emit: () => {},
     credential,
   };
@@ -88,17 +90,21 @@ function keep(box: Sandbox, values: Record<string, string>): void {
 async function refusedRun(
   t: TestContext,
   box: Sandbox,
-): Promise<{ screen: Screen; watching: Promise<number> }> {
+): Promise<{ setup: TestRendererSetup; left: Left[] }> {
   box.writeAdapter("tracker", needsSource("the site said no"));
   box.write("w.ts", callWorkflow);
   keep(box, { site: "kept.tracker.test", token: TOKEN });
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.text().includes("What now?"));
-  return { screen, watching };
+  homed(t, box.home);
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="w-1" agent="agent none" canReturn={false} onLeave={(one) => left.push(one)} />,
+  );
+  t.after(() => setup.renderer.destroy());
+  await setup.waitForFrame((text) => text.includes("What now?"));
+  return { setup, left };
 }
 
 function useEditor(t: TestContext, command: string): void {
@@ -166,17 +172,28 @@ test("invariant 12: a credential reaches the store, never the run's files", asyn
     { name: "token", label: "A tracker API token", secret: true, env: "TRACKER_TOKEN" },
   ]);
 
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.text().includes("Your tracker site"));
-  screen.input.write("acme.tracker.test\r");
-  await waitFor(() => screen.text().includes("A tracker API token"));
-  screen.input.write(`${TOKEN}\r`);
-  const ended = await box.waitForEnd("w-1");
-  const code = await watching;
-  const shown = screen.stop();
+  homed(t, box.home);
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="w-1" agent="agent none" canReturn={false} onLeave={(one) => left.push(one)} />,
+  );
+  let ended: Event;
+  let shown = "";
+  try {
+    await setup.waitForFrame((text) => text.includes("Your tracker site"));
+    await typeText(setup, "acme.tracker.test");
+    await press(setup, ["RETURN"]);
+    await setup.waitForFrame((text) => text.includes("A tracker API token"));
+    await typeText(setup, TOKEN);
+    shown = setup.captureCharFrame();
+    await press(setup, ["RETURN"]);
+    ended = await box.waitForEnd("w-1");
+    await waitFor(() => left.length > 0);
+  } finally {
+    setup.renderer.destroy();
+  }
 
-  assert.equal(code, 0);
+  assert.equal(left[0]?.code, 0);
   assert.equal(ended["result"], "acme.tracker.test matched");
   assert.deepEqual(store(box, "tracker"), { site: "acme.tracker.test", token: TOKEN });
 
@@ -220,68 +237,38 @@ test("a stored credential runs without a question", async (t) => {
   assert.equal(asked(box, "w-1").length, 0);
 });
 
-test("the entry prompt leaves the cursor where the user types", async (t) => {
-  const box = sandbox(t);
-  box.writeAdapter("tracker", needsSource());
-  box.write("w.ts", callWorkflow);
-  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
-  await box.waitForState("w-1", "blocked");
-
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.text().includes("Your tracker site"));
-
-  screen.input.write("ab");
-  const parked = "\x1b[2A\x1b[5G";
-  await waitFor(() => screen.text().endsWith(parked), 2000).catch(() => {
-    assert.fail(`the cursor did not land after "> ab": ${JSON.stringify(screen.text().slice(-40))}`);
-  });
-
-  screen.input.write("c.tracker.test\r");
-  await waitFor(() => screen.text().includes("A tracker API token"));
-  screen.input.write(`${TOKEN}\r`);
-  const ended = await box.waitForEnd("w-1");
-  const code = await watching;
-  screen.stop();
-
-  assert.equal(code, 0);
-  assert.equal(ended["result"], "abc.tracker.test matched");
-});
-
-const DOWN = "\x1b[B";
-
 test("a refused credential offers to try again with what penguin has", async (t) => {
   const box = sandbox(t);
-  const { screen, watching } = await refusedRun(t, box);
+  const { setup, left } = await refusedRun(t, box);
 
-  screen.input.write("\r");
-  const ended = await box.waitForEnd("w-1");
-  const code = await watching;
-  const shown = screen.stop();
-
-  assert.equal(code, 0);
-  assert.equal(ended["result"], "kept.tracker.test matched");
+  const shown = setup.captureCharFrame();
   assert.ok(shown.includes("Tracker refused the credential"), "the label names who said no");
   assert.ok(shown.includes("the site said no"), "the reason shows");
   assert.equal(shown.includes(TOKEN), false, "no secret on the screen");
+  await press(setup, ["RETURN"]);
+  const ended = await box.waitForEnd("w-1");
+  await waitFor(() => left.length > 0);
+
+  assert.equal(left[0]?.code, 0);
+  assert.equal(ended["result"], "kept.tracker.test matched");
   assert.deepEqual(store(box, "tracker"), { site: "kept.tracker.test", token: TOKEN });
   assert.equal(asked(box, "w-1").length, 0, "trying again asks for nothing");
 });
 
 test("a refused credential takes every value again", async (t) => {
   const box = sandbox(t);
-  const { screen, watching } = await refusedRun(t, box);
+  const { setup } = await refusedRun(t, box);
 
-  screen.input.write(`${DOWN}\r`);
-  await waitFor(() => screen.text().includes("Your tracker site"));
-  screen.input.write("new.tracker.test\r");
-  await waitFor(() => screen.text().includes("A tracker API token"));
-  screen.input.write(`${TOKEN}\r`);
+  await press(setup, ["ARROW_DOWN", "RETURN"]);
+  await setup.waitForFrame((text) => text.includes("Your tracker site"));
+  await typeText(setup, "new.tracker.test");
+  await press(setup, ["RETURN"]);
+  await setup.waitForFrame((text) => text.includes("A tracker API token"));
+  await typeText(setup, TOKEN);
+  const shown = setup.captureCharFrame();
+  await press(setup, ["RETURN"]);
   const ended = await box.waitForEnd("w-1");
-  const code = await watching;
-  const shown = screen.stop();
 
-  assert.equal(code, 0);
   assert.equal(ended["result"], "new.tracker.test matched");
   assert.deepEqual(store(box, "tracker"), { site: "new.tracker.test", token: TOKEN });
   assert.equal(shown.includes(TOKEN), false, "the retyped secret echoes stars");
@@ -307,29 +294,27 @@ fs.writeFileSync(file, JSON.stringify(values));
 `,
   );
   useEditor(t, `${process.execPath} ${script}`);
-  const { screen, watching } = await refusedRun(t, box);
+  const { setup, left } = await refusedRun(t, box);
 
-  screen.input.write(`${DOWN}${DOWN}\r`);
+  await press(setup, ["ARROW_DOWN", "ARROW_DOWN", "RETURN"]);
   const ended = await box.waitForEnd("w-1");
-  const code = await watching;
-  screen.stop();
+  await waitFor(() => left.length > 0);
 
-  assert.equal(code, 0);
+  assert.equal(left[0]?.code, 0);
   assert.equal(ended["result"], "edited.tracker.test matched");
   assert.deepEqual(store(box, "tracker"), { site: "edited.tracker.test", token: TOKEN });
 });
 
 test("a refused credential stops the run when the user picks that", async (t) => {
   const box = sandbox(t);
-  const { screen, watching } = await refusedRun(t, box);
+  const { setup, left } = await refusedRun(t, box);
 
-  screen.input.write(`${DOWN}${DOWN}${DOWN}\r`);
+  await press(setup, ["ARROW_DOWN", "ARROW_DOWN", "ARROW_DOWN", "RETURN"]);
   const ended = await box.waitForEnd("w-1");
-  const code = await watching;
-  screen.stop();
+  await waitFor(() => left.length > 0);
 
   assert.equal(ended["phase"], "stopped");
-  assert.equal(code, 130);
+  assert.equal(left[0]?.code, 130);
   assert.deepEqual(
     store(box, "tracker"),
     { site: "kept.tracker.test", token: TOKEN },

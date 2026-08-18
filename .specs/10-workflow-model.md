@@ -93,7 +93,7 @@ The call validates the arguments against the callee's params schema, runs the ca
 
 ## The view
 
-`ctx.view` posts typed objects. It never formats output, and nothing in a workflow knows what a terminal is. A view adapter renders the stream, and `events.jsonl` in the run directory keeps it for any other subscriber (`20-architecture.md`, events).
+`ctx.view` posts typed objects. It never formats output, and nothing in a workflow knows what a terminal is. The viewer renders the stream, and `events.jsonl` in the run directory keeps it for any other subscriber (`20-architecture.md`, events).
 
 - `view.activity(label, body)`: a span with a start, an end, and a parent. The engine opens one per step by itself. A workflow opens one where it knows structure the engine cannot see (a review round wrapping two turns). Returns what `body` returns.
 - `view.fact({name: value})`: what is true right now. The status line overwrites facts, it never scrolls them.

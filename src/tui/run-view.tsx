@@ -1,0 +1,573 @@
+import { decodePasteBytes, type KeyEvent } from "@opentui/core";
+import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/react";
+import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { pasteImage } from "../clipboard.ts";
+import * as credentials from "../credentials.ts";
+import { holder } from "../lock.ts";
+import { attachmentsDir, credentialFile, runDir } from "../paths.ts";
+import { edit, runCommand } from "../spawn.ts";
+import { type Ask, type Fix, fixes, notes, why } from "./credential.ts";
+import { Editor } from "./editor.ts";
+import { controlFor } from "./gate.ts";
+import { deliver, provide } from "./inbox.ts";
+import { Choices, Fields, InputBar } from "./input.tsx";
+import type { Attention } from "./projection.ts";
+import { brief, statusLine } from "./status.ts";
+import { cut } from "./text.ts";
+import { ink } from "./theme.ts";
+import { Transcript } from "./transcript.tsx";
+import { type Selection, Tree, treeRows } from "./tree.tsx";
+import { Feed } from "./watch.ts";
+
+const WATCHDOG = 500;
+const SPIN = 200;
+const SAMPLE = 1000;
+const PANE = 34;
+
+export type Left = { back: boolean; code: number; note?: string };
+
+type Pick = { key: string; cursor: number; chosen: number[] };
+
+type Form = { key: string; at: number; values: Record<string, string>; buffer: string; retype: boolean };
+
+const NO_PICK: Pick = { key: "", cursor: 0, chosen: [] };
+
+const NO_FORM: Form = { key: "", at: 0, values: {}, buffer: "", retype: false };
+
+/** One run on the whole screen: its tree, the selected transcript, and the input. */
+export function RunView({
+  name,
+  agent,
+  node,
+  canReturn,
+  onLeave,
+}: {
+  name: string;
+  agent: string;
+  node?: string;
+  canReturn: boolean;
+  onLeave(left: Left): void;
+}): ReactNode {
+  const dir = useMemo(() => runDir(name), [name]);
+  const feed = useMemo(() => {
+    const made = new Feed(name, dir);
+    made.read();
+    return made;
+  }, [name, dir]);
+  const [, bump] = useReducer((count: number) => count + 1, 0);
+  const size = useTerminalDimensions();
+  const renderer = useRenderer();
+  const [editor] = useState(() => new Editor());
+  const [selected, setSelected] = useState<Selection>({ kind: "node", id: node ?? "root" });
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const [dropped, setDropped] = useState<Set<string>>(() => new Set());
+  const held = useRef<{ pick: Pick; form: Form }>({ pick: NO_PICK, form: NO_FORM });
+  const pick = held.current.pick;
+  const form = held.current.form;
+  const setPick = (next: Pick): void => {
+    held.current.pick = next;
+    bump();
+  };
+  const setForm = (next: Form): void => {
+    held.current.form = next;
+    bump();
+  };
+  const [alive, setAlive] = useState(() => holder(dir) !== undefined);
+  const [frame, setFrame] = useState(0);
+  const [since, setSince] = useState(() => Date.now());
+  const [diff, setDiff] = useState("");
+  const [warn, setWarn] = useState("");
+
+  useEffect(() => {
+    const off = feed.follow(bump);
+    return () => {
+      off();
+      feed.stop();
+    };
+  }, [feed]);
+
+  useEffect(() => {
+    if (!alive) return;
+    const timer = setInterval(() => {
+      if (holder(dir) !== undefined) return;
+      feed.pump();
+      setAlive(false);
+    }, WATCHDOG);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }, [alive, dir, feed]);
+
+  useEffect(() => {
+    if (!alive) return;
+    const timer = setInterval(() => setFrame((count) => count + 1), SPIN);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }, [alive]);
+
+  const projection = feed.projection;
+  const watch = projection.watch();
+  const where = watch?.diff;
+
+  useEffect(() => {
+    setSince(Date.now());
+    setDiff("");
+  }, [watch?.elapsed, where]);
+
+  useEffect(() => {
+    if (where === undefined) return;
+    let gone = false;
+    const sample = async (): Promise<void> => {
+      const done = await runCommand("git diff --shortstat", where);
+      if (!gone) setDiff(done.code === 0 ? done.stdout.trim() : "");
+    };
+    void sample();
+    const timer = setInterval(() => void sample(), SAMPLE);
+    timer.unref?.();
+    return () => {
+      gone = true;
+      clearInterval(timer);
+    };
+  }, [where]);
+
+  const phase = projection.phase();
+  const ended = phase !== "live" || !alive;
+  const rows = treeRows(projection, closed);
+  const nodeId = selected.kind === "node" ? selected.id : projection.sessionNode(selected.id);
+  const attention = projection.attention();
+  const need = attention.find((one) => one.node === nodeId && !dropped.has(keyOf(one)));
+  const gate = need?.kind === "gate" ? need : undefined;
+  const shape = gate?.schema === undefined ? undefined : controlFor(gate.schema);
+  const list = shape !== undefined && "list" in shape ? shape : undefined;
+  const asked = need?.kind === "credential" ? need : undefined;
+  const entries =
+    selected.kind === "session" ? projection.sessionTranscript(selected.id) : projection.transcript(selected.id);
+  const width = Math.max(20, size.width - PANE - 3);
+
+  const leave = (left: Left): void => {
+    onLeave(left);
+  };
+
+  const stopRun = (): void => {
+    const pid = holder(dir);
+    if (pid === undefined) return leave({ back: canReturn, code: 130 });
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      leave({ back: canReturn, code: 130 });
+    }
+  };
+
+  useEffect(() => {
+    if (!ended || canReturn) return;
+    leave(farewell(name, projection.phase(), projection.result(), projection.runState().detail, alive));
+  }, [ended, canReturn, name, alive]);
+
+  const move = (step: number): void => {
+    const at = rows.findIndex((row) => row.kind === selected.kind && row.id === selected.id);
+    const next = rows[Math.max(0, Math.min(rows.length - 1, (at === -1 ? 0 : at) + step))];
+    if (next !== undefined) setSelected({ kind: next.kind, id: next.id });
+  };
+
+  const fold = (open: boolean): void => {
+    if (selected.kind !== "node") return;
+    setClosed((was) => {
+      const next = new Set(was);
+      if (open) next.delete(selected.id);
+      else next.add(selected.id);
+      return next;
+    });
+  };
+
+  const drop = (): void => {
+    if (need === undefined) return;
+    const key = keyOf(need);
+    setDropped((was) => new Set(was).add(key));
+  };
+
+  const send = (text: string): void => {
+    if (text === "") return;
+    const to: { session?: string; gate?: string } = {};
+    if (gate !== undefined) to.gate = gate.gate;
+    else if (selected.kind === "session") to.session = selected.id;
+    deliver(dir, text, to);
+  };
+
+  const answerFrom = (choices: string[], chosen: number[]): void => {
+    const text = chosen.map((index) => choices[index] ?? "").filter((label) => label !== "").join(", ");
+    if (text === "") return;
+    send(text);
+  };
+
+  const takeImage = async (): Promise<void> => {
+    const got = await pasteImage(attachmentsDir(dir));
+    if ("path" in got) {
+      editor.insert(got.path);
+      setWarn("");
+    } else {
+      setWarn(got.warn);
+    }
+    bump();
+  };
+
+  const applyFix = async (fix: Fix, refused: Ask): Promise<void> => {
+    if (fix === "stop") return stopRun();
+    if (fix === "reset") {
+      credentials.forget(refused.name);
+      setForm({ key: keyOf(refused), at: 0, values: {}, buffer: "", retype: true });
+      return;
+    }
+    if (fix === "edit") {
+      credentials.seed(
+        refused.name,
+        refused.fields.map((field) => field.name),
+      );
+      renderer.suspend();
+      try {
+        await edit(credentialFile(refused.name));
+      } finally {
+        renderer.resume();
+      }
+    }
+    drop();
+    provide(dir, refused.name);
+  };
+
+  const fieldKey = (key: KeyEvent, wanted: Ask): void => {
+    const now = held.current.form;
+    const state = now.key === keyOf(wanted) ? now : { ...NO_FORM, key: keyOf(wanted), retype: now.retype };
+    const field = wanted.fields[state.at];
+    if (field === undefined) return;
+    if (key.name === "escape") return setForm({ ...state, buffer: "" });
+    if (key.name === "backspace") return setForm({ ...state, buffer: state.buffer.slice(0, -1) });
+    if (key.name === "return" || key.name === "enter") {
+      if (state.buffer.trim() === "") return;
+      const values = { ...state.values, [field.name]: state.buffer.trim() };
+      const next = wanted.fields[state.at + 1];
+      if (next === undefined) {
+        credentials.save(wanted.name, values);
+        provide(dir, wanted.name);
+        drop();
+        setForm(NO_FORM);
+        return;
+      }
+      setForm({ ...state, at: state.at + 1, values, buffer: "" });
+      return;
+    }
+    const typed = printable(key);
+    if (typed !== undefined) setForm({ ...state, buffer: state.buffer + typed });
+  };
+
+  const choiceKey = (
+    key: KeyEvent,
+    what: string,
+    choices: string[],
+    many: boolean,
+    take: (chosen: number[]) => void,
+  ): void => {
+    const now = held.current.pick;
+    const state = now.key === what ? now : { ...NO_PICK, key: what };
+    const step = (delta: number): void => {
+      const cursor = (state.cursor + choices.length + delta) % choices.length;
+      setPick({ ...state, cursor });
+    };
+    if (key.name === "up" || key.name === "k") return step(-1);
+    if (key.name === "down" || key.name === "j") return step(1);
+    if (key.name === "space" && many) {
+      const chosen = state.chosen.includes(state.cursor)
+        ? state.chosen.filter((index) => index !== state.cursor)
+        : [...state.chosen, state.cursor].sort((left, right) => left - right);
+      return setPick({ ...state, chosen });
+    }
+    if (key.name === "escape") {
+      setPick(NO_PICK);
+      return drop();
+    }
+    if (key.name === "return" || key.name === "enter") {
+      take(many ? state.chosen : [state.cursor]);
+      setPick(NO_PICK);
+    }
+  };
+
+  const typeKey = (key: KeyEvent): void => {
+    if (key.ctrl) {
+      if (key.name === "v") return void takeImage();
+      if (key.name === "a") editor.head();
+      else if (key.name === "e") editor.tail();
+      else if (key.name === "u") editor.killLeft();
+      else if (key.name === "k") editor.killRight();
+      else if (key.name === "w") editor.killWord();
+      else if (key.name === "left" || key.name === "b") editor.wordLeft();
+      else if (key.name === "right" || key.name === "f") editor.wordRight();
+      else return;
+      return bump();
+    }
+    if (key.meta) {
+      if (key.name === "b" || key.name === "left") editor.wordLeft();
+      else if (key.name === "f" || key.name === "right") editor.wordRight();
+      else if (key.name === "backspace") editor.killWord();
+      else return;
+      return bump();
+    }
+    if (key.name === "return" || key.name === "enter") {
+      const text = editor.take();
+      send(text);
+      return bump();
+    }
+    if (key.name === "escape") {
+      editor.clear();
+      return bump();
+    }
+    if (key.name === "backspace") {
+      editor.backspace();
+      return bump();
+    }
+    if (key.name === "delete") {
+      editor.delete();
+      return bump();
+    }
+    if (key.name === "home") {
+      editor.head();
+      return bump();
+    }
+    if (key.name === "end") {
+      editor.tail();
+      return bump();
+    }
+    if (!editor.empty) {
+      if (key.name === "left") {
+        editor.left();
+        return bump();
+      }
+      if (key.name === "right") {
+        editor.right();
+        return bump();
+      }
+      if (key.name === "up" || key.name === "down") {
+        editor.recall(key.name === "up" ? -1 : 1);
+        return bump();
+      }
+    } else {
+      if (key.name === "up") return move(-1);
+      if (key.name === "down") return move(1);
+      if (key.name === "left") return fold(false);
+      if (key.name === "right") return fold(true);
+      if (key.name === "return") return fold(closed.has(selected.id));
+      if (key.name === "q") return leave({ back: canReturn, code: 0 });
+    }
+    const typed = printable(key);
+    if (typed === undefined) return;
+    editor.insert(typed);
+    bump();
+  };
+
+  useKeyboard((key: KeyEvent) => {
+    if (key.eventType === "release") return;
+    if (key.ctrl && key.name === "c") return stopRun();
+    if (ended) {
+      if (key.name === "q") leave({ back: canReturn, code: 0 });
+      else if (key.name === "up" || key.name === "k") move(-1);
+      else if (key.name === "down" || key.name === "j") move(1);
+      else if (key.name === "left" || key.name === "h") fold(false);
+      else if (key.name === "right" || key.name === "l") fold(true);
+      return;
+    }
+    if (asked !== undefined) {
+      if (asked.phase === "rejected" && !(form.key === keyOf(asked) && form.retype)) {
+        const list = fixes(asked.name);
+        return choiceKey(
+          key,
+          keyOf(asked),
+          list.map((one) => one.label),
+          false,
+          (chosen) => {
+            const fix = list[chosen[0] ?? 0]?.fix;
+            if (fix !== undefined) void applyFix(fix, asked);
+          },
+        );
+      }
+      return fieldKey(key, asked);
+    }
+    if (list !== undefined) {
+      return choiceKey(key, keyOf(gate as Attention), list.list, list.many, (chosen) => answerFrom(list.list, chosen));
+    }
+    typeKey(key);
+  });
+
+  usePaste((event) => {
+    if (ended || asked !== undefined || list !== undefined) return;
+    editor.paste(decodePasteBytes(event.bytes));
+    bump();
+  });
+
+  const state = ended ? endedState(projection.phase(), alive) : projection.runState();
+  const status = statusLine({
+    state: state.state,
+    ...(state.detail === undefined ? {} : { detail: state.detail }),
+    ...(watch?.elapsed === true && !ended ? { running: Date.now() - since } : {}),
+    diff,
+    facts: projection.facts(),
+  });
+
+  return (
+    <box style={{ flexDirection: "column", width: size.width, height: size.height }}>
+      <box style={{ flexDirection: "row", flexGrow: 1 }}>
+        <box
+          style={{
+            flexDirection: "column",
+            width: PANE,
+            border: ["right"],
+            borderColor: ink.border,
+            flexShrink: 0,
+          }}
+        >
+          <text fg={ink.dim}>{cut(` ${name}  ${agent}`, PANE)}</text>
+          <Tree rows={rows} selected={selected} frame={frame} width={PANE - 1} />
+        </box>
+        <box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 1 }}>
+          <Transcript entries={entries} live={!ended} width={width} />
+        </box>
+      </box>
+      <text fg={ink.dim}>{cut(status === "" ? " " : status, size.width)}</text>
+      <Bottom
+        ended={ended}
+        asked={asked}
+        form={form}
+        gate={gate}
+        list={list}
+        pick={pick}
+        editor={editor}
+        selected={selected}
+        sessionName={selected.kind === "session" ? (projection.sessionName(selected.id) ?? selected.id) : undefined}
+        blocked={state.state === "blocked"}
+        warn={warn}
+        width={size.width}
+      />
+    </box>
+  );
+}
+
+function Bottom({
+  ended,
+  asked,
+  form,
+  gate,
+  list,
+  pick,
+  editor,
+  selected,
+  sessionName,
+  blocked,
+  warn,
+  width,
+}: {
+  ended: boolean;
+  asked: Ask | undefined;
+  form: Form;
+  gate: Extract<Attention, { kind: "gate" }> | undefined;
+  list: { list: string[]; many: boolean } | undefined;
+  pick: Pick;
+  editor: Editor;
+  selected: Selection;
+  sessionName: string | undefined;
+  blocked: boolean;
+  warn: string;
+  width: number;
+}): ReactNode {
+  if (ended) return <text fg={ink.faint}>{cut("this run is done. q leaves", width)}</text>;
+  if (asked !== undefined) {
+    const key = keyOf(asked);
+    if (asked.phase === "rejected" && !(form.key === key && form.retype)) {
+      const choices = fixes(asked.name);
+      return (
+        <Choices
+          title={`${asked.label} refused the credential. What now?`}
+          notes={why(asked)}
+          choices={choices.map((one) => ({ label: one.label, ...(one.note === undefined ? {} : { note: one.note }) }))}
+          cursor={pick.key === key ? pick.cursor : 0}
+          chosen={[]}
+          many={false}
+          keys="arrows move, enter confirms, esc goes back to typing"
+          width={width}
+        />
+      );
+    }
+    const state = form.key === key ? form : NO_FORM;
+    return (
+      <Fields
+        title={`${asked.label} needs a credential`}
+        notes={notes(asked)}
+        fields={asked.fields}
+        at={state.at}
+        values={state.values}
+        buffer={state.buffer}
+        width={width}
+      />
+    );
+  }
+  if (list !== undefined && gate !== undefined) {
+    const key = keyOf(gate);
+    return (
+      <Choices
+        title={brief(gate.question)}
+        choices={list.list.map((label) => ({ label }))}
+        cursor={pick.key === key ? pick.cursor : 0}
+        chosen={pick.key === key ? pick.chosen : []}
+        many={list.many}
+        keys={
+          list.many
+            ? "arrows move, space toggles, enter answers, esc types the answer"
+            : "arrows move, enter answers, esc types the answer"
+        }
+        width={width}
+      />
+    );
+  }
+  const prompt =
+    gate !== undefined
+      ? `answer: ${brief(gate.question)}`
+      : selected.kind === "session"
+        ? `to ${sessionName ?? selected.id}`
+        : "to run";
+  const hints: string[] = [];
+  if (warn !== "") hints.push(warn);
+  if (editor.empty) hints.push("arrows move, enter opens, q leaves, type to send");
+  else hints.push("enter sends, esc clears, ctrl-v pastes an image");
+  if (!blocked) hints.push("the run is busy: this message queues");
+  return <InputBar editor={editor} prompt={`${prompt} >`} hint={hints.join("  ")} width={width} />;
+}
+
+function keyOf(one: Attention): string {
+  if (one.kind === "gate") return `gate:${one.gate ?? one.question}`;
+  return `credential:${one.name}:${one.phase}`;
+}
+
+function printable(key: KeyEvent): string | undefined {
+  if (key.ctrl || key.meta) return undefined;
+  const sequence = key.sequence;
+  if (sequence.length !== 1) return undefined;
+  const code = sequence.codePointAt(0) ?? 0;
+  if (code < 0x20 || code === 0x7f) return undefined;
+  return sequence;
+}
+
+function endedState(phase: string, alive: boolean): { state: string; detail?: string } {
+  if (phase === "live" && !alive) return { state: "done", detail: "the run process died" };
+  return { state: phase };
+}
+
+function farewell(
+  name: string,
+  phase: string,
+  result: unknown,
+  reason: string | undefined,
+  alive: boolean,
+): Left {
+  if (phase === "done") {
+    const line = result === undefined ? undefined : typeof result === "string" ? result : JSON.stringify(result);
+    return line === undefined ? { back: false, code: 0 } : { back: false, code: 0, note: line };
+  }
+  if (phase === "stopped") return { back: false, code: 130, note: `run ${name} stopped` };
+  if (phase === "error") return { back: false, code: 1, note: `run ${name} failed: ${reason ?? "unknown error"}` };
+  if (!alive) return { back: false, code: 1, note: "pn: the run process died" };
+  return { back: false, code: 0 };
+}

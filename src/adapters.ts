@@ -91,7 +91,7 @@ export function writeEnv(cwd: string, list: Found[]): void {
 export function renderEnv(dir: string, list: Found[]): string {
   const chosen: Found[] = [];
   for (const role of [...new Set(list.map((entry) => entry.role))].sort()) {
-    if (role === "agent" || role === "view") continue;
+    if (role === "agent") continue;
     const picked = pick(list, role);
     if ("found" in picked) chosen.push(picked.found);
   }

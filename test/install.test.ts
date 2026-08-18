@@ -14,7 +14,7 @@ test("a fresh install fills the home with the catalog", (t) => {
   assert.equal(fs.existsSync(path.join(box.home, "ticket.ts")), true);
   assert.equal(fs.existsSync(path.join(box.home, "skills", "penguin-triage", "SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(box.home, "tsconfig.json")), true);
-  for (const name of ["claude", "git", "gh", "terminal"]) {
+  for (const name of ["claude", "git", "gh"]) {
     assert.equal(fs.existsSync(path.join(box.home, "adapters", `${name}.ts`)), true, name);
   }
   const env = fs.readFileSync(path.join(box.home, "penguin-env.d.ts"), "utf8");

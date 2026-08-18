@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { allocateRun, discardRun, finishRun, readRun } from "../src/create.ts";
 import { rows } from "../src/runs.ts";
-import { attach } from "../src/viewer.ts";
-import { type Event, sandbox, terminal, waitFor } from "./helpers.ts";
+import { type Left, RunView } from "../src/tui/run-view.tsx";
+import { homed, paste, press, screen } from "./drive.tsx";
+import { type Event, sandbox, waitFor } from "./helpers.ts";
 
 const gateWorkflow = `import { workflow } from "penguin";
 import { z } from "zod";
@@ -96,15 +96,23 @@ test("invariant 3: q detaches and the run continues", async (t) => {
   await box.waitForState("w-1", "blocked");
   const holder = box.holder("w-1");
 
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.input.listenerCount("keypress") > 0);
-  screen.input.write("q");
-  const code = await watching;
-  const shown = screen.stop();
+  homed(t, box.home);
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="w-1" agent="agent fake" canReturn={false} onLeave={(one) => left.push(one)} />,
+  );
+  try {
+    const shown = await setup.waitForFrame((text) => text.includes("keep going?"));
+    assert.match(shown, /keep going\?/);
+    await press(setup, ["q"]);
+  } finally {
+    setup.renderer.destroy();
+  }
 
-  assert.equal(code, 0);
-  assert.match(shown, /gate: keep going\?/);
+  assert.deepEqual(
+    left.map((one) => one.code),
+    [0],
+  );
   assert.equal(box.holder("w-1"), holder, "the run kept the lock");
   assert.equal(box.lastState("w-1")?.["state"], "blocked");
   box.send("w-1", "yes");
@@ -524,7 +532,7 @@ export default workflow({
   const missing = box.penguin("run", "./role.ts");
   assert.equal(missing.code, 1);
   assert.match(missing.stdout, /nothing provides ctx\.shell/);
-  assert.match(missing.stdout, /Installed adapter roles: agent, view/);
+  assert.match(missing.stdout, /Installed adapter roles: agent/);
   assert.match(String(box.ended("role-1")?.["reason"]), /nothing provides ctx\.shell/);
 
   box.write("skill.md", "do the thing\n");
@@ -819,61 +827,50 @@ export default workflow({
 });
 `;
 
-function withTerminalAdapter(box: ReturnType<typeof sandbox>): void {
-  const source = fs.readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "examples", "adapters", "terminal.ts"),
-    "utf8",
-  );
-  box.writeAdapter("terminal", source);
-}
-
-function pause(millis: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, millis));
-}
+const nothing = (): void => {};
 
 test("invariant 16: the status line holds one line, however long the question", async (t) => {
   const box = sandbox(t);
-  withTerminalAdapter(box);
   box.write("w.ts", watchingWorkflow);
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.text().includes(SENTINEL));
-  await pause(2100);
-  const shown = screen.text();
+  homed(t, box.home);
+  const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
+  try {
+    const frame = await setup.waitForFrame(
+      (text) => text.includes("blocked: Blockers") && text.includes(SENTINEL),
+    );
+    const status = frame.split("\n").filter((row) => row.includes("blocked: Blockers"));
+    assert.equal(status.length, 1, "the status prints once, one line");
+    assert.ok((status[0] ?? "").length <= 100, "the status stays inside the width");
+    assert.match(status[0] ?? "", /round 1/, "the status carries the facts");
+  } finally {
+    setup.renderer.destroy();
+  }
   box.send("w-1", "ok");
   await box.waitForEnd("w-1");
-  await watching;
-
-  assert.equal(shown.split(SENTINEL).length - 1, 1, "the question printed once, not once a second");
-  assert.match(shown, /blocked: Blockers/, "the status names the state and the first words");
-  assert.match(shown, /round 1/, "the status carries the facts");
 });
 
-test("invariant 16: nothing paints over the input field", async (t) => {
+test("invariant 16: the input bar holds the bottom of the screen", async (t) => {
   const box = sandbox(t);
-  withTerminalAdapter(box);
   box.write("w.ts", watchingWorkflow);
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.text().includes(SENTINEL));
-  screen.input.write("hello");
-  await waitFor(() => screen.text().includes("> hello"));
-  await pause(2100);
-  const frames = screen.text().split("\x1b[J");
+  homed(t, box.home);
+  const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
+  try {
+    const frame = await setup.waitForFrame((text) => text.includes("answer: Blockers"));
+    const rows = frame.trimEnd().split("\n");
+    assert.match(rows.at(-1) ?? "", /enter sends|type to send/, "the input hint is the last row");
+    assert.match(rows.at(-2) ?? "", /answer: Blockers/, "the input bar sits above it");
+    assert.match(rows.at(-3) ?? "", /blocked: Blockers/, "the status sits above the input");
+  } finally {
+    setup.renderer.destroy();
+  }
   box.send("w-1", "ok");
   await box.waitForEnd("w-1");
-  await watching;
-
-  const last = frames.at(-2) ?? "";
-  assert.match(last, /> hello/, "the last thing drawn is the input field");
-  assert.match(last, /blocked: Blockers/, "the same draw carries the status under it");
-  assert.doesNotMatch(frames.at(-1) ?? "", /blocked/, "and nothing wrote after it");
 });
 
 test("invariant 15: a paste sends as one message, newlines kept", async (t) => {
@@ -882,16 +879,21 @@ test("invariant 15: a paste sends as one message, newlines kept", async (t) => {
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.text().includes("keep going?"));
-  screen.input.write("\x1b[200~line one\nline two\x1b[201~");
-  await waitFor(() => screen.text().includes("line two"));
-  screen.input.write("\r");
-  const ended = await box.waitForEnd("w-1");
-  const code = await watching;
+  homed(t, box.home);
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="w-1" agent="agent fake" canReturn={false} onLeave={(one) => left.push(one)} />,
+  );
+  let ended: Event;
+  try {
+    await setup.waitForFrame((text) => text.includes("keep going?"));
+    await paste(setup, "line one\nline two");
+    await press(setup, ["RETURN"]);
+    ended = await box.waitForEnd("w-1");
+  } finally {
+    setup.renderer.destroy();
+  }
 
-  assert.equal(code, 0);
   assert.equal(ended["result"], "line one\nline two");
   const sent = fs
     .readFileSync(path.join(box.runDir("w-1"), "inbox.jsonl"), "utf8")
@@ -907,16 +909,19 @@ test("invariant 15: a collapsed paste sends its full text, never the token", asy
   await box.waitForState("w-1", "blocked");
 
   const big = Array.from({ length: 10 }, (_, n) => `line ${n}`).join("\n");
-  const screen = terminal(t, box.home);
-  const watching = attach("w-1");
-  await waitFor(() => screen.text().includes("keep going?"));
-  screen.input.write(`\x1b[200~${big}\x1b[201~`);
-  await waitFor(() => screen.text().includes("[pasted #1, 10 lines]"));
-  screen.input.write("\r");
-  const ended = await box.waitForEnd("w-1");
-  const code = await watching;
+  homed(t, box.home);
+  const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
+  let ended: Event;
+  try {
+    await setup.waitForFrame((text) => text.includes("keep going?"));
+    await paste(setup, big);
+    await setup.waitForFrame((text) => text.includes("[pasted #1, 10 lines]"));
+    await press(setup, ["RETURN"]);
+    ended = await box.waitForEnd("w-1");
+  } finally {
+    setup.renderer.destroy();
+  }
 
-  assert.equal(code, 0);
   assert.equal(ended["result"], big);
   const sent = fs.readFileSync(path.join(box.runDir("w-1"), "inbox.jsonl"), "utf8");
   assert.doesNotMatch(sent, /pasted #1/);

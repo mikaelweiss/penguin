@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { Attached } from "./editor.ts";
-
 const ROOM = 64 * 1024 * 1024;
+
+/** Where the pasted image landed, or why it did not. */
+export type Attached = { path: string } | { warn: string };
 
 /** The clipboard image lands as one file in dir, or the reason it did not. */
 export async function pasteImage(dir: string): Promise<Attached> {

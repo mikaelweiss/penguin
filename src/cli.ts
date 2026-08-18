@@ -7,7 +7,6 @@ import type { z } from "zod";
 import * as adapters from "./adapters.ts";
 import { pasteImage } from "./clipboard.ts";
 import { allocateRun, createRun, discardRun, finishRun } from "./create.ts";
-import { ask } from "./editor.ts";
 import { execute } from "./engine.ts";
 import { messageOf, PenguinError } from "./errors.ts";
 import { firstRun, install, syncSkills } from "./install.ts";
@@ -15,26 +14,27 @@ import { blocks } from "./layout.ts";
 import { load } from "./loader.ts";
 import { type Asked, coerce, parseParams, unfilled, validate } from "./params.ts";
 import { attachmentsDir, type Scope, short } from "./paths.ts";
-import { choose, control, interactive } from "./prompt.ts";
 import { render as renderRuns, rows } from "./runs.ts";
 import * as skills from "./skills.ts";
-import { agentLine, attach } from "./viewer.ts";
+import { agentLine, attach, dashboard } from "./tui/attach.ts";
+import { interactive } from "./tui/tty.ts";
 import * as workflows from "./workflows.ts";
 
 const usage = `penguin runs one workflow as a live process, and the terminal watches it.
 
 usage:
+  pn                                              the dashboard: every run, and what needs you
   pn list workflows|skills|adapters [--verbose]   show what penguin can use
   pn run <workflow> [--param value ...]           start a run and watch it
   pn run <workflow> -i                            ask for the params the args did not fill
   pn run <workflow> --background                  start a run and leave it alone
-  pn ps                                           the live runs, and a picker to attach
+  pn ps                                           the dashboard, or a plain table when piped
   pn attach <run>                                 watch a run, with its history first
   pn install                                      set up ~/.penguin and choose your skill directories
   pn sync-skills [--global|--local]               choose your skill directories again
 
 <workflow> is a name from the list, or a path to a workflow file.
-In a run: type to send a message, q detaches, Ctrl-C stops the run.
+In a run: type to send a message, q leaves, Ctrl-C stops the run.
 `;
 
 async function main(argv: string[]): Promise<number> {
@@ -54,7 +54,12 @@ async function main(argv: string[]): Promise<number> {
   if (command === "ps") return listRuns();
   if (command === "attach") return attachRun(rest);
   if (command === "sync-skills") return syncScopes(rest);
-  if (command === undefined || command === "help" || command === "--help" || command === "-h") {
+  if (command === undefined) {
+    if (interactive()) return dashboard();
+    process.stdout.write(usage);
+    return 0;
+  }
+  if (command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(usage);
     return 0;
   }
@@ -204,21 +209,19 @@ async function fillParam(
   interrupt: () => void,
 ): Promise<void> {
   const question = `--${param.name} <${param.hint}>`;
+  const { askText, pickOne } = await import("./tui/ask.tsx");
   if (param.choices.length > 0) {
     const labels = param.optional ? [...param.choices, "skip"] : param.choices;
-    const running = control(
+    const picked = await pickOne(
       question,
       labels.map((label) => ({ label })),
-      { many: false, interrupt },
+      { interrupt },
     );
-    const picked = (await running.picked)?.[0];
-    if (picked !== undefined && picked < param.choices.length) {
-      values[param.name] = param.choices[picked] ?? "";
-    }
+    if (picked < param.choices.length) values[param.name] = param.choices[picked] ?? "";
     return;
   }
   for (;;) {
-    const answer = await ask(question, {
+    const answer = await askText(question, {
       notes: param.optional ? ["enter skips"] : [],
       attach: () => pasteImage(attachments),
       interrupt,
@@ -254,21 +257,9 @@ async function runProcess(argv: string[]): Promise<number> {
 }
 
 async function listRuns(): Promise<number> {
-  const list = rows(Date.now());
-  const text = renderRuns(list);
-  if (!interactive() || list.length === 0) {
-    say(text);
-    return 0;
-  }
-  const [header = "", ...labels] = text.split("\n");
-  const index = await choose(
-    header,
-    labels.map((label) => ({ label })),
-    "arrows or hjkl move, enter attaches, q leaves",
-  );
-  const picked = index === undefined ? undefined : list[index];
-  if (picked === undefined) return 0;
-  return attach(picked.run);
+  if (interactive()) return dashboard();
+  say(renderRuns(rows(Date.now())));
+  return 0;
 }
 
 async function attachRun(argv: string[]): Promise<number> {

@@ -30,7 +30,7 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.penguin/` with nine workflows, their skills, five adapters, and a tsconfig for editor types. Two of them are pipelines:
+Install fills `~/.penguin/` with nine workflows, their skills, four adapters, and a tsconfig for editor types. Two of them are pipelines:
 
 - `pn run ticket --ticket ABC-123`: ticket to merged PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
 - `pn run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, then the pull request.
@@ -47,7 +47,7 @@ The other seven are small workflows. Each one runs alone, and a pipeline calls a
 
 A pipeline is the small ones called as functions (Compose workflows, below).
 
-`~/.penguin/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, `jira`, and `terminal`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
+`~/.penguin/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, and `jira`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
 Workflow files live in `~/.penguin/` for every repository, or in `<repo>/.penguin/` for one. Skills and adapters live next to them, in `skills/` and `adapters/`.
 
@@ -93,7 +93,7 @@ $ pn run implement --task "rename the flag"
 run implement-1 started, agent claude
 ```
 
-`--background` starts the run and gives the terminal back. `ps` lists the live runs: on a terminal it is a picker, and enter attaches to the run under the cursor. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw. Bare `pn` prints the usage.
+`--background` starts the run and gives the terminal back. Bare `pn` opens the dashboard: every run, live ones first with their state, and a needs-you list of every open question across them. Enter opens the run under the cursor, and entering from the needs-you list lands on the question. `ps` opens the same dashboard, or prints a plain table when piped. `attach` joins a run by name: it renders the whole history first, then follows the live events, so a late viewer sees what an early one saw.
 
 ```
 $ pn list workflows
@@ -149,11 +149,12 @@ Workflow code writes none of this. `ctx.jira.issue.get("ABC-123")` is the whole 
 
 A run is in one of four states. **running**: a step is executing. **blocked**: the run waits on you, at a gate or at `ctx.messages.next()`. **idle**: the run waits on the outside world. **done**: the run function returned, you stopped it, or an error ended it. Done is final. To act again, start a new run.
 
-In an attached terminal:
+In a run view, the run's tree fills the left pane: each activity, session, and sub-workflow call, with a glyph for its state. The right pane shows the transcript of whatever you select. The input bar at the bottom names its target:
 
-- Type a line and press enter to send a message. A gate takes it as the answer.
-- `Tab` picks which session fills the screen, and addresses your next message to it.
-- `q` detaches. The run keeps going, and `pn attach` comes back to it.
+- Select an open gate and the bar takes your answer, addressed to that gate, so ten parallel questions never collide. An enum gate draws a list instead.
+- Select a session and the bar sends to it.
+- Select anything else and the bar sends to the run. When the run is not blocked, the bar says the message queues.
+- With the input empty, arrows move through the tree. `q` leaves, back to the dashboard when you came from it.
 - `Ctrl-C` stops the run. penguin kills the steps in flight and records the stop.
 
 Closing the terminal never touches the run.

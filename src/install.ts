@@ -13,7 +13,7 @@ import {
   short,
   userRoot,
 } from "./paths.ts";
-import { interactive, pick, pickMany } from "./prompt.ts";
+import { interactive } from "./tui/tty.ts";
 import { link, shared, type Source, sources } from "./skills.ts";
 
 const hint =
@@ -74,13 +74,14 @@ export async function syncSkills(scope: Scope, quiet = false): Promise<void> {
 
 async function choose(found: Source[]): Promise<Source[]> {
   if (!interactive()) return found;
-  const wanted = await pickMany(
+  const { pickOne, pickSome } = await import("./tui/ask.tsx");
+  const wanted = await pickSome(
     "Which skill directories should penguin use?",
     found.map((source) => ({ label: short(source.dir) })),
   );
   const chosen = wanted.map((index) => found[index]).filter((source) => source !== undefined);
   if (chosen.length < 2 || shared(chosen).length === 0) return chosen;
-  const first = await pick(
+  const first = await pickOne(
     "Looks like you have some of the same skills in both directories. Which directory is your preference?",
     chosen.map((source) => ({ label: short(source.dir) })),
   );

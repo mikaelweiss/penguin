@@ -218,10 +218,6 @@ export type AgentAdapter = {
   turn(turn: AgentTurn): Promise<AgentTurnResult>;
 };
 
-export type ViewAdapter = {
-  render(event: ViewEvent): void;
-};
-
 export type Adapter<A = unknown> = {
   role: string;
   name: string;

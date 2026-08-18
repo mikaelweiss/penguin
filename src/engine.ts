@@ -30,7 +30,7 @@ import {
   type ViewEvent,
   type Workflow,
 } from "./types.ts";
-import { Bus } from "./view.ts";
+import { Bus } from "./bus.ts";
 
 export async function execute(name: string): Promise<number> {
   const dir = runDir(name);
@@ -155,7 +155,7 @@ class Execution {
 
   ctx<Params>(params: Params): Ctx<Params> {
     const roles = new Set(
-      this.found.map((entry) => entry.role).filter((role) => role !== "agent" && role !== "view"),
+      this.found.map((entry) => entry.role).filter((role) => role !== "agent"),
     );
     const base: Record<string, unknown> = {
       params,
@@ -181,7 +181,7 @@ class Execution {
           return built;
         }
         throw new PenguinError(
-          `nothing provides ctx.${prop}. Installed adapter roles: ${[...roles, "agent", "view"].sort().join(", ")}. Adapters are files in ${adapters.searched(this.record.cwd).join(" and ")}.`,
+          `nothing provides ctx.${prop}. Installed adapter roles: ${[...roles, "agent"].sort().join(", ")}. Adapters are files in ${adapters.searched(this.record.cwd).join(" and ")}.`,
         );
       },
     });

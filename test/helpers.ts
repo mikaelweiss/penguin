@@ -2,7 +2,6 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PassThrough } from "node:stream";
 import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -287,40 +286,6 @@ function stopRuns(runs: string): void {
       continue;
     }
   }
-}
-
-export type Screen = { input: PassThrough; text(): string; stop(): string };
-
-export function terminal(t: TestContext, home: string): Screen {
-  const input = new PassThrough() as PassThrough & { isTTY: boolean; setRawMode(on: boolean): void };
-  input.isTTY = true;
-  input.setRawMode = () => {};
-  const stdin = Object.getOwnPropertyDescriptor(process, "stdin");
-  const isTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
-  const write = process.stdout.write.bind(process.stdout);
-  const penguinHome = process.env["PENGUIN_HOME"];
-  const chunks: string[] = [];
-  let stopped = false;
-  const restore = (): string => {
-    if (stopped) return chunks.join("");
-    stopped = true;
-    process.stdout.write = write;
-    if (stdin !== undefined) Object.defineProperty(process, "stdin", stdin);
-    if (isTTY === undefined) delete (process.stdout as { isTTY?: boolean }).isTTY;
-    else Object.defineProperty(process.stdout, "isTTY", isTTY);
-    if (penguinHome === undefined) delete process.env["PENGUIN_HOME"];
-    else process.env["PENGUIN_HOME"] = penguinHome;
-    return chunks.join("");
-  };
-  Object.defineProperty(process, "stdin", { value: input, configurable: true });
-  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    chunks.push(chunk.toString());
-    return true;
-  }) as typeof process.stdout.write;
-  process.env["PENGUIN_HOME"] = home;
-  t.after(restore);
-  return { input, text: () => chunks.join(""), stop: restore };
 }
 
 export function waitFor(check: () => boolean, timeoutMs = 10_000): Promise<void> {
