@@ -30,11 +30,12 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.penguin/` with twelve workflows, their skills, eight adapters, a `defaults` file that picks the agent, and a tsconfig for editor types. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
+Install fills `~/.penguin/` with fourteen workflows, their skills, eight adapters, a `defaults` file that picks the agent, and a tsconfig for editor types. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
 
 - `pn run ship --ticket ABC-123`: ticket to open PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
 - `pn run ship-local --ticket "the footer scrolls"`: the same work, landed instead of proposed. It commits, holds until you answer done, then rebases onto main and moves main to it.
-- `pn run review-pr --pr 42`: review an open PR, post the findings, approve when nothing blocks, and review again on every push until it closes.
+- `pn run review-pr --pr 42`: review an open PR. A change small enough to read yourself holds at a gate first. Then post the findings, approve when nothing blocks, and review again on every push until it closes.
+- `pn run pr-queue`: watch this repository for the pull requests that ask for your review, and run review-pr on each one as it arrives.
 - `pn run make-workflow --idea "..."`: design, write, and review a new workflow.
 
 A step is one bare verb. Each one runs alone, and the pipelines call them:

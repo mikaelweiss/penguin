@@ -2,6 +2,16 @@ import { workflow } from "penguin";
 import { z } from "zod";
 
 const Ack = z.union([z.enum(["ok"]), z.string()]);
+
+const DIFF_LINES = 500;
+
+const Triage = z.object({
+  eyeball: z
+    .boolean()
+    .describe("true when a person can read the whole change and judge it in a minute"),
+  reason: z.string().describe("the one line that decides it"),
+});
+
 const Findings = z.object({
   blockers: z
     .array(z.string())
@@ -24,6 +34,12 @@ function report(findings: Findings): string {
   return `### Blockers\n\n${listed(findings.blockers)}\n\n### Non-blockers\n\n${listed(findings.nonBlockers)}`;
 }
 
+function cut(diff: string): string {
+  const lines = diff.split("\n");
+  if (lines.length <= DIFF_LINES) return diff;
+  return `${lines.slice(0, DIFF_LINES).join("\n")}\n\n[cut here: the diff runs ${lines.length} lines]`;
+}
+
 function noted(notes: Note[]): string {
   return notes
     .map((note) => `## ${note.author} on ${note.at}\n\n${note.body}`)
@@ -32,7 +48,7 @@ function noted(notes: Note[]): string {
 
 export default workflow({
   description:
-    "review an open pull request: post the findings, approve when nothing blocks, and re-review every push until it closes",
+    "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until it closes",
   params: z.object({ pr: z.string() }),
 
   async run({ params, agent, vcs, github, view, gate }) {
@@ -57,6 +73,34 @@ export default workflow({
       });
     let description = pr.body;
     let notes: Note[] = said.comments;
+
+    const briefing = (): string => {
+      const conversation =
+        notes.length === 0 ? "" : `\n\n# Comments\n\n${noted(notes)}`;
+      return `# PR #${pr.number}: ${pr.title}\n\n${pr.url}\n\n${description}${conversation}`;
+    };
+
+    // The triage reads the diff over the wire, so a PR the user takes costs no worktree.
+    const looked = await github.pr.diff(params.pr);
+    if (!looked.ok)
+      view.event({
+        level: "warn",
+        message: `The PR diff did not read: ${looked.reason}`,
+      });
+    const triaged = (await agent({ name: "triage" }).run("penguin-triage-pr", {
+      input: `${briefing()}\n\n# Diff\n\n${cut(looked.diff)}`,
+      result: Triage,
+    }))!;
+    if (triaged.eyeball) {
+      const choice = await gate(
+        `PR #${pr.number} is small enough to read yourself: ${triaged.reason}\n\n${pr.url}\n\nType review to run the full review, or mine to leave it to you.`,
+        z.enum(["review", "mine"]),
+      );
+      if (choice === "mine") {
+        view.event({ message: `PR #${pr.number} is yours to read` });
+        return { rounds: 0, posted: 0 };
+      }
+    }
 
     const ref = `pull/${pr.number}/head`;
     const name = `review-pr-${pr.number}`;
@@ -92,12 +136,6 @@ export default workflow({
     let owed = true;
     let rounds = 0;
     let posted = 0;
-
-    const briefing = (): string => {
-      const conversation =
-        notes.length === 0 ? "" : `\n\n# Comments\n\n${noted(notes)}`;
-      return `# PR #${pr.number}: ${pr.title}\n\n${pr.url}\n\n${description}${conversation}`;
-    };
 
     const opening = (): string =>
       previous === undefined

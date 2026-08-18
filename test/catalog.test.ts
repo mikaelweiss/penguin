@@ -21,6 +21,7 @@ const workflowFiles = [
   "make-workflow.ts",
   "open-pr.ts",
   "plan.ts",
+  "pr-queue.ts",
   "review-pr.ts",
   "review.ts",
   "ship-local.ts",
@@ -253,6 +254,83 @@ export default adapter({
 });
 `;
 
+const queueGithub = `import fs from "node:fs";
+import { adapter } from "penguin";
+
+export default adapter({
+  role: "github",
+  name: "gh",
+  description: "fake github with a queue of review requests",
+  build: (host) => ({
+    issue: {
+      get: async () => ({ ok: false, issue: null, reason: "no issue" }),
+      comments: async () => ({ ok: true, comments: [], reason: "" }),
+    },
+    pr: {
+      get: async (ref) => ({
+        ok: true,
+        pr: {
+          number: Number(ref),
+          title: "pin the footer",
+          body: "the footer scrolls away",
+          state: "OPEN",
+          isDraft: false,
+          headRefOid: "abc123",
+          url: "https://example.test/pr/" + ref,
+        },
+        reason: "",
+      }),
+      comments: async () => ({ ok: true, comments: [], reason: "" }),
+      create: async () => ({ ok: true, url: "https://example.test/pr/7", reason: "" }),
+      diff: async () => ({ ok: true, diff: "", reason: "" }),
+      comment: async (ref, options) => {
+        fs.appendFileSync(host.cwd + "/commented-" + ref + ".txt", options.body ?? "");
+        return { ok: true, reason: "" };
+      },
+      approve: async (ref) => {
+        fs.writeFileSync(host.cwd + "/approved-" + ref + ".txt", "approved");
+        return { ok: true, reason: "" };
+      },
+      changes: (pr) => ({
+        next: () =>
+          new Promise((resolve) => {
+            const tick = () => {
+              if (fs.existsSync(host.cwd + "/closed-" + pr + ".txt"))
+                return resolve({ kind: "closed", state: "MERGED" });
+              setTimeout(tick, 25);
+            };
+            tick();
+          }),
+      }),
+      requested: async (reviewer) => {
+        fs.writeFileSync(host.cwd + "/reviewer.txt", reviewer);
+        let at = 0;
+        return {
+          next: () =>
+            new Promise((resolve) => {
+              const tick = () => {
+                const file = host.cwd + "/requests.txt";
+                const lines = fs.existsSync(file)
+                  ? fs.readFileSync(file, "utf8").split("\\n").filter((line) => line !== "")
+                  : [];
+                const line = lines[at];
+                if (line === undefined) return setTimeout(tick, 25);
+                at += 1;
+                resolve({
+                  number: Number(line),
+                  title: "pin the footer",
+                  url: "https://example.test/pr/" + line,
+                });
+              };
+              tick();
+            }),
+        };
+      },
+    },
+  }),
+});
+`;
+
 const fakeJira = `import { adapter } from "penguin";
 
 export default adapter({
@@ -453,6 +531,7 @@ test("the catalog composes the pipelines out of the steps", async () => {
     "work",
   ]);
   assert.deepEqual(importsOf("work.ts"), ["baseline", "implement", "plan", "triage"]);
+  assert.deepEqual(importsOf("pr-queue.ts"), ["review-pr"]);
   assert.equal(typeof (await load(path.join(examples, "ship.ts"))), "function");
   assert.equal(
     typeof (await load(path.join(examples, "ship-local.ts"))),
@@ -851,7 +930,10 @@ test("the catalog commit workflow writes nothing when the tree is clean", async 
 
 test("the catalog review-pr workflow approves a clean PR and follows it to the close", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"blockers":[],"nonBlockers":["tiny nit"]}');
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":["tiny nit"]}',
+  );
   outsideReady(box);
 
   const started = box.penguin(
@@ -877,7 +959,10 @@ test("the catalog review-pr workflow approves a clean PR and follows it to the c
 
 test("the catalog review-pr workflow gates on blockers and posts without approving", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"blockers":["the flag is wrong"],"nonBlockers":[]}');
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":["the flag is wrong"],"nonBlockers":[]}',
+  );
   outsideReady(box);
 
   const started = box.penguin(
@@ -908,7 +993,10 @@ test("the catalog review-pr workflow gates on blockers and posts without approvi
 
 test("the catalog review-pr workflow reviews in the worktree that is already there", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"blockers":[],"nonBlockers":[]}');
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":[]}',
+  );
   outsideReady(box);
   box.writeAdapter("git", takenVcs);
 
@@ -933,7 +1021,10 @@ test("the catalog review-pr workflow reviews in the worktree that is already the
 
 test("the catalog review-pr workflow replaces the worktree that is already there", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"blockers":[],"nonBlockers":[]}');
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":[]}',
+  );
   outsideReady(box);
   box.writeAdapter("git", takenVcs);
 
@@ -957,7 +1048,10 @@ test("the catalog review-pr workflow replaces the worktree that is already there
 
 test("the catalog review-pr workflow stops when the user exits the worktree gate", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"blockers":[],"nonBlockers":[]}');
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":[]}',
+  );
   outsideReady(box);
   box.writeAdapter("git", takenVcs);
 
@@ -998,6 +1092,92 @@ test("the catalog review-pr workflow gates when the PR does not read", async (t)
   assert.ok(question.startsWith("gh pr view 42 failed:"), question);
   box.send("review-pr-1", "ok");
   assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
+});
+
+test("the catalog review-pr workflow hands a small PR back to the user", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":true,"reason":"one line of copy","blockers":[],"nonBlockers":[]}',
+  );
+  outsideReady(box);
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "review-pr-1", "PR #42 is small enough", "mine");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 0, posted: 0 });
+  assert.equal(box.sessions().length, 1, "the review ran anyway");
+  assert.ok(!box.exists("commented.txt"), "the review posted a comment");
+  assert.ok(!box.exists("removed.txt"), "a worktree was cut for a PR nobody reviewed");
+});
+
+test("the catalog review-pr workflow reviews the small PR the user keeps", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":true,"reason":"one line of copy","blockers":[],"nonBlockers":[]}',
+  );
+  outsideReady(box);
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "review-pr-1", "PR #42 is small enough", "review");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.ok(box.exists("approved.txt"), "the PR was not approved");
+});
+
+test("the catalog pr-queue workflow reviews every request once, beside the watch", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":[]}',
+  );
+  box.writeAdapter("git", fakeVcs);
+  box.writeAdapter("gh", queueGithub);
+  // 42 twice: the second request lands while the review of the first one is still open.
+  box.write("requests.txt", "42\n43\n42\n44\n");
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "pr-queue.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+  // 44 is handed out after 42 arrives the second time, so its review pins what the queue did with it.
+  await waitFor(
+    () =>
+      box.exists("approved-42.txt") &&
+      box.exists("approved-43.txt") &&
+      box.exists("approved-44.txt"),
+  );
+
+  const label = await description("review-pr.ts");
+  const reviews = activities(box, "pr-queue-1").filter(
+    (span) => span.label === label,
+  );
+  assert.equal(box.read("reviewer.txt"), "@me");
+  assert.equal(reviews.length, 3, "the PR under review was taken twice");
+  assert.equal(box.ended("pr-queue-1"), undefined, "the queue stopped watching");
 });
 
 test("the catalog make-workflow workflow designs, writes, and reviews the new workflow", async (t) => {

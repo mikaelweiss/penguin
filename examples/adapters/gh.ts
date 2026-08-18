@@ -3,6 +3,8 @@ import { adapter } from "penguin";
 const ISSUE_FIELDS = "number,title,body,state,url";
 const PR_FIELDS = "number,title,body,state,isDraft,headRefOid,url";
 const WATCHED_FIELDS = "state,isDraft,body,headRefOid,comments";
+const REQUESTED_FIELDS = "number,title,url";
+const REQUESTED_LIMIT = 100;
 const POLL_MS = 30_000;
 
 type Issue = {
@@ -27,6 +29,12 @@ type Comment = {
   author: string;
   at: string;
   body: string;
+};
+
+type Requested = {
+  number: number;
+  title: string;
+  url: string;
 };
 
 type Written = { author?: { login?: string }; createdAt?: string; body?: string };
@@ -159,6 +167,42 @@ export default adapter({
                       type: "event",
                       level: "warn",
                       message: `watching PR ${pr} failed: ${error instanceof Error ? error.message : String(error)}`,
+                    });
+                  }
+                  failing = true;
+                }
+                if (queue.length === 0) await rested(POLL_MS);
+              }
+            }),
+        };
+      },
+      async requested(reviewer: string): Promise<{ next(): Promise<Requested> }> {
+        const search = `review-requested:${reviewer} draft:false`;
+        let last: number[] | undefined;
+        let failing = false;
+        const queue: Requested[] = [];
+        return {
+          next: () =>
+            host.wait(`watching the review requests for ${reviewer}`, async () => {
+              for (;;) {
+                const ready = queue.shift();
+                if (ready !== undefined) return ready;
+                try {
+                  const done = await host.shell(
+                    `gh pr list --search ${quoted(search)} --state open --limit ${REQUESTED_LIMIT} --json ${REQUESTED_FIELDS}`,
+                  );
+                  if (done.code !== 0) throw new Error(done.stderr.trim());
+                  const open = JSON.parse(done.stdout) as Requested[];
+                  const before = last ?? [];
+                  queue.push(...open.filter((pr) => !before.includes(pr.number)));
+                  last = open.map((pr) => pr.number);
+                  failing = false;
+                } catch (error) {
+                  if (!failing) {
+                    host.emit({
+                      type: "event",
+                      level: "warn",
+                      message: `watching the review requests for ${reviewer} failed: ${error instanceof Error ? error.message : String(error)}`,
                     });
                   }
                   failing = true;
