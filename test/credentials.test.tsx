@@ -97,7 +97,7 @@ async function refusedRun(
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  homed(t, box.home);
+  homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
     <RunView name="w-1" agent="agent none" canReturn={false} onLeave={(one) => left.push(one)} />,
@@ -172,7 +172,7 @@ test("invariant 12: a credential reaches the store, never the run's files", asyn
     { name: "token", label: "A tracker API token", secret: true, env: "TRACKER_TOKEN" },
   ]);
 
-  homed(t, box.home);
+  homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
     <RunView name="w-1" agent="agent none" canReturn={false} onLeave={(one) => left.push(one)} />,

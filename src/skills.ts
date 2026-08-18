@@ -16,8 +16,9 @@ export function sources(root: string): Source[] {
 
 export function link(target: string, chosen: Source[]): void {
   fs.mkdirSync(target, { recursive: true });
+  const owned = new Set(order(target));
   for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
-    if (entry.isSymbolicLink()) fs.unlinkSync(path.join(target, entry.name));
+    if (entry.isSymbolicLink() && owned.has(entry.name)) fs.unlinkSync(path.join(target, entry.name));
   }
   for (const source of chosen) {
     const at = path.join(target, source.name);

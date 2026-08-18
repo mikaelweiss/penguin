@@ -13,6 +13,7 @@ const hint =
 export async function install(): Promise<void> {
   const fresh = !fs.existsSync(home());
   if (interactive()) await wordmark("penguin", { color: color(), delay: 65 });
+  fs.mkdirSync(home(), { recursive: true });
   fs.mkdirSync(runsRoot(), { recursive: true });
   if (fresh) {
     copyCatalog();

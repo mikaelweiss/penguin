@@ -7,8 +7,14 @@ export function home(): string {
   return path.join(os.homedir(), ".penguin");
 }
 
+export function stateRoot(): string {
+  const base = process.env["XDG_STATE_HOME"];
+  if (base !== undefined && base !== "") return path.join(path.resolve(base), "penguin");
+  return path.join(os.homedir(), ".local", "state", "penguin");
+}
+
 export function runsRoot(): string {
-  return path.join(home(), "runs");
+  return path.join(stateRoot(), "runs");
 }
 
 export function homeSkills(): string {

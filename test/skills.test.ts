@@ -239,3 +239,20 @@ test("an unknown sync-skills option is refused", (t) => {
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /unknown option --everything/);
 });
+
+test("a symlink penguin did not make survives a sync", (t) => {
+  const box = sandbox(t);
+  const claude = path.join(box.userHome, ".claude", "skills");
+  box.writeSkill(claude, "review", "review it\n");
+  const stowed = path.join(box.userHome, "dotfiles", "skills");
+  box.writeSkill(stowed, "deploy", "deploy it\n");
+  const skills = path.join(box.home, "skills");
+  fs.mkdirSync(skills, { recursive: true });
+  fs.symlinkSync(stowed, path.join(skills, "dotfiles"));
+
+  const synced = box.penguin("sync-skills", "--global");
+
+  assert.equal(synced.code, 0, synced.output);
+  assert.equal(fs.readlinkSync(path.join(skills, "dotfiles")), stowed);
+  assert.equal(fs.readlinkSync(path.join(skills, "claude")), claude);
+});

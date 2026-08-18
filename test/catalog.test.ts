@@ -285,7 +285,7 @@ function ancestors(spans: Span[], span: Span): string[] {
 }
 
 function runNames(box: Sandbox): string[] {
-  return fs.readdirSync(path.join(box.home, "runs")).sort();
+  return fs.readdirSync(box.runs).sort();
 }
 
 async function description(file: string): Promise<string> {

@@ -18,21 +18,29 @@ type Box = {
   run(name: string, events: ViewEvent[], options?: { live?: boolean; workflow?: string }): string;
 };
 
+function restore(name: string, prior: string | undefined): void {
+  if (prior === undefined) delete process.env[name];
+  else process.env[name] = prior;
+}
+
 function sandbox(t: TestContext): Box {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-tui-")));
   const home = path.join(root, "home");
-  fs.mkdirSync(path.join(home, "runs"), { recursive: true });
-  const prior = process.env["PENGUIN_HOME"];
+  const state = path.join(root, "state");
+  const runs = path.join(state, "penguin", "runs");
+  fs.mkdirSync(runs, { recursive: true });
+  const prior = { home: process.env["PENGUIN_HOME"], state: process.env["XDG_STATE_HOME"] };
   process.env["PENGUIN_HOME"] = home;
+  process.env["XDG_STATE_HOME"] = state;
   t.after(() => {
-    if (prior === undefined) delete process.env["PENGUIN_HOME"];
-    else process.env["PENGUIN_HOME"] = prior;
+    restore("PENGUIN_HOME", prior.home);
+    restore("XDG_STATE_HOME", prior.state);
     fs.rmSync(root, { recursive: true, force: true });
   });
   return {
     home,
     run(name, events, options) {
-      const dir = path.join(home, "runs", name);
+      const dir = path.join(runs, name);
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(
         path.join(dir, "run.json"),

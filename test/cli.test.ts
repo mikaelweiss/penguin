@@ -79,7 +79,7 @@ test("a missing param fails before the run is created", (t) => {
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /invalid params:/);
   assert.match(failed.stderr, /count:/);
-  assert.equal(fs.existsSync(path.join(box.home, "runs")), false);
+  assert.equal(fs.existsSync(box.runs), false);
   assert.equal(box.exists("out.txt"), false, "the run function never ran");
 });
 
@@ -113,7 +113,7 @@ test("run names count up per workflow file", (t) => {
   assert.match(box.penguin("run", "./w.ts", "--background").stdout, /^run w-2 started,/m);
   assert.match(box.penguin("run", "./other.ts", "--background").stdout, /^run other-1 started,/m);
 
-  assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")).sort(), ["other-1", "w-1", "w-2"]);
+  assert.deepEqual(fs.readdirSync(box.runs).sort(), ["other-1", "w-1", "w-2"]);
 });
 
 test("a run starts by naming the run and the agent adapter", (t) => {
@@ -252,7 +252,7 @@ test("a file that exports no workflow is refused", (t) => {
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /does not default-export a workflow/);
-  assert.equal(fs.existsSync(path.join(box.home, "runs")), false);
+  assert.equal(fs.existsSync(box.runs), false);
 });
 
 test("list adapters shows role, name, and description", (t) => {
@@ -298,5 +298,5 @@ test("run -i without a terminal is refused", (t) => {
 
   assert.equal(done.code, 1);
   assert.match(done.stderr, /pn run -i needs a terminal/);
-  assert.equal(fs.existsSync(path.join(box.home, "runs", "w-1")), false);
+  assert.equal(fs.existsSync(path.join(box.runs, "w-1")), false);
 });

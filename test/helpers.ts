@@ -98,6 +98,8 @@ export default adapter({
 
 export type Sandbox = {
   home: string;
+  state: string;
+  runs: string;
   userHome: string;
   project: string;
   writeSkill(dir: string, name: string, text: string): void;
@@ -129,19 +131,23 @@ export function sandbox(t: TestContext): Sandbox {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-test-")));
   const home = path.join(root, "penguin-home");
   const userHome = path.join(root, "user-home");
+  const state = path.join(userHome, ".local", "state");
+  const runs = path.join(state, "penguin", "runs");
   const project = path.join(root, "project");
   fs.mkdirSync(home);
   fs.mkdirSync(userHome);
   fs.mkdirSync(project);
   const sessionLog = path.join(root, "agent-log.jsonl");
   t.after(() => {
-    stopRuns(path.join(home, "runs"));
+    stopRuns(runs);
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const env = { ...process.env, PENGUIN_HOME: home, HOME: userHome };
+  const env = { ...process.env, PENGUIN_HOME: home, HOME: userHome, XDG_STATE_HOME: state };
   const box: Sandbox = {
     home,
+    state,
+    runs,
     userHome,
     project,
     writeSkill(dir, name, text) {
@@ -222,7 +228,7 @@ export function sandbox(t: TestContext): Sandbox {
         .map((line) => JSON.parse(line) as SessionLine);
     },
     runDir(run) {
-      return path.join(home, "runs", run);
+      return path.join(runs, run);
     },
     events(run) {
       const file = path.join(box.runDir(run), "events.jsonl");

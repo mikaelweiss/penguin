@@ -96,7 +96,7 @@ test("invariant 3: q detaches and the run continues", async (t) => {
   await box.waitForState("w-1", "blocked");
   const holder = box.holder("w-1");
 
-  homed(t, box.home);
+  homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
     <RunView name="w-1" agent="agent fake" canReturn={false} onLeave={(one) => left.push(one)} />,
@@ -494,7 +494,7 @@ export default workflow({
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  assert.deepEqual(fs.readdirSync(path.join(box.home, "runs")), ["w-1"]);
+  assert.deepEqual(fs.readdirSync(box.runs), ["w-1"]);
   const listed = box.penguin("ps");
   const rows = listed.stdout.split("\n").filter((line) => line.trim() !== "");
   assert.equal(rows.length, 2, listed.stdout);
@@ -567,7 +567,7 @@ test("invariant 9: the first penguin command installs, and sync keeps a skill yo
 
   assert.equal(first.code, 0, first.output);
   assert.match(first.stdout, new RegExp(`created ${box.home}`));
-  assert.equal(fs.existsSync(path.join(box.home, "runs")), true);
+  assert.equal(fs.existsSync(box.runs), true);
   assert.equal(fs.existsSync(path.join(box.home, "adapters", "claude.ts")), true);
   assert.equal(fs.readlinkSync(path.join(box.home, "skills", "claude")), claude);
 
@@ -788,12 +788,7 @@ function alive(pid: number): boolean {
 
 test("invariant 14: an unfinished run directory is invisible, and discard spares a finished one", (t) => {
   const box = sandbox(t);
-  const was = process.env["PENGUIN_HOME"];
-  process.env["PENGUIN_HOME"] = box.home;
-  t.after(() => {
-    if (was === undefined) delete process.env["PENGUIN_HOME"];
-    else process.env["PENGUIN_HOME"] = was;
-  });
+  homed(t, box);
   const file = path.join(box.project, "w.ts");
 
   const { name, dir } = allocateRun(file);
@@ -835,7 +830,7 @@ test("invariant 16: the status line holds one line, however long the question", 
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  homed(t, box.home);
+  homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
   try {
     const frame = await setup.waitForFrame(
@@ -858,7 +853,7 @@ test("invariant 16: the input bar holds the bottom of the screen", async (t) => 
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  homed(t, box.home);
+  homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
   try {
     const frame = await setup.waitForFrame((text) => text.includes("answer: Blockers"));
@@ -879,7 +874,7 @@ test("invariant 15: a paste sends as one message, newlines kept", async (t) => {
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
   await box.waitForState("w-1", "blocked");
 
-  homed(t, box.home);
+  homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
     <RunView name="w-1" agent="agent fake" canReturn={false} onLeave={(one) => left.push(one)} />,
@@ -909,7 +904,7 @@ test("invariant 15: a collapsed paste sends its full text, never the token", asy
   await box.waitForState("w-1", "blocked");
 
   const big = Array.from({ length: 10 }, (_, n) => `line ${n}`).join("\n");
-  homed(t, box.home);
+  homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
   let ended: Event;
   try {

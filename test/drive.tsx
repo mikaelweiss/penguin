@@ -4,12 +4,17 @@ import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode } from "react";
 
 /** Point the in-process TUI at a sandbox home, and put it back after. */
-export function homed(t: TestContext, home: string): void {
-  const prior = process.env["PENGUIN_HOME"];
-  process.env["PENGUIN_HOME"] = home;
+export function homed(t: TestContext, box: { home: string; state: string }): void {
+  set(t, "PENGUIN_HOME", box.home);
+  set(t, "XDG_STATE_HOME", box.state);
+}
+
+function set(t: TestContext, name: string, value: string): void {
+  const prior = process.env[name];
+  process.env[name] = value;
   t.after(() => {
-    if (prior === undefined) delete process.env["PENGUIN_HOME"];
-    else process.env["PENGUIN_HOME"] = prior;
+    if (prior === undefined) delete process.env[name];
+    else process.env[name] = prior;
   });
 }
 
