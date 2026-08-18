@@ -18,7 +18,7 @@ A TypeScript CLI on Bun. It runs one workflow as one live process against any re
 4. **Definitions are files the user keeps anywhere.** Team workflows, skills, and adapters sit in `<project>/.penguin/` and ship in git. Personal ones sit in `~/.penguin/`. penguin lists both and runs either. Run state lives under `~/.penguin/`.
 5. **Params are data, workflows are code.** What the engine must know before code runs is one schema. Everything inside a run's lifetime is TypeScript over `ctx`, so control flow never grows a schema.
 6. **Workflows compose as functions.** A workflow imports another workflow, calls it with params, and receives its return value. Small atomic workflows build large ones, and only the root is a run.
-7. **Agent-agnostic.** An agent is an adapter with the `agent` role. The claude adapter ships. An adapter for another CLI is one file with the same role, and any session can name the implementation it wants.
+7. **Agent-agnostic.** An agent is an adapter with the `agent` role. The claude, codex, cursor, and pi adapters ship. An adapter for another CLI is one file with the same role, and any session can name the implementation it wants.
 8. **The engine enforces what agents cannot self-enforce.** Gates, schema-valid results, and loop bounds live in workflow code that the engine executes, never in agent hands.
 9. **The engine ships empty, the home starts full.** The engine depends on no adapter and no definition. Install copies the starter catalog (`30-defaults.md`) into `~/.penguin/`. Every entry is an ordinary file the user can edit or delete.
 

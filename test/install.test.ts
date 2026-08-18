@@ -20,7 +20,7 @@ test("a fresh install fills the home with the catalog", (t) => {
   assert.equal(fs.existsSync(path.join(box.home, "ship.ts")), true);
   assert.equal(fs.existsSync(path.join(box.home, "skills", "penguin-triage", "SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(box.home, "tsconfig.json")), true);
-  for (const name of ["claude", "codex", "git", "gh"]) {
+  for (const name of ["claude", "codex", "cursor", "git", "gh"]) {
     assert.equal(fs.existsSync(path.join(box.home, "adapters", `${name}.ts`)), true, name);
   }
   assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent claude\n");

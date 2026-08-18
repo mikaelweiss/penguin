@@ -47,7 +47,7 @@ for (let round = 1; round <= 3; round++) {
 }
 ```
 
-Options: `use` names the agent adapter implementation when more than one is installed, `cwd` sets the session's working directory, `name` labels the session (a viewer shows it, and a message targets it; the default is the implementation name plus a counter), and any other field passes through to the adapter (the claude adapter reads `model`).
+Options: `use` names the agent adapter implementation when more than one is installed, `cwd` sets the session's working directory, `name` labels the session (a viewer shows it, and a message targets it; the default is the implementation name plus a counter), and any other field passes through to the adapter (every shipped agent adapter reads `model`).
 
 `session.run(skill, {input, result, blocked})` returns a **turn**. `skill` is a skill name or a path to a markdown file (skills below). `result` is a plain `z.object` schema. Await the turn for the result: on a schema mismatch the engine sends the validation error back into the same conversation and retries once, then gates to a human. A turn with no `result` resolves to null.
 

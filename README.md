@@ -30,7 +30,7 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.penguin/` with twelve workflows, their skills, six adapters, a `defaults` file that picks the agent, and a tsconfig for editor types. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
+Install fills `~/.penguin/` with twelve workflows, their skills, seven adapters, a `defaults` file that picks the agent, and a tsconfig for editor types. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
 
 - `pn run ship --ticket ABC-123`: ticket to open PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
 - `pn run ship-local --ticket "the footer scrolls"`: the same work, landed instead of proposed. It commits, holds until you answer done, then rebases onto main and moves main to it.
@@ -50,7 +50,7 @@ A step is one bare verb. Each one runs alone, and the pipelines call them:
 
 The pipelines are the steps called as functions (Compose workflows, below).
 
-`~/.penguin/adapters/` holds the adapters: `claude`, `codex`, and `pi` (the agents), `git`, `gh`, and `jira`. `~/.penguin/defaults` picks one implementation per role, and it ships with one line, `agent claude`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
+`~/.penguin/adapters/` holds the adapters: `claude`, `codex`, `cursor`, and `pi` (the agents), `git`, `gh`, and `jira`. `~/.penguin/defaults` picks one implementation per role, and it ships with one line, `agent claude`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
 Workflow files live in `~/.penguin/` for every repository, or in `<repo>/.penguin/` for one. Skills and adapters live next to them, in `skills/` and `adapters/`.
 
