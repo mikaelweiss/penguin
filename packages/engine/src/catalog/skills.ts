@@ -1,20 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type Scope } from "../paths.ts";
 import * as catalogs from "./catalogs.ts";
 
-export type Source = { name: string; dir: string };
+export type SkillSource = { name: string; dir: string };
 
 const ORDER = ".order";
 
-export function sources(root: string): Source[] {
+export function skillSources(root: string): SkillSource[] {
   return [
     { name: "claude", dir: path.join(root, ".claude", "skills") },
     { name: "agents", dir: path.join(root, ".agents", "skills") },
   ].filter((source) => fs.existsSync(source.dir));
 }
 
-export function link(target: string, chosen: Source[]): void {
+export function linkSkills(target: string, chosen: SkillSource[]): void {
   fs.mkdirSync(target, { recursive: true });
   const owned = new Set(order(target));
   for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
@@ -30,7 +29,7 @@ export function link(target: string, chosen: Source[]): void {
   else fs.writeFileSync(file, `${chosen.map((source) => source.name).join("\n")}\n`);
 }
 
-export function shared(chosen: Source[]): string[] {
+export function sharedSkills(chosen: SkillSource[]): string[] {
   const seen = new Set<string>();
   const twice = new Set<string>();
   for (const source of chosen) {
@@ -42,9 +41,9 @@ export function shared(chosen: Source[]): string[] {
   return [...twice].sort();
 }
 
-export type Root = { dir: string; scope: Scope; source: string };
+export type SkillRoot = { dir: string; scope: catalogs.CatalogScope; source: string };
 
-export function roots(dir: string, scope: Scope): Root[] {
+export function skillRoots(dir: string, scope: catalogs.CatalogScope): SkillRoot[] {
   if (!fs.existsSync(dir)) return [];
   const inside = fs
     .readdirSync(dir)
@@ -58,23 +57,23 @@ export function roots(dir: string, scope: Scope): Root[] {
   ];
 }
 
-export function searchPath(cwd: string): Root[] {
+export function searchPath(cwd: string): SkillRoot[] {
   return searchPathIn(catalogs.roots(cwd));
 }
 
-export function searchPathIn(list: catalogs.Catalog[]): Root[] {
-  return list.flatMap((catalog) => roots(catalogs.skillsDir(catalog), catalog.scope));
+export function searchPathIn(list: catalogs.Catalog[]): SkillRoot[] {
+  return list.flatMap((catalog) => skillRoots(catalogs.skillsDir(catalog), catalog.scope));
 }
 
 export type Skill = {
   name: string;
   description: string;
-  scope: Scope;
+  scope: catalogs.CatalogScope;
   source: string;
   at: string;
 };
 
-export function available(cwd: string): Skill[] {
+export function availableSkills(cwd: string): Skill[] {
   const taken = new Set<string>();
   const found: Skill[] = [];
   for (const root of searchPath(cwd)) {

@@ -185,10 +185,10 @@ test("list skills --verbose adds scope, source, and file", (t) => {
   const listed = box.penguin("list", "skills", "--verbose");
 
   assert.equal(listed.code, 0, listed.output);
-  assert.match(listed.stdout, /^house-style\n {2}local {2}penguin {2}\S/m);
-  assert.match(listed.stdout, /^penguin-triage\n {2}global {2}penguin {2}\S/m);
-  assert.match(listed.stdout, /^ {2}global {2}claude {2}~\/\.claude\/skills\/review$/m);
-  assert.match(listed.stdout, /^ {2}global {2}agents {2}~\/\.agents\/skills\/migrate$/m);
+  assert.match(listed.stdout, /^house-style\n {2}project {2}penguin {2}\S/m);
+  assert.match(listed.stdout, /^penguin-triage\n {2}home {2}penguin {2}\S/m);
+  assert.match(listed.stdout, /^ {2}home {2}claude {2}~\/\.claude\/skills\/review$/m);
+  assert.match(listed.stdout, /^ {2}home {2}agents {2}~\/\.agents\/skills\/migrate$/m);
 });
 
 test("list skills shows the winner of a shared name once", (t) => {

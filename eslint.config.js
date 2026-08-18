@@ -21,7 +21,7 @@ const engineBare = {
 export default [
   ...nx.configs["flat/base"],
   {
-    ignores: ["**/node_modules/**", "packages/engine/examples/**", "src/**"],
+    ignores: ["**/node_modules/**", "packages/engine/examples/**"],
   },
   {
     files: ["**/*.ts", "**/*.tsx"],

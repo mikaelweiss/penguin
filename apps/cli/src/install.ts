@@ -1,7 +1,6 @@
 import {
     catalogsFile,
     defaultsFile,
-    forScope,
     homeCatalog,
     installed,
     linkSkills,
@@ -12,14 +11,15 @@ import {
     skillsDir,
     starterCatalog,
     userRoot,
+    writableCatalog,
     writeEnv,
-    type Scope,
     type SkillSource,
+    type WritableCatalog,
 } from "@mikaelweiss/penguin-engine/catalog";
 import fs from "node:fs";
 import path from "node:path";
 import { intro } from "./intro.ts";
-import { interactive } from "./this-computer/tty.ts";
+import { interactive } from "./machine/tty.ts";
 
 const hint =
   "run `pn list workflows` to see what's available and then `pn run <workflow>` from a project directory to get started";
@@ -34,7 +34,7 @@ export async function install(): Promise<void> {
     enableStarter(dir);
     writeEnv(process.cwd(), await installed(process.cwd()));
   }
-  await syncSkills("global", true);
+  await syncSkills("home", true);
   say(fresh ? `\ncreated ${short(dir)}` : `\npenguin home is ${short(dir)}`);
   say(hint);
 }
@@ -53,9 +53,9 @@ export async function firstRun(): Promise<boolean> {
   return true;
 }
 
-export async function syncSkills(scope: Scope, quiet = false): Promise<void> {
-  const root = scope === "global" ? userRoot() : process.cwd();
-  const target = skillsDir(forScope(process.cwd(), scope));
+export async function syncSkills(into: WritableCatalog, quiet = false): Promise<void> {
+  const root = into === "home" ? userRoot() : process.cwd();
+  const target = skillsDir(writableCatalog(process.cwd(), into));
   const found = skillSources(root);
   if (found.length === 0) {
     if (fs.existsSync(target)) linkSkills(target, []);

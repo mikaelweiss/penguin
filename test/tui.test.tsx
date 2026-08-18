@@ -9,14 +9,14 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { act, type ReactNode } from "react";
-import { computerLine, strained } from "../apps/cli/src/this-computer/memory.ts";
+import { agentLabel, agentLine } from "../apps/cli/src/attach/attach.ts";
+import { watchAsLines } from "../apps/cli/src/attach/plain.ts";
+import { computerLine, strained } from "../apps/cli/src/machine/memory.ts";
 import { Ask, Pick } from "../apps/cli/src/tui/ask.tsx";
 import { Dashboard, type Open } from "../apps/cli/src/tui/dashboard.tsx";
 import { Editor } from "../apps/cli/src/tui/editor.ts";
 import { Choices } from "../apps/cli/src/tui/input.tsx";
 import { type Left, PANE, RunView } from "../apps/cli/src/tui/run-view/run-view.tsx";
-import { watchAsLines } from "../apps/cli/src/watch-run/plain.ts";
-import { agentLabel, agentLine } from "../apps/cli/src/watch-run/watch.ts";
 import { frameWith } from "./drive.tsx";
 
 type Box = {
@@ -2037,7 +2037,7 @@ test("every agent header label fits the pane the run view cuts it to", (t) => {
     role: "agent",
     name,
     description: "",
-    scope: "global",
+    scope: "home",
     file: `/adapters/${name}.ts`,
     definition: { role: "agent", name, description: "", build: () => ({}) },
   });

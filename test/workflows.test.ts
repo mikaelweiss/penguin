@@ -76,11 +76,11 @@ test("list workflows --verbose adds scope and file", (t) => {
   assert.equal(listed.code, 0, listed.output);
   assert.match(
     listed.stdout,
-    new RegExp(`^ticket\\n {2}local\\n {2}local {2}${path.join(box.project, ".penguin")}`, "m"),
+    new RegExp(`^ticket\\n {2}local\\n {2}project {2}${path.join(box.project, ".penguin")}`, "m"),
   );
   assert.match(
     listed.stdout,
-    new RegExp(`^release\\n {2}global\\n {2}global {2}${box.home}`, "m"),
+    new RegExp(`^release\\n {2}global\\n {2}home {2}${box.home}`, "m"),
   );
 });
 
@@ -164,15 +164,15 @@ test("a name that matches nothing names both places", (t) => {
 
 test("a name in both scopes draws two labels, and a name in one draws its own", () => {
   const both = [
-    { name: "ticket", scope: "local" as const, file: "/p/ticket.ts", description: "the local one", params: [] },
-    { name: "release", scope: "global" as const, file: "/h/release.ts", description: "ship it\nsecond line", params: [] },
-    { name: "ticket", scope: "global" as const, file: "/h/ticket.ts", description: "", params: [] },
+    { name: "ticket", scope: "project" as const, file: "/p/ticket.ts", description: "the local one", params: [] },
+    { name: "release", scope: "home" as const, file: "/h/release.ts", description: "ship it\nsecond line", params: [] },
+    { name: "ticket", scope: "home" as const, file: "/h/ticket.ts", description: "", params: [] },
   ];
 
   assert.deepEqual(choices(both), [
-    { label: "ticket (local)", note: "the local one" },
+    { label: "ticket (project)", note: "the local one" },
     { label: "release", note: "ship it" },
-    { label: "ticket (global)" },
+    { label: "ticket (home)" },
   ]);
 });
 

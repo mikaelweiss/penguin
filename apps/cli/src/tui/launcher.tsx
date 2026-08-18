@@ -18,8 +18,8 @@ import { allocateRun, attachmentsDir, discardRun, finishRun, startRun } from "@m
 import { decodePasteBytes, type KeyEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import { pasteImage } from "../this-computer/clipboard.ts";
-import { agentLine, started } from "../watch-run/watch.ts";
+import { agentLine, started } from "../attach/attach.ts";
+import { pasteImage } from "../machine/clipboard.ts";
 import { Editor } from "./editor.ts";
 import { Choices, InputBar } from "./input.tsx";
 import { cut } from "./text.ts";

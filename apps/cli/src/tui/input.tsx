@@ -1,6 +1,6 @@
 import type { KeyEvent } from "@opentui/core";
 import { type ReactNode, useReducer, useRef } from "react";
-import { copyText } from "../this-computer/clipboard.ts";
+import { copyText } from "../machine/clipboard.ts";
 import type { Editor } from "./editor.ts";
 import { cut } from "./text.ts";
 import { ink } from "./theme.ts";

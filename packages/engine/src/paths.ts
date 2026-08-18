@@ -21,8 +21,6 @@ export function projectHome(cwd: string): string {
   return path.join(cwd, ".penguin");
 }
 
-export type Scope = "local" | "global";
-
 export function userRoot(): string {
   return os.homedir();
 }

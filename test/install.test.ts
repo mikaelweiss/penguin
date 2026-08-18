@@ -57,7 +57,7 @@ test("a fresh install leaves ship in the workflow list, from examples/", (t) => 
     listed.stdout,
     /^ship {2}--ticket <text> \[--rounds <number>\]\n {2}ticket to open pull request:/m,
   );
-  assert.match(listed.stdout, new RegExp(path.join(starterCatalog().dir, "ship.ts")));
+  assert.match(listed.stdout, new RegExp(`starter  ${path.join(starterCatalog().dir, "ship.ts")}`));
 });
 
 test("a home workflow of the same name overlays the starter", (t) => {

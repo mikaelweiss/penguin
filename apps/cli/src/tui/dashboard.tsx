@@ -3,7 +3,7 @@ import { type Attention, age, Feed, stateOf } from "@mikaelweiss/penguin-viewer"
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
-import { type Computer, computerLine, readComputer, strained } from "../this-computer/memory.ts";
+import { type Computer, computerLine, readComputer, strained } from "../machine/memory.ts";
 import { CopyList, useCopy } from "./input.tsx";
 import { Launcher } from "./launcher.tsx";
 import { cut } from "./text.ts";

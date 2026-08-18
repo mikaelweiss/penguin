@@ -18,7 +18,7 @@ import {
   writeEnv,
   type Asked,
   type ParamsSchema,
-  type Scope,
+  type WritableCatalog,
 } from "@mikaelweiss/penguin-engine/catalog";
 import {
   allocateRun,
@@ -32,12 +32,12 @@ import {
 } from "@mikaelweiss/penguin-engine/run";
 import fs from "node:fs";
 import path from "node:path";
+import { agentLine, watchRun } from "./attach/attach.ts";
 import { firstRun, install, syncSkills } from "./install.ts";
 import { intro } from "./intro.ts";
 import { adapterBlocks, liveRunTable, skillBlocks, workflowBlocks } from "./list.ts";
-import { pasteImage } from "./this-computer/clipboard.ts";
-import { interactive } from "./this-computer/tty.ts";
-import { agentLine, watchRun } from "./watch-run/watch.ts";
+import { pasteImage } from "./machine/clipboard.ts";
+import { interactive } from "./machine/tty.ts";
 
 const usage = `penguin runs one workflow as a live process, and the terminal watches it.
 
@@ -147,15 +147,15 @@ function listSkills(verbose = false): number {
 }
 
 async function syncScopes(argv: string[]): Promise<number> {
-  const asked = new Set(argv.map(scopeOf));
-  const wanted: Scope[] = asked.size === 0 ? ["global", "local"] : [...asked];
-  for (const scope of wanted) await syncSkills(scope);
+  const asked = new Set(argv.map(writableFromFlag));
+  const wanted: WritableCatalog[] = asked.size === 0 ? ["home", "project"] : [...asked];
+  for (const into of wanted) await syncSkills(into);
   return 0;
 }
 
-function scopeOf(flag: string): Scope {
-  if (flag === "--global") return "global";
-  if (flag === "--local") return "local";
+function writableFromFlag(flag: string): WritableCatalog {
+  if (flag === "--global") return "home";
+  if (flag === "--local") return "project";
   throw new PenguinError(`unknown option ${flag}\n\n${usage}`);
 }
 

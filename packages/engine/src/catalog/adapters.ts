@@ -1,27 +1,27 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PenguinError } from "../errors.ts";
-import { defaultsFile, envFile, type Scope } from "../paths.ts";
 import type { Adapter } from "../author/host.ts";
+import { PenguinError } from "../errors.ts";
+import { defaultsFile, envFile } from "../paths.ts";
 import * as catalogs from "./catalogs.ts";
 import { importDefault } from "./loader.ts";
 
-export type Found = {
+export type AdapterFound = {
   role: string;
   name: string;
   description: string;
-  scope: Scope;
+  scope: catalogs.CatalogScope;
   file: string;
   definition: Adapter;
 };
 
-export async function installed(cwd: string): Promise<Found[]> {
+export async function installed(cwd: string): Promise<AdapterFound[]> {
   return installedIn(catalogs.roots(cwd));
 }
 
-export async function installedIn(list: catalogs.Catalog[]): Promise<Found[]> {
+export async function installedIn(list: catalogs.Catalog[]): Promise<AdapterFound[]> {
   const seen = new Set<string>();
-  const found: Found[] = [];
+  const found: AdapterFound[] = [];
   for (const catalog of list) {
     for (const entry of await scan(catalogs.adaptersDir(catalog), catalog.scope)) {
       const key = `${entry.role}\n${entry.name}`;
@@ -33,7 +33,7 @@ export async function installedIn(list: catalogs.Catalog[]): Promise<Found[]> {
   return found;
 }
 
-export function searched(cwd: string): string[] {
+export function searchedAdapters(cwd: string): string[] {
   return catalogs.roots(cwd).map(catalogs.adaptersDir);
 }
 
@@ -65,9 +65,9 @@ export function defaults(): Map<string, string> {
   return map;
 }
 
-export type Picked = { found: Found } | { missing: string } | { conflict: string };
+export type Picked = { found: AdapterFound } | { missing: string } | { conflict: string };
 
-export function pick(list: Found[], role: string, name?: string): Picked {
+export function pick(list: AdapterFound[], role: string, name?: string): Picked {
   const implementations = list.filter((entry) => entry.role === role);
   const chosen = defaults().get(role);
   const wanted = name ?? chosen;
@@ -94,14 +94,14 @@ export function pick(list: Found[], role: string, name?: string): Picked {
   return { found: first };
 }
 
-export function writeEnv(cwd: string, list: Found[]): void {
+export function writeEnv(cwd: string, list: AdapterFound[]): void {
   for (const catalog of [catalogs.projectCatalog(cwd), catalogs.homeCatalog()]) {
     if (fs.existsSync(catalog.dir)) writeEnvFile(catalog.dir, list);
   }
 }
 
-export function renderEnv(dir: string, list: Found[]): string {
-  const chosen: Found[] = [];
+export function renderEnv(dir: string, list: AdapterFound[]): string {
+  const chosen: AdapterFound[] = [];
   for (const role of [...new Set(list.map((entry) => entry.role))].sort()) {
     if (role === "agent") continue;
     const picked = pick(list, role);
@@ -120,7 +120,7 @@ export function renderEnv(dir: string, list: Found[]): string {
   return `// penguin writes this file from the installed adapters. Do not edit.\n${body}`;
 }
 
-function writeEnvFile(dir: string, list: Found[]): void {
+function writeEnvFile(dir: string, list: AdapterFound[]): void {
   const content = renderEnv(dir, list);
   const file = envFile(dir);
   if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === content) return;
@@ -133,7 +133,7 @@ function specifier(dir: string, file: string): string {
   return `./${relative}`;
 }
 
-async function scan(dir: string, scope: Scope): Promise<Found[]> {
+async function scan(dir: string, scope: catalogs.CatalogScope): Promise<AdapterFound[]> {
   if (!fs.existsSync(dir)) return [];
   const names = fs
     .readdirSync(dir, { withFileTypes: true })
@@ -141,7 +141,7 @@ async function scan(dir: string, scope: Scope): Promise<Found[]> {
     .filter((entry) => entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts"))
     .map((entry) => entry.name)
     .sort();
-  const found: Found[] = [];
+  const found: AdapterFound[] = [];
   for (const name of names) {
     const file = path.join(dir, name);
     const definition = await loadAdapter(file);

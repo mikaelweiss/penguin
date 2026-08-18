@@ -6,7 +6,7 @@ import {
 } from "@mikaelweiss/penguin-engine/catalog";
 import { alive, eventsPath, readRun, runDir } from "@mikaelweiss/penguin-engine/protocol";
 import fs from "node:fs";
-import { interactive } from "../this-computer/tty.ts";
+import { interactive } from "../machine/tty.ts";
 import { watchAsLines } from "./plain.ts";
 
 const START_TIMEOUT = 10_000;

@@ -1,23 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { catalogsFile, home, projectHome, type Scope } from "../paths.ts";
+import { catalogsFile, home, projectHome } from "../paths.ts";
+
+export type CatalogScope = "project" | "home" | "starter" | "catalog";
+export type WritableCatalog = "project" | "home";
 
 export type Catalog = {
   dir: string;
-  scope: Scope;
+  scope: CatalogScope;
 };
 
 export function projectCatalog(cwd: string): Catalog {
-  return { dir: projectHome(cwd), scope: "local" };
+  return { dir: projectHome(cwd), scope: "project" };
 }
 
 export function homeCatalog(): Catalog {
-  return { dir: home(), scope: "global" };
+  return { dir: home(), scope: "home" };
 }
 
 export function starterCatalog(): Catalog {
-  return { dir: fileURLToPath(new URL("../../examples", import.meta.url)), scope: "global" };
+  return { dir: fileURLToPath(new URL("../../examples", import.meta.url)), scope: "starter" };
 }
 
 /** Project, then home, then catalogs enabled in ~/.penguin/catalogs. Earlier wins. */
@@ -25,9 +28,9 @@ export function roots(cwd: string): Catalog[] {
   return [projectCatalog(cwd), homeCatalog(), ...enabled()];
 }
 
-/** The writable catalog for a scope. Enabled catalogs are never this. */
-export function forScope(cwd: string, scope: Scope): Catalog {
-  return scope === "local" ? projectCatalog(cwd) : homeCatalog();
+/** The catalog install and sync-skills can write. Enabled catalogs are never this. */
+export function writableCatalog(cwd: string, which: WritableCatalog): Catalog {
+  return which === "project" ? projectCatalog(cwd) : homeCatalog();
 }
 
 export function adaptersDir(catalog: Catalog): string {
@@ -45,9 +48,10 @@ function enabled(): Catalog[] {
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
     const text = line.trim();
     if (text === "" || text.startsWith("#")) continue;
-    const dir = text === "starter" ? starterCatalog().dir : path.resolve(home(), text);
+    const starter = text === "starter";
+    const dir = starter ? starterCatalog().dir : path.resolve(home(), text);
     if (!fs.existsSync(dir)) continue;
-    found.push({ dir, scope: "global" });
+    found.push({ dir, scope: starter ? "starter" : "catalog" });
   }
   return found;
 }
