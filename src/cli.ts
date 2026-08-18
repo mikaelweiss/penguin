@@ -45,12 +45,12 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (command === "_run") return runProcess(rest);
+  if (command === "intro") return playIntro();
   const fresh = await firstRun();
   if (fresh) {
     if (command === undefined) return 0;
     say("");
   }
-  if (command === "intro") return playIntro();
   if (command === "run") return runWorkflow(rest);
   if (command === "list") return listWhat(rest);
   if (command === "ps") return listRuns();

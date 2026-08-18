@@ -215,14 +215,16 @@ test("pn help prints the usage", (t) => {
   assert.doesNotMatch(help.stdout, /resume/);
 });
 
-test("intro without a terminal is refused", (t) => {
+test("intro without a terminal is refused, and it installs nothing", (t) => {
   const box = sandbox(t);
+  const unmade = path.join(box.userHome, "unmade-home");
 
-  const failed = box.penguin("intro");
+  const failed = box.penguinWith({ PENGUIN_HOME: unmade }, "intro");
 
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /pn intro needs a terminal/);
   assert.equal(failed.stdout, "");
+  assert.equal(fs.existsSync(unmade), false);
   assert.equal(fs.existsSync(box.runs), false);
 });
 
