@@ -113,6 +113,8 @@ export type Sandbox = {
   tty(steps: TtyStep[], ...args: string[]): Promise<Result>;
   start(...args: string[]): ChildProcess;
   write(relative: string, text: string): string;
+  writeWorkflow(name: string, text: string, scope?: "home" | "project"): string;
+  homeWorkflow(name: string): string;
   read(relative: string): string;
   exists(relative: string): boolean;
   lines(relative: string): string[];
@@ -243,6 +245,19 @@ export function sandbox(t: TestContext): Sandbox {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, text);
       return file;
+    },
+    writeWorkflow(name, text, scope = "project") {
+      const dir =
+        scope === "home"
+          ? path.join(home, "workflows")
+          : path.join(project, ".penguin", "workflows");
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${name}.ts`);
+      fs.writeFileSync(file, text);
+      return file;
+    },
+    homeWorkflow(name) {
+      return path.join(home, "workflows", `${name}.ts`);
     },
     read(relative) {
       return fs.readFileSync(path.join(project, relative), "utf8");

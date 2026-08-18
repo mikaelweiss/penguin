@@ -3,13 +3,13 @@ import path from "node:path";
 import { blocks } from "./layout.ts";
 import { load } from "./loader.ts";
 import { usage } from "./params.ts";
-import { home, projectHome, type Scope, short } from "./paths.ts";
+import { homeWorkflows, projectWorkflows, type Scope, short } from "./paths.ts";
 
 export type Details = { description: string; params: string[] };
 export type Found = { name: string; scope: Scope; file: string } & Details;
 
 export function found(cwd: string): Omit<Found, keyof Details>[] {
-  return [...scan(projectHome(cwd), "local"), ...scan(home(), "global")];
+  return [...scan(projectWorkflows(cwd), "local"), ...scan(homeWorkflows(), "global")];
 }
 
 export async function listed(cwd: string): Promise<Found[]> {
@@ -23,7 +23,7 @@ export function locate(name: string, cwd: string): string | undefined {
 }
 
 export function searched(cwd: string): string[] {
-  return [projectHome(cwd), home()];
+  return [projectWorkflows(cwd), homeWorkflows()];
 }
 
 export function render(list: Found[], verbose = false): string {

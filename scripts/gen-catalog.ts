@@ -25,6 +25,7 @@ export function generated(): string {
 
   function walk(dir: string, prefix: string): void {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
       const name = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) walk(path.join(dir, entry.name), name);
       else names.push(name);

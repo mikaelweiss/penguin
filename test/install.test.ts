@@ -17,7 +17,7 @@ test("a fresh install fills the home with the catalog", (t) => {
   const first = box.penguin("ps");
 
   assert.equal(first.code, 0, first.output);
-  assert.equal(fs.existsSync(path.join(box.home, "ship.ts")), true);
+  assert.equal(fs.existsSync(path.join(box.home, "workflows", "ship.ts")), true);
   assert.equal(fs.existsSync(path.join(box.home, "skills", "penguin-triage", "SKILL.md")), true);
   assert.equal(fs.existsSync(path.join(box.home, "tsconfig.json")), true);
   for (const name of ["claude", "codex", "cursor", "opencode", "git", "gh"]) {
@@ -96,7 +96,7 @@ test("install on a home that exists copies nothing", (t) => {
   assert.equal(again.code, 0, again.output);
   assert.match(again.stdout, /penguin home is/);
   assert.match(again.stdout, /pn list workflows/);
-  assert.equal(fs.existsSync(path.join(box.home, "ship.ts")), false);
+  assert.equal(fs.existsSync(path.join(box.home, "workflows", "ship.ts")), false);
 });
 
 test("a fresh install prints the two lines and no skills report", (t) => {

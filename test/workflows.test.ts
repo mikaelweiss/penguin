@@ -19,8 +19,8 @@ export default workflow({
 
 test("list workflows shows the description under the name", (t) => {
   const box = sandbox(t);
-  box.write(".penguin/ticket.ts", writes("local"));
-  fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
+  box.writeWorkflow("ticket", writes("local"));
+  box.writeWorkflow("release", writes("global"), "home");
 
   const listed = box.penguin("list", "workflows");
 
@@ -33,8 +33,8 @@ test("list workflows shows the description under the name", (t) => {
 
 test("list workflows shows the params next to the name", (t) => {
   const box = sandbox(t);
-  box.write(
-    ".penguin/ticket.ts",
+  box.writeWorkflow(
+    "ticket",
     writes(
       "local",
       "z.object({ ticket: z.string(), rounds: z.number().default(3), draft: z.boolean().optional(), mode: z.enum(['fast', 'slow']) })",
@@ -54,7 +54,7 @@ test("list workflows wraps a long description and a long param line", (t) => {
   const box = sandbox(t);
   const long = "wraps ".repeat(40).trim();
   const many = Array.from({ length: 12 }, (_, index) => `p${index}: z.string()`).join(", ");
-  box.write(".penguin/ticket.ts", writes(long, `z.object({ ${many} })`));
+  box.writeWorkflow("ticket", writes(long, `z.object({ ${many} })`));
 
   const listed = box.penguin("list", "workflows");
 
@@ -68,25 +68,25 @@ test("list workflows wraps a long description and a long param line", (t) => {
 
 test("list workflows --verbose adds scope and file", (t) => {
   const box = sandbox(t);
-  box.write(".penguin/ticket.ts", writes("local"));
-  fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
+  box.writeWorkflow("ticket", writes("local"));
+  box.writeWorkflow("release", writes("global"), "home");
 
   const listed = box.penguin("list", "workflows", "--verbose");
 
   assert.equal(listed.code, 0, listed.output);
   assert.match(
     listed.stdout,
-    new RegExp(`^ticket\\n {2}local\\n {2}local {2}${path.join(box.project, ".penguin")}`, "m"),
+    new RegExp(`^ticket\\n {2}local\\n {2}local {2}${path.join(box.project, ".penguin", "workflows")}`, "m"),
   );
   assert.match(
     listed.stdout,
-    new RegExp(`^release\\n {2}global\\n {2}global {2}${box.home}`, "m"),
+    new RegExp(`^release\\n {2}global\\n {2}global {2}${path.join(box.home, "workflows")}`, "m"),
   );
 });
 
 test("pn with no command prints the usage", (t) => {
   const box = sandbox(t);
-  box.write(".penguin/ticket.ts", writes("local"));
+  box.writeWorkflow("ticket", writes("local"));
 
   const listed = box.penguin();
 
@@ -97,7 +97,7 @@ test("pn with no command prints the usage", (t) => {
 
 test("pn run with no workflow lists them instead of failing", (t) => {
   const box = sandbox(t);
-  box.write(".penguin/ticket.ts", writes("local"));
+  box.writeWorkflow("ticket", writes("local"));
 
   const listed = box.penguin("run");
 
@@ -112,7 +112,7 @@ test("pn list workflows with no file says where to put one", (t) => {
   const empty = box.penguin("list", "workflows");
 
   assert.equal(empty.code, 0);
-  assert.match(empty.stdout, new RegExp(`no workflow file in ${path.join(box.project, ".penguin")}`));
+  assert.match(empty.stdout, new RegExp(`no workflow file in ${path.join(box.project, ".penguin", "workflows")}`));
   assert.match(empty.stdout, new RegExp(box.home));
 });
 
@@ -132,7 +132,7 @@ test("the first bare pn stops after the install output", (t) => {
 test("pn run takes a workflow name", (t) => {
   const box = sandbox(t);
   box.withShell();
-  fs.writeFileSync(path.join(box.home, "release.ts"), writes("global"));
+  box.writeWorkflow("release", writes("global"), "home");
 
   const done = box.penguin("run", "release");
 
@@ -144,8 +144,8 @@ test("pn run takes a workflow name", (t) => {
 test("a project workflow shadows the home workflow of the same name", (t) => {
   const box = sandbox(t);
   box.withShell();
-  box.write(".penguin/ticket.ts", writes("local"));
-  fs.writeFileSync(path.join(box.home, "ticket.ts"), writes("global"));
+  box.writeWorkflow("ticket", writes("local"));
+  box.writeWorkflow("ticket", writes("global"), "home");
 
   assert.equal(box.penguin("run", "ticket").code, 0);
 

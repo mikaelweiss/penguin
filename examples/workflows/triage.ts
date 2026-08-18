@@ -1,5 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { resolveTicket } from "../helpers/ticket.ts";
 
 const Blocked = z.object({ questions: z.array(z.string()) });
 const Triage = z.object({
@@ -24,9 +25,11 @@ export default workflow({
   description: "decide if a ticket is ready to work on, and split it into tasks",
   params: z.object({ ticket: z.string() }),
 
-  async run({ params, agent, view, gate }) {
+  async run(ctx) {
+    const { params, agent, view, gate } = ctx;
+    const ticket = await resolveTicket(ctx, params.ticket);
     const triager = agent();
-    let input = params.ticket;
+    let input = ticket;
     for (;;) {
       const out = (await triager.run("penguin-triage", {
         input,
@@ -42,7 +45,7 @@ export default workflow({
         view.fact({ actionable: false });
         return triage;
       }
-      const tasks = triage.tasks.length === 0 ? [params.ticket] : triage.tasks;
+      const tasks = triage.tasks.length === 0 ? [ticket] : triage.tasks;
       view.fact({ actionable: true, tasks: tasks.length });
       if (tasks.length === 1) return { ...triage, tasks };
       const listed = tasks.map((task, index) => `${index + 1}. ${task}`).join("\n");

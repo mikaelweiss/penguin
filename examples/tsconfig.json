@@ -18,5 +18,5 @@
       ]
     }
   },
-  "include": ["*.ts", "adapters/*.ts"]
+  "include": ["*.ts", "adapters/*.ts", "workflows/*.ts", "helpers/*.ts"]
 }

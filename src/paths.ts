@@ -29,6 +29,14 @@ export function projectSkills(cwd: string): string {
   return path.join(projectHome(cwd), "skills");
 }
 
+export function homeWorkflows(): string {
+  return path.join(home(), "workflows");
+}
+
+export function projectWorkflows(cwd: string): string {
+  return path.join(projectHome(cwd), "workflows");
+}
+
 export type Scope = "local" | "global";
 
 export function userRoot(): string {
