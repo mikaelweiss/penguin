@@ -16,7 +16,7 @@
   "scripts": {
     "check": "tsc --noEmit && eslint .",
     "test": "bun test --parallel --timeout 30000 test/",
-    "release": "./scripts/publish.sh",
+    "publish": "./scripts/publish.sh",
     "reinstall": "./scripts/reinstall.sh",
     "graph": "nx graph"
   },
