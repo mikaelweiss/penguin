@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { generated } from "../scripts/gen-catalog.ts";
 import { sandbox } from "./helpers.ts";
+
+test("the embedded catalog matches examples/", () => {
+  const current = fs.readFileSync(new URL("../src/catalog.gen.ts", import.meta.url), "utf8");
+  assert.ok(current === generated(), "examples/ changed: run `bun scripts/gen-catalog.ts`");
+});
 
 test("a fresh install fills the home with the catalog", (t) => {
   const box = sandbox(t);

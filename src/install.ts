@@ -1,18 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { installed, writeEnv } from "./adapters.ts";
 import { wordmark } from "./animate.ts";
-import {
-  home,
-  homeAdapters,
-  homeSkills,
-  projectSkills,
-  runsRoot,
-  type Scope,
-  short,
-  userRoot,
-} from "./paths.ts";
+import { catalog } from "./catalog.gen.ts";
+import { home, homeSkills, projectSkills, runsRoot, type Scope, short, userRoot } from "./paths.ts";
 import { interactive } from "./tui/tty.ts";
 import { link, shared, type Source, sources } from "./skills.ts";
 
@@ -33,22 +24,10 @@ export async function install(): Promise<void> {
 }
 
 function copyCatalog(): void {
-  const from = fileURLToPath(new URL("../examples", import.meta.url));
-  if (!fs.existsSync(from)) return;
-  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    const at = path.join(from, entry.name);
-    if (entry.name === "skills") copySkills(at);
-    else if (entry.name === "adapters") fs.cpSync(at, homeAdapters(), { recursive: true });
-    else if (entry.isFile()) fs.copyFileSync(at, path.join(home(), entry.name));
-  }
-}
-
-function copySkills(from: string): void {
-  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    fs.cpSync(path.join(from, entry.name), path.join(homeSkills(), entry.name), {
-      recursive: true,
-    });
+  for (const [name, content] of Object.entries(catalog)) {
+    const target = path.join(home(), name);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, content);
   }
 }
 

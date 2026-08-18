@@ -240,8 +240,10 @@ async function fillParam(
 }
 
 function start(name: string): number {
+  // A compiled binary has no entry file on disk and re-runs itself.
   const entry = fileURLToPath(import.meta.url);
-  const child = spawn(process.execPath, [entry, "_run", name], {
+  const args = fs.existsSync(entry) ? [entry, "_run", name] : ["_run", name];
+  const child = spawn(process.execPath, args, {
     cwd: process.cwd(),
     detached: true,
     stdio: "ignore",
