@@ -5,13 +5,13 @@ import type { z } from "zod";
 import * as adapters from "../adapters.ts";
 import { pasteImage } from "../clipboard.ts";
 import { allocateRun, discardRun, finishRun } from "../create.ts";
-import { messageOf } from "../errors.ts";
+import { messageOf, PenguinError } from "../errors.ts";
 import { load } from "../loader.ts";
 import { type Asked, coerce, unfilled, validate } from "../params.ts";
 import { attachmentsDir, short } from "../paths.ts";
 import { startRun } from "../start.ts";
 import * as workflows from "../workflows.ts";
-import { agentLine } from "./attach.ts";
+import { agentLine, started } from "./attach.ts";
 import { Editor } from "./editor.ts";
 import { Choices, InputBar } from "./input.tsx";
 import { cut } from "./text.ts";
@@ -33,6 +33,7 @@ type Launch = {
 type Phase =
   | { kind: "list" }
   | { kind: "loading" }
+  | { kind: "starting" }
   | { kind: "ask"; param: Asked }
   | { kind: "pick"; param: Asked; cursor: number };
 
@@ -89,21 +90,30 @@ export function Launcher({
     setPhase({ kind: "list" });
   };
 
-  const finish = (launch: Launch): void => {
+  /** The view opens on a run the process already holds, which reads as live. */
+  const finish = async (launch: Launch): Promise<void> => {
+    let pid: number;
     try {
       validate(launch.schema, launch.values);
       finishRun(launch.dir, launch.source, launch.values);
-      startRun(launch.name);
+      pid = startRun(launch.name);
     } catch (error) {
       return fail(error, launch);
     }
+    setWarn("");
+    setPhase({ kind: "starting" });
+    const took = await started(launch.dir, pid);
+    if (!live.current) return;
     held.current = undefined;
+    if (!took) {
+      return fail(new PenguinError(`the run process for ${launch.name} died before it started`), launch);
+    }
     onStarted({ name: launch.name, agent: launch.agent });
   };
 
   const ask = (launch: Launch): void => {
     const param = launch.queue[0];
-    if (param === undefined) return finish(launch);
+    if (param === undefined) return void finish(launch);
     setWarn("");
     setPhase(param.choices.length > 0 ? { kind: "pick", param, cursor: 0 } : { kind: "ask", param });
   };
@@ -218,7 +228,7 @@ export function Launcher({
   useKeyboard((key: KeyEvent) => {
     if (key.eventType === "release") return;
     if (key.name === "escape" || (key.ctrl && key.name === "c")) return cancel();
-    if (phase.kind === "loading") return;
+    if (phase.kind === "loading" || phase.kind === "starting") return;
     if (phase.kind === "list") return listKey(key);
     const launch = held.current;
     if (launch === undefined) return;
@@ -293,6 +303,7 @@ function Bottom({
   width: number;
 }): ReactNode {
   if (phase.kind === "loading") return <text fg={ink.dim}>{cut("  reading the workflow", width)}</text>;
+  if (phase.kind === "starting") return <text fg={ink.dim}>{cut("  starting the run", width)}</text>;
   if (phase.kind === "pick") {
     return (
       <Choices

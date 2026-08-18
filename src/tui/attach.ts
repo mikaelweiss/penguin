@@ -36,7 +36,8 @@ export async function dashboard(): Promise<number> {
   return mount({ kind: "dashboard" });
 }
 
-function started(dir: string, pid: number): Promise<boolean> {
+/** True once the run process holds the run. A viewer that opens earlier reads it as dead. */
+export function started(dir: string, pid: number): Promise<boolean> {
   const deadline = Date.now() + START_TIMEOUT;
   return new Promise((resolve) => {
     const tick = (): void => {

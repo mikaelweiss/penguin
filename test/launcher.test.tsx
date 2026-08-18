@@ -36,6 +36,18 @@ export default workflow({
 `;
 }
 
+const gates = `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "wait for one answer",
+  params: z.object({}),
+  async run({ gate }) {
+    return await gate("keep going?");
+  },
+});
+`;
+
 /** A workflow in the sandbox home, which the launcher lists as a global entry. */
 function workflowIn(box: Sandbox, name: string, source: string): string {
   const file = path.join(box.home, `${name}.ts`);
@@ -156,6 +168,25 @@ test("a workflow with no param starts on one enter, and its run opens", async (t
   assert.equal(recordOf(box, "hello-1")["workflow"], file);
   assert.equal(fs.existsSync(path.join(box.home, "penguin-env.d.ts")), true);
   assert.equal(ended["phase"], "done");
+});
+
+test("the view opens on a run the process already holds", async (t) => {
+  const box = sandbox(t);
+  workflowIn(box, "hold", gates);
+  homed(t, box);
+  const opened: Open[] = [];
+
+  const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
+  t.after(() => setup.renderer.destroy());
+  await press(setup, ["n"]);
+  await setup.waitForFrame((text) => text.includes("wait for one answer"));
+  await press(setup, ["RETURN"]);
+  await waitFor(() => opened.length > 0);
+  const holder = box.holder("hold-1");
+
+  box.send("hold-1", "yes");
+  await box.waitForEnd("hold-1");
+  assert.notEqual(holder, undefined, "the view opened before the run took the lock");
 });
 
 test("the launcher asks each param in order and writes the answers into the run", async (t) => {
