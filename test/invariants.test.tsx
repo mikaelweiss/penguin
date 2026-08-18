@@ -835,11 +835,12 @@ test("invariant 16: the status line holds one line, however long the question", 
   homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await frameWith(setup, (text) => text.includes("blocked: Blockers") && text.includes(SENTINEL));
+    const frame = await frameWith(setup, (text) => text.includes("blocked: Blockers"));
     const status = frame.split("\n").filter((row) => row.includes("blocked: Blockers"));
     assert.equal(status.length, 1, "the status prints once, one line");
     assert.ok((status[0] ?? "").length <= 100, "the status stays inside the width");
     assert.match(status[0] ?? "", /round 1/, "the status carries the facts");
+    assert.doesNotMatch(status[0] ?? "", new RegExp(SENTINEL), "the status cuts the question, never wraps it");
   } finally {
     setup.renderer.destroy();
   }

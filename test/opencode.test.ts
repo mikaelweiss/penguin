@@ -125,6 +125,14 @@ test("a schema asks for JSON in the prompt and reads the object back", async () 
   assert.deepEqual(bareRun.result, { ok: true, value: { ok: false } });
 });
 
+test("a trailing block that is not JSON falls back to the block that is", async () => {
+  const reply = 'here it is\n```json\n{"ok": true}\n```\n\nthen run\n\n```\npn run x\n```\n';
+
+  const { result } = await once([says("ses_1", reply)], { schema: { type: "object" } });
+
+  assert.deepEqual(result, { ok: true, value: { ok: true } });
+});
+
 test("a schema with no JSON in the reply fails the turn", async () => {
   const { result } = await once([says("ses_1", "I would rather not")], {
     schema: { type: "object" },

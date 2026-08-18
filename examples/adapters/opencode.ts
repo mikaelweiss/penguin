@@ -56,28 +56,26 @@ function reason(error: unknown): string {
   return said(message) ? message : JSON.stringify(error);
 }
 
-/** The last fenced block wins: a model often shows an example before the answer. */
-function fenced(text: string): string | undefined {
-  let body: string | undefined;
-  for (const match of text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)) body = match[1];
-  return body;
-}
-
-function braced(text: string): string | undefined {
+/** Every JSON the reply could hold, last block first: a model often shows an example before the answer. */
+function candidates(text: string): string[] {
+  const found = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)]
+    .map((match) => match[1] ?? "")
+    .reverse();
   const open = text.indexOf("{");
   const close = text.lastIndexOf("}");
-  if (open === -1 || close <= open) return undefined;
-  return text.slice(open, close + 1);
+  if (open !== -1 && close > open) found.push(text.slice(open, close + 1));
+  return found;
 }
 
 function structured(text: string): unknown {
-  const candidate = fenced(text) ?? braced(text);
-  if (candidate === undefined) return undefined;
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    return undefined;
+  for (const candidate of candidates(text)) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      continue;
+    }
   }
+  return undefined;
 }
 
 function asked(turn: AgentTurn): string {
