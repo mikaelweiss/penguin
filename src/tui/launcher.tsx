@@ -131,8 +131,10 @@ export function Launcher({
     let launch: Launch | undefined;
     try {
       const definition = await load(entry.file);
+      const queue = unfilled(definition.params, {});
       const installed = await adapters.installed(process.cwd());
       adapters.writeEnv(process.cwd(), installed);
+      // Nothing between the claim and the assignment throws, so nothing leaks the directory.
       const { name, dir } = allocateRun(entry.file);
       launch = {
         name,
@@ -142,7 +144,7 @@ export function Launcher({
         agent: agentLine(installed),
         schema: definition.params,
         values: {},
-        queue: unfilled(definition.params, {}),
+        queue,
       };
       if (!live.current) return discardRun(dir);
       held.current = launch;
@@ -334,10 +336,19 @@ function Bottom({
   const hint = empty ? "esc closes" : "arrows or hjkl move, enter starts, esc closes";
   return (
     <box style={{ flexDirection: "column", flexShrink: 0 }}>
-      {warn === "" ? null : <text fg={ink.bad}>{cut(`  ${oneLine(warn)}`, width)}</text>}
+      {said(warn).map((line, index) => (
+        <text key={`${index}:${line}`} fg={ink.bad}>
+          {cut(`  ${line}`, width)}
+        </text>
+      ))}
       <text fg={ink.faint}>{cut(`  ${hint}`, width)}</text>
     </box>
   );
+}
+
+/** A message names the param that failed on its own line, so every line shows. */
+function said(warn: string): string[] {
+  return warn.split("\n").filter((line) => line.trim() !== "");
 }
 
 function question(param: Asked): string {

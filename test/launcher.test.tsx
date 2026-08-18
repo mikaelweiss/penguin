@@ -248,6 +248,45 @@ test("an empty answer skips an optional param, and a bad one asks again", async 
   assert.deepEqual(recordOf(box, "count-1")["params"], { total: 4 });
 });
 
+test("an answer the schema refuses names the param and the reason", async (t) => {
+  const box = sandbox(t);
+  workflowIn(box, "notes", writes("keep a long note", "z.object({ note: z.string().min(5) })"));
+  homed(t, box);
+  const opened: Open[] = [];
+
+  const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
+  t.after(() => setup.renderer.destroy());
+  await press(setup, ["n"]);
+  await setup.waitForFrame((text) => text.includes("keep a long note"));
+  await press(setup, ["RETURN"]);
+  await setup.waitForFrame((text) => text.includes("--note <text>"));
+  await typeText(setup, "abc");
+  await press(setup, ["RETURN"]);
+  const frame = await setup.waitForFrame((text) => text.includes("invalid params:"));
+
+  assert.match(frame, /note: Too small/, "the line that names the param shows too");
+  assert.deepEqual(opened, []);
+  assert.deepEqual(runNames(box), []);
+});
+
+test("a params schema that is no object claims no run directory", async (t) => {
+  const box = sandbox(t);
+  workflowIn(box, "loose", writes("a schema that is not an object", "z.string()"));
+  homed(t, box);
+  const opened: Open[] = [];
+
+  const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
+  t.after(() => setup.renderer.destroy());
+  await press(setup, ["n"]);
+  await setup.waitForFrame((text) => text.includes("loose"));
+  await press(setup, ["RETURN"]);
+  const frame = await setup.waitForFrame((text) => text.includes("Object.entries"));
+
+  assert.match(frame, /esc closes/, "the list takes the keyboard again");
+  assert.deepEqual(opened, []);
+  assert.deepEqual(runNames(box), []);
+});
+
 test("esc during the questions leaves no run directory", async (t) => {
   const box = sandbox(t);
   workflowIn(box, "notes", writes("take a note", "z.object({ note: z.string() })"));
