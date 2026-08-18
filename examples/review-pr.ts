@@ -133,6 +133,7 @@ export default workflow({
     let inbound = changes.next();
     let previous: Findings | undefined;
     let inDraft = pr.isDraft;
+    let paused = pr.isInMergeQueue;
     let owed = true;
     let rounds = 0;
     let posted = 0;
@@ -163,7 +164,7 @@ export default workflow({
     };
 
     const review = async (): Promise<
-      "approved" | "sent" | "closed" | "draft"
+      "approved" | "sent" | "closed" | "draft" | "queued"
     > => {
       await pulled();
       const reviewer = agent({ cwd: ws.path, name: `reviewer-${rounds}` });
@@ -193,7 +194,15 @@ export default workflow({
           });
           return "draft";
         }
+        if (change.kind === "queued") {
+          await turn.stop();
+          view.event({
+            message: `PR #${pr.number} is queued to merge, the review waits`,
+          });
+          return "queued";
+        }
         if (change.kind === "ready") continue;
+        if (change.kind === "dequeued") continue;
         await turn.stop();
         let update: string;
         if (change.kind === "commits") {
@@ -242,7 +251,7 @@ export default workflow({
 
     try {
       for (;;) {
-        if (owed && !inDraft) {
+        if (owed && !inDraft && !paused) {
           rounds += 1;
           view.fact({ phase: "reviewing", round: rounds });
           const outcome = await view.activity(`review round ${rounds}`, review);
@@ -251,10 +260,15 @@ export default workflow({
             inDraft = true;
             continue;
           }
+          if (outcome === "queued") {
+            paused = true;
+            continue;
+          }
           owed = false;
           continue;
         }
-        view.fact({ phase: inDraft ? "draft" : "watching", round: rounds });
+        const phase = inDraft ? "draft" : paused ? "queued" : "watching";
+        view.fact({ phase, round: rounds });
         const change = await inbound;
         inbound = changes.next();
         if (change.kind === "closed") {
@@ -263,6 +277,16 @@ export default workflow({
         }
         if (change.kind === "draft") inDraft = true;
         if (change.kind === "ready") inDraft = false;
+        if (change.kind === "queued") {
+          paused = true;
+          view.event({
+            message: `PR #${pr.number} is queued to merge, the review waits`,
+          });
+        }
+        if (change.kind === "dequeued") {
+          paused = false;
+          view.event({ message: `PR #${pr.number} left the merge queue` });
+        }
         if (change.kind === "commits") owed = true;
         if (change.kind === "description") description = change.body;
         if (change.kind === "comments") notes = notes.concat(change.comments);

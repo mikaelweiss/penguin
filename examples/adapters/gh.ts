@@ -5,7 +5,10 @@ const Ready = z.union([z.enum(["done", "skip"]), z.string()]);
 
 const ISSUE_FIELDS = "number,title,body,state,url";
 const PR_FIELDS = "number,title,body,state,isDraft,headRefOid,url";
-const WATCHED_FIELDS = "state,isDraft,body,headRefOid,comments";
+const WATCHED_FIELDS = "state,isDraft,body,headRefOid,url,comments";
+const QUEUE_QUERY =
+  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){isInMergeQueue}}}";
+const QUEUE_PATH = ".data.repository.pullRequest.isInMergeQueue";
 const REQUESTED_FIELDS = "number,title,url";
 const REQUESTED_LIMIT = 100;
 const POLL_MS = 30_000;
@@ -26,6 +29,7 @@ type Pr = {
   isDraft: boolean;
   headRefOid: string;
   url: string;
+  isInMergeQueue: boolean;
 };
 
 type Comment = {
@@ -47,13 +51,19 @@ type Watched = {
   isDraft: boolean;
   body: string;
   headRefOid: string;
+  url: string;
+  isInMergeQueue: boolean;
   comments?: Written[];
 };
+
+type Place = { owner: string; repo: string; number: string };
 
 type Change =
   | { kind: "closed"; state: string }
   | { kind: "draft" }
   | { kind: "ready" }
+  | { kind: "queued" }
+  | { kind: "dequeued" }
   | { kind: "commits" }
   | { kind: "description"; body: string }
   | { kind: "comments"; comments: Comment[] };
@@ -75,6 +85,16 @@ function commentsOf(stdout: string): Comment[] {
   return (parsed.comments ?? []).map(written);
 }
 
+function placeOf(url: string): Place | undefined {
+  const found = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url);
+  if (found === null) return undefined;
+  return { owner: found[1] ?? "", repo: found[2] ?? "", number: found[3] ?? "" };
+}
+
+function queueRead(place: Place): string {
+  return `gh api graphql -f query=${quoted(QUEUE_QUERY)} -f owner=${quoted(place.owner)} -f name=${quoted(place.repo)} -F number=${quoted(place.number)} -q ${QUEUE_PATH}`;
+}
+
 function changedBetween(last: Watched, snap: Watched): Change[] {
   const found: Change[] = [];
   if (snap.state !== last.state && snap.state !== "OPEN") {
@@ -82,6 +102,8 @@ function changedBetween(last: Watched, snap: Watched): Change[] {
   }
   if (snap.isDraft && !last.isDraft) found.push({ kind: "draft" });
   if (!snap.isDraft && last.isDraft) found.push({ kind: "ready" });
+  if (snap.isInMergeQueue && !last.isInMergeQueue) found.push({ kind: "queued" });
+  if (!snap.isInMergeQueue && last.isInMergeQueue) found.push({ kind: "dequeued" });
   if (snap.headRefOid !== last.headRefOid) found.push({ kind: "commits" });
   if (snap.body !== last.body) found.push({ kind: "description", body: snap.body });
   const fresh = (snap.comments ?? []).slice((last.comments ?? []).length);
@@ -142,7 +164,14 @@ export default adapter({
         async get(pr: string): Promise<{ ok: boolean; pr: Pr | null; reason: string }> {
           const done = await gh(`gh pr view ${quoted(pr)} --json ${PR_FIELDS}`);
           if (done.code !== 0) return { ok: false, pr: null, reason: done.stderr.trim() };
-          return { ok: true, pr: JSON.parse(done.stdout) as Pr, reason: "" };
+          const found = JSON.parse(done.stdout) as Pr;
+          const place = placeOf(found.url);
+          if (place === undefined)
+            return { ok: false, pr: null, reason: `the PR url did not read: ${found.url}` };
+          const asked = await gh(queueRead(place));
+          if (asked.code !== 0) return { ok: false, pr: null, reason: asked.stderr.trim() };
+          found.isInMergeQueue = asked.stdout.trim() === "true";
+          return { ok: true, pr: found, reason: "" };
         },
         async comments(pr: string): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
           const done = await gh(`gh pr view ${quoted(pr)} --json comments`);
@@ -191,6 +220,7 @@ export default adapter({
         },
         async changes(pr: string): Promise<{ next(): Promise<Change> }> {
           let last: Watched | undefined;
+          let place: Place | undefined;
           let failing = false;
           const queue: Change[] = [];
           return {
@@ -203,6 +233,11 @@ export default adapter({
                     const done = await gh(`gh pr view ${quoted(pr)} --json ${WATCHED_FIELDS}`);
                     if (done.code !== 0) throw new Error(done.stderr.trim());
                     const snap = JSON.parse(done.stdout) as Watched;
+                    place = place ?? placeOf(snap.url);
+                    if (place === undefined) throw new Error(`the PR url did not read: ${snap.url}`);
+                    const asked = await gh(queueRead(place));
+                    if (asked.code !== 0) throw new Error(asked.stderr.trim());
+                    snap.isInMergeQueue = asked.stdout.trim() === "true";
                     if (last !== undefined) queue.push(...changedBetween(last, snap));
                     last = snap;
                     failing = false;

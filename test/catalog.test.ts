@@ -216,6 +216,7 @@ export default adapter({
           isDraft: false,
           headRefOid: "abc123",
           url: "https://example.test/pr/" + ref,
+          isInMergeQueue: false,
         },
         reason: "",
       }),
@@ -255,6 +256,62 @@ export default adapter({
 });
 `;
 
+const mergeQueueGithub = fakeGithub
+  .replace(
+    'fs.writeFileSync(host.cwd + "/commented.txt", options.body ?? "");',
+    'fs.appendFileSync(host.cwd + "/commented.txt", (options.body ?? "") + "\\n");',
+  )
+  .replace(
+    `      changes: () => {
+        let sent = false;
+        return {
+          next: () =>
+            new Promise((resolve) => {
+              const timer = setInterval(() => {
+                if (!sent && fs.existsSync(host.cwd + "/commented.txt")) {
+                  sent = true;
+                  clearInterval(timer);
+                  resolve({ kind: "closed", state: "MERGED" });
+                }
+              }, 25);
+              if (sent) clearInterval(timer);
+            }),
+        };
+      },`,
+    `      changes: () => {
+        const steps = [
+          { file: "/commented.txt", change: { kind: "queued" } },
+          { file: "", change: { kind: "commits" } },
+          { file: "/dequeue.txt", change: { kind: "dequeued" } },
+          { file: "/close.txt", change: { kind: "closed", state: "MERGED" } },
+        ];
+        let at = 0;
+        return {
+          next: () =>
+            new Promise((resolve) => {
+              const step = steps[at];
+              if (step === undefined) return;
+              at += 1;
+              const tick = () => {
+                if (step.file === "" || fs.existsSync(host.cwd + step.file))
+                  return resolve(step.change);
+                setTimeout(tick, 25);
+              };
+              tick();
+            }),
+        };
+      },`,
+  );
+
+const startQueuedGithub = mergeQueueGithub
+  .replace("isInMergeQueue: false,", "isInMergeQueue: true,")
+  .replace(
+    `          { file: "/commented.txt", change: { kind: "queued" } },
+          { file: "", change: { kind: "commits" } },
+          { file: "/dequeue.txt", change: { kind: "dequeued" } },`,
+    `          { file: "/dequeue.txt", change: { kind: "dequeued" } },`,
+  );
+
 const queueGithub = `import fs from "node:fs";
 import { adapter } from "penguin";
 
@@ -278,6 +335,7 @@ export default adapter({
           isDraft: false,
           headRefOid: "abc123",
           url: "https://example.test/pr/" + ref,
+          isInMergeQueue: false,
         },
         reason: "",
       }),
@@ -461,6 +519,17 @@ function ancestors(spans: Span[], span: Span): string[] {
     labels.push(found.label);
   }
   return labels;
+}
+
+function facts(box: Sandbox, run: string): Record<string, unknown>[] {
+  return box
+    .events(run)
+    .filter((event) => event["type"] === "fact")
+    .map((event) => event["values"] as Record<string, unknown>);
+}
+
+function queuedFacts(box: Sandbox, run: string): number {
+  return facts(box, run).filter((values) => values["phase"] === "queued").length;
 }
 
 function runNames(box: Sandbox): string[] {
@@ -965,6 +1034,88 @@ test("the catalog review-pr workflow approves a clean PR and follows it to the c
     "### Non-blockers",
     "- tiny nit",
   ]);
+  assert.ok(box.exists("approved.txt"), "the PR was not approved");
+});
+
+test("the catalog review-pr workflow waits while the PR sits in the merge queue", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":["tiny nit"]}',
+  );
+  outsideReady(box);
+  box.writeAdapter("gh", mergeQueueGithub);
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  // The second queued fact proves the loop read the commits change and started no round.
+  await waitFor(() => queuedFacts(box, "review-pr-1") >= 2);
+
+  assert.equal(box.sessions().length, 2, "a round ran while the PR waited");
+  assert.equal(box.lines("commented.txt").length, 4);
+
+  box.write("dequeue.txt", "left");
+  await waitFor(() => box.lines("commented.txt").length === 8);
+
+  box.write("close.txt", "merged");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 2, posted: 2 });
+  assert.ok(box.exists("approved.txt"), "the PR was not approved");
+
+  const messages = box
+    .events("review-pr-1")
+    .filter((event) => event["type"] === "event")
+    .map((event) => String(event["message"]));
+  assert.ok(
+    messages.includes("PR #42 is queued to merge, the review waits"),
+    messages.join("\n"),
+  );
+  assert.ok(
+    messages.includes("PR #42 left the merge queue"),
+    messages.join("\n"),
+  );
+});
+
+test("the catalog review-pr workflow waits when the PR is queued before the run starts", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":["tiny nit"]}',
+  );
+  outsideReady(box);
+  box.writeAdapter("gh", startQueuedGithub);
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await waitFor(() => queuedFacts(box, "review-pr-1") >= 1);
+
+  assert.equal(box.sessions().length, 1, "a round ran on a queued PR");
+  assert.equal(box.exists("commented.txt"), false);
+
+  box.write("dequeue.txt", "left");
+  await waitFor(() => box.exists("commented.txt"));
+
+  box.write("close.txt", "merged");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
   assert.ok(box.exists("approved.txt"), "the PR was not approved");
 });
 
