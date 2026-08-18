@@ -59,7 +59,7 @@ export function RunView({
   const renderer = useRenderer();
   const [editor] = useState(() => new Editor());
   const [selected, setSelected] = useState<Selection>({ kind: "node", id: node ?? "root" });
-  const [focus, setFocus] = useState<"input" | "tree">("input");
+  const [focus, setFocus] = useState<"input" | "tree">("tree");
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
   const held = useRef<{ pick: Pick; form: Form }>({ pick: NO_PICK, form: NO_FORM });
@@ -354,7 +354,9 @@ export function RunView({
   const typeKey = (key: KeyEvent): void => {
     if (!key.ctrl && !key.meta) {
       if (key.name === "return" || key.name === "enter") {
-        send(editor.take());
+        const text = editor.take();
+        send(text);
+        if (text !== "") setFocus("tree");
         return bump();
       }
       if (key.name === "escape") return setFocus("tree");

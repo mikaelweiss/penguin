@@ -104,7 +104,6 @@ test("invariant 3: q goes to the dashboard and the run continues", async (t) => 
   try {
     const shown = await frameWith(setup, (text) => text.includes("keep going?"));
     assert.match(shown, /keep going\?/);
-    await press(setup, ["ESCAPE"]);
     await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
     await press(setup, ["q"]);
   } finally {
@@ -881,10 +880,9 @@ test("invariant 16: the input bar holds the bottom of the output column", async 
   homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await frameWith(
-      setup,
-      (text) => text.includes("answer: Blockers") && text.includes("── gate"),
-    );
+    await frameWith(setup, (text) => text.includes("answer: Blockers") && text.includes("── gate"));
+    await press(setup, ["ESCAPE"]);
+    const frame = await frameWith(setup, (text) => text.includes("enter sends") && text.includes("── gate"));
     const rows = frame.trimEnd().split("\n");
     assert.match(rows.at(-1) ?? "", /blocked: Blockers/, "the status is the last row");
     assert.match(rows.at(-2) ?? "", /arrows move|enter sends/, "the input hint sits above the status");
@@ -911,9 +909,14 @@ test("invariant 16: the status line keeps the last row under a scrolled transcri
   homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await frameWith(
+    await frameWith(
       setup,
       (text) => text.includes("answer: Ship the findings?") && text.includes("finding number 59"),
+    );
+    await press(setup, ["ESCAPE"]);
+    const frame = await frameWith(
+      setup,
+      (text) => text.includes("enter sends") && text.includes("finding number 59"),
     );
     const rows = frame.split("\n");
     assert.ok(frame.includes("finding number 59"), "the transcript draws its tail");
