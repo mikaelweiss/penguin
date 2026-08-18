@@ -223,6 +223,61 @@ export default workflow({
   assert.equal(box.invocations("second.txt").length, 1);
 });
 
+test("a default that names no installed adapter names the defaults file", (t) => {
+  const box = sandbox(t);
+  box.setAgent("none", undefined, "fake");
+  box.setDefaults("agent ghost");
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skill.md");
+  },
+});
+`,
+  );
+
+  const failed = box.penguin("run", "./w.ts");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stdout, /no agent adapter named ghost/);
+  assert.match(failed.stdout, /Installed: fake\./);
+  assert.ok(failed.stdout.includes(path.join(box.home, "defaults")), failed.output);
+});
+
+test("a use option that names no installed adapter never names the defaults file", (t) => {
+  const box = sandbox(t);
+  box.setAgent("none", undefined, "fake");
+  box.setDefaults("agent fake");
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent({ use: "ghost" }).run("./skill.md");
+  },
+});
+`,
+  );
+
+  const failed = box.penguin("run", "./w.ts");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stdout, /no agent adapter named ghost/);
+  assert.equal(failed.stdout.includes(path.join(box.home, "defaults")), false, failed.output);
+});
+
 test("two agent adapters with no default end the run with the fix", (t) => {
   const box = sandbox(t);
   box.setAgent("none", undefined, "fake");
