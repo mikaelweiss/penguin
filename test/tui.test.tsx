@@ -186,9 +186,15 @@ function optionGate(schema: Record<string, unknown>): ViewEvent[] {
 const ONE_OF = { type: "string", enum: ["approve", "reject"] };
 const OPEN_OF = { anyOf: [{ type: "string", enum: ["approve", "revise"] }, { type: "string" }] };
 
-/** Where a control line starts on the screen, so a test can place it against the tree pane. */
-function column(frame: string, pattern: RegExp): number {
-  const row = frame.split("\n").find((line) => pattern.test(line));
+/** The screen without its last row, so a test reads the two panes without the status line. */
+function panes(frame: string): string {
+  return frame.split("\n").slice(0, 23).join("\n");
+}
+
+/** Where a line starts on the screen, so a test can place a control against the transcript. */
+function column(frame: string, pattern: RegExp, which: "first" | "last" = "first"): number {
+  const rows = frame.split("\n").filter((line) => pattern.test(line));
+  const row = which === "first" ? rows[0] : rows.at(-1);
   assert.ok(row !== undefined, `no row matched ${pattern}`);
   return row.search(pattern);
 }
@@ -461,7 +467,14 @@ test("an enum gate draws a list, and the choice sends one gate-addressed message
   const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     const frame = await frameWith(setup, (text) => text.includes("approve") && text.includes("reject"));
-    assert.ok(column(frame, /[(][ o][)] approve/) > PANE, "the choice list draws in the output column");
+    const edge = column(frame, /── gate/);
+    assert.ok(edge > PANE, "the transcript starts right of the tree pane");
+    assert.equal(
+      column(panes(frame), /What now[?]/, "last"),
+      edge,
+      "the choice list starts at the transcript's left edge",
+    );
+    assert.ok(column(frame, /[(][ o][)] approve/) > edge, "the choices draw inside the output column");
     await press(setup, ["ARROW_DOWN", "RETURN"]);
     assert.deepEqual(inbox(dir), [
       { at: inbox(dir)[0]?.["at"], text: "reject", gate: "g-1" },
@@ -716,6 +729,93 @@ test("a cursor past the last option draws as the typing row", async () => {
   }
 });
 
+test("a tall transcript gives up its rows, and the control keeps every one of its own", async (t) => {
+  const box = sandbox(t);
+  const scrolled: ViewEvent[] = Array.from({ length: 60 }, (_, index) => ({
+    type: "agent",
+    session: "s1",
+    kind: "tool",
+    text: "Read",
+    detail: `src/file-${index}.ts`,
+  }));
+  box.run(
+    "review-1",
+    [
+      { type: "run", phase: "started", run: "review-1" },
+      ...scrolled,
+      {
+        type: "gate",
+        phase: "asked",
+        id: "g-1",
+        question: "What now?",
+        schema: { type: "string", enum: Array.from({ length: 12 }, (_, index) => `choice-${index}`) },
+      },
+      { type: "state", state: "blocked", detail: "What now?" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    const frame = await frameWith(setup, (text) => text.includes("choice-11"));
+    const rows = frame.split("\n");
+    assert.equal((rows[23] ?? "").trimEnd(), "blocked: What now?", "the status alone draws on the last row");
+    assert.match(rows[22] ?? "", /arrows move, enter answers/, "the list keeps its last row above the status");
+    assert.match(rows[21] ?? "", /type a different answer/, "the list keeps its typing row above the hint");
+    assert.match(rows[20] ?? "", /[(] [)] choice-11/, "the list keeps its last choice");
+    const first = rows.findIndex((row) => /[(][ o][)] choice-0/.test(row));
+    assert.match(rows[first - 1] ?? "", /What now[?]/, "the list keeps its title");
+    assert.equal(rows.filter((row) => /[(][ o][)] choice-/.test(row)).length, 12, "the list keeps all 12 choices");
+    assert.ok(
+      rows.slice(0, first - 1).some((row) => /\[Read\] src\/file-\d+\.ts/.test(row)),
+      "the transcript keeps drawing above the list",
+    );
+    assert.ok(!frame.includes("src/file-0."), "the transcript scrolled instead of pushing the list off the screen");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a control taller than its column stops at the column, never on the status line", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "ticket-1",
+    [
+      { type: "run", phase: "started", run: "ticket-1" },
+      {
+        type: "credential",
+        phase: "asked",
+        name: "jira",
+        label: "Jira",
+        fields: Array.from({ length: 22 }, (_, index) => ({
+          name: `f${index}`,
+          label: `field number ${index}`,
+          secret: false,
+        })),
+      },
+      { type: "state", state: "blocked", detail: "Jira needs a credential" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="ticket-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("field number 0"));
+    for (let index = 0; index < 19; index++) {
+      await type(setup, `value-${index}`);
+      await press(setup, ["RETURN"]);
+    }
+    const rows = setup.captureCharFrame().split("\n");
+    assert.match(rows[20] ?? "", /field number 18: value-18/, "the form draws its rows down the column");
+    assert.match(rows[22] ?? "", /│ > /, "the form fills the column to its last row");
+    assert.equal(
+      (rows[23] ?? "").trimEnd(),
+      "blocked: Jira needs a credential",
+      "the status alone holds the last row",
+    );
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("typing a message sends it to the run", async (t) => {
   const box = sandbox(t);
   const dir = box.run(
@@ -765,7 +865,14 @@ test("a credential goes to the store, and never to the screen or the inbox", asy
   const setup = await screen(<RunView name="ticket-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     const asking = await frameWith(setup, (text) => text.includes("your Jira site"));
-    assert.ok(column(asking, /your Jira site/) > PANE, "the credential form draws in the output column");
+    const edge = column(asking, /Jira needs a credential/);
+    assert.ok(edge > PANE, "the transcript starts right of the tree pane");
+    assert.equal(
+      column(panes(asking), /Jira needs a credential/, "last"),
+      edge,
+      "the credential form starts at the transcript's left edge",
+    );
+    assert.ok(column(asking, /your Jira site/) > edge, "the form fields draw inside the output column");
     await type(setup, "acme.atlassian.net");
     await press(setup, ["RETURN"]);
     await frameWith(setup, (text) => text.includes("the API token"));
@@ -800,7 +907,9 @@ test("a done run opens read-only, with no input bar", async (t) => {
   try {
     const frame = await frameWith(setup, (text) => text.includes("this run is done"));
     assert.ok(!frame.includes("to run >"), "a done run offered an input bar");
-    assert.ok(column(frame, /this run is done/) > PANE, "the read-only line draws in the output column");
+    const edge = column(frame, /run plan-1 done/);
+    assert.ok(edge > PANE, "the transcript starts right of the tree pane");
+    assert.equal(column(frame, /this run is done/), edge, "the read-only line starts at the transcript's left edge");
   } finally {
     setup.renderer.destroy();
   }

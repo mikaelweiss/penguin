@@ -824,6 +824,19 @@ export default workflow({
 });
 `;
 
+const scrollingWorkflow = `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate, view }) {
+    for (let index = 0; index < 60; index++) view.event({ message: \`finding number \${index}\` });
+    return await gate("Ship the findings?");
+  },
+});
+`;
+
 const nothing = (): void => {};
 
 test("invariant 16: the status line holds one line, however long the question", async (t) => {
@@ -874,6 +887,32 @@ test("invariant 16: the input bar holds the bottom of the output column", async 
     assert.ok(column > PANE, "the transcript starts right of the tree pane");
     assert.equal(bar.indexOf("answer: Blockers"), column, "the input bar starts at the transcript's left edge");
     assert.equal(bar.slice(0, column).trim().length <= 1, true, "only the tree border sits left of the bar");
+  } finally {
+    setup.renderer.destroy();
+  }
+  box.send("w-1", "ok");
+  await box.waitForEnd("w-1");
+});
+
+test("invariant 16: the status line keeps the last row under a scrolled transcript", async (t) => {
+  const box = sandbox(t);
+  box.write("w.ts", scrollingWorkflow);
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  homed(t, box);
+  const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
+  try {
+    const frame = await frameWith(
+      setup,
+      (text) => text.includes("answer: Ship the findings?") && text.includes("finding number 59"),
+    );
+    const rows = frame.split("\n");
+    assert.ok(frame.includes("finding number 59"), "the transcript draws its tail");
+    assert.ok(!frame.includes("finding number 0 "), "the transcript scrolled past its own top");
+    assert.equal((rows[23] ?? "").trimEnd(), "blocked: Ship the findings?", "the status alone holds the last row");
+    assert.match(rows[22] ?? "", /arrows move|enter sends/, "the input hint keeps its row above the status");
+    assert.match(rows[21] ?? "", /answer: Ship the findings\?/, "the input bar keeps its row above the hint");
   } finally {
     setup.renderer.destroy();
   }

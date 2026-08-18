@@ -25,7 +25,7 @@ export function Transcript({
   const last = entries.at(-1)?.seq;
   return (
     <scrollbox
-      style={{ flexGrow: 1, rootOptions: { flexGrow: 1 } }}
+      style={{ flexGrow: 1, flexBasis: 0, rootOptions: { flexGrow: 1, flexBasis: 0 } }}
       stickyScroll={true}
       stickyStart="bottom"
       scrollY={true}

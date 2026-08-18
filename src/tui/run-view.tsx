@@ -494,7 +494,7 @@ export function RunView({
           <text fg={ink.dim}>{cut(` ${name}  ${agent}`, PANE)}</text>
           <Tree rows={rows} selected={selected} frame={frame} width={PANE - 1} />
         </box>
-        <box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 1 }}>
+        <box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 1, overflow: "hidden" }}>
           <Transcript entries={entries} live={!ended} width={width} />
           <Bottom
             ended={ended}
