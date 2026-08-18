@@ -1,11 +1,38 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import type { ExecOptions } from "@mikaelweiss/penguin-engine";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
-export const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+export const cli = fileURLToPath(new URL("../apps/cli/src/cli.ts", import.meta.url));
+
+export function runArgv(argv: string[], cwd: string, options?: ExecOptions): Promise<number> {
+  const [cmd, ...args] = argv;
+  if (cmd === undefined) return Promise.resolve(1);
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+    const forward = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
+      options?.onOutput?.(chunk.toString(), stream);
+    };
+    child.stdout?.on("data", forward("stdout"));
+    child.stderr?.on("data", forward("stderr"));
+    if (options?.stdin !== undefined) {
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(options.stdin);
+    }
+    child.on("error", (error) => {
+      reject(error);
+    });
+    child.on("close", (code) => {
+      resolve(code ?? 1);
+    });
+  });
+}
 
 const runner = fileURLToPath(import.meta.url);
 
@@ -404,7 +431,7 @@ async function fakeTerminal(): Promise<void> {
   output.isTTY = true;
   output.columns = 100;
   output.rows = 30;
-  await import("../src/cli.ts");
+  await import("../apps/cli/src/cli.ts");
 }
 
 if (import.meta.main) await fakeTerminal();

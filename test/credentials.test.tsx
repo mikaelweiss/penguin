@@ -1,17 +1,17 @@
+import type { CredentialRequest, Host } from "@mikaelweiss/penguin-engine";
+import { loadAdapter } from "@mikaelweiss/penguin-engine/catalog";
+import { credentials } from "@mikaelweiss/penguin-engine/protocol";
+import type { TestRendererSetup } from "@opentui/core/testing";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { TestRendererSetup } from "@opentui/core/testing";
-import { loadAdapter } from "../src/adapters.ts";
-import * as credentials from "../src/credentials.ts";
-import { type Left, RunView } from "../src/tui/run-view.tsx";
-import type { CredentialRequest, Host } from "../src/types.ts";
+import { type Left, RunView } from "../apps/cli/src/tui/run-view/run-view.tsx";
 import { frameWith, homed, press, screen, typeText } from "./drive.tsx";
 import { type Event, type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
-const jiraFile = fileURLToPath(new URL("../examples/adapters/jira.ts", import.meta.url));
+const jiraFile = fileURLToPath(new URL("../packages/engine/examples/adapters/jira.ts", import.meta.url));
 
 const TOKEN = "s3cret-jira-token";
 

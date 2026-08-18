@@ -347,7 +347,7 @@ test("list adapters shows role, name, and description", (t) => {
   assert.match(listed.stdout, /^shell {2}shell\n {2}test shell$/m);
 
   const verbose = box.penguin("list", "adapters", "--verbose");
-  assert.match(verbose.stdout, /^ {2}global {2}\S+adapters\/fake\.ts$/m);
+  assert.match(verbose.stdout, /^ {2}home {2}\S+adapters\/fake\.ts$/m);
 });
 
 test("list adapters with none installed says where they go", (t) => {
@@ -500,8 +500,8 @@ test("the choice runs the file it listed, not the first workflow of that name", 
 
   const done = await box.tty(
     [
-      { await: "count (global)", send: "\x1b[B" },
-      { await: "count (global)", send: "\r" },
+      { await: "count (home)", send: "\x1b[B" },
+      { await: "count (home)", send: "\r" },
       { await: "--count <number>", send: "4\r" },
       { await: "--tag <text>", send: "\r" },
     ],

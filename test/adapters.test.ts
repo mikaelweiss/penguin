@@ -1,14 +1,14 @@
+import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "@mikaelweiss/penguin-engine";
+import { loadAdapter } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadAdapter } from "../src/adapters.ts";
-import { runArgv } from "../src/spawn.ts";
-import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "../src/types.ts";
+import { runArgv } from "./helpers.ts";
 
-const cursorFile = fileURLToPath(new URL("../examples/adapters/cursor.ts", import.meta.url));
+const cursorFile = fileURLToPath(new URL("../packages/engine/examples/adapters/cursor.ts", import.meta.url));
 
 type Call = { argv: string[]; cwd: string; stdin: string };
 
@@ -289,7 +289,7 @@ test("a result the CLI marks as an error fails with the text it gave", async (t)
   assert.deepEqual(outcome, { ok: false, error: "the model is over its rate limit" });
 });
 
-const ghFile = fileURLToPath(new URL("../examples/adapters/gh.ts", import.meta.url));
+const ghFile = fileURLToPath(new URL("../packages/engine/examples/adapters/gh.ts", import.meta.url));
 
 type Shelled = { code: number; stdout?: string; stderr?: string };
 

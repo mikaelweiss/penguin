@@ -1,12 +1,9 @@
+import { catalogs, foundIn, installedIn, searchPathIn } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { installedIn } from "../src/adapters.ts";
-import * as catalogs from "../src/catalogs.ts";
-import { searchPathIn } from "../src/skills.ts";
-import { foundIn } from "../src/workflows.ts";
 
 const extraAdapter = `import { adapter } from "penguin";
 
@@ -49,8 +46,8 @@ test("roots is the project catalog then the home catalog", (t) => {
   const cwd = "/repo";
   assert.deepEqual(catalogs.roots(cwd), [catalogs.projectCatalog(cwd), catalogs.homeCatalog()]);
   assert.equal(catalogs.homeCatalog().dir, dir);
-  assert.equal(catalogs.forScope(cwd, "local").dir, catalogs.projectCatalog(cwd).dir);
-  assert.equal(catalogs.forScope(cwd, "global").dir, catalogs.homeCatalog().dir);
+  assert.equal(catalogs.writableCatalog(cwd, "project").dir, catalogs.projectCatalog(cwd).dir);
+  assert.equal(catalogs.writableCatalog(cwd, "home").dir, catalogs.homeCatalog().dir);
 });
 
 test("a catalogs file with starter enables examples/ after the home", (t) => {
@@ -61,6 +58,10 @@ test("a catalogs file with starter enables examples/ after the home", (t) => {
     catalogs.roots(cwd).map((catalog) => catalog.dir),
     [path.join(cwd, ".penguin"), dir, catalogs.starterCatalog().dir],
   );
+  assert.deepEqual(
+    catalogs.roots(cwd).map((catalog) => catalog.scope),
+    ["project", "home", "starter"],
+  );
 });
 
 test("a catalogs file path line is a catalog root", (t) => {
@@ -69,6 +70,7 @@ test("a catalogs file path line is a catalog root", (t) => {
   fs.mkdirSync(extra);
   fs.writeFileSync(path.join(dir, "catalogs"), `${extra}\n`);
   assert.equal(catalogs.roots("/repo").at(-1)?.dir, extra);
+  assert.equal(catalogs.roots("/repo").at(-1)?.scope, "catalog");
 });
 
 test("a third catalog root is scanned for workflows, adapters, and skills", async (t) => {
@@ -83,9 +85,9 @@ test("a third catalog root is scanned for workflows, adapters, and skills", asyn
   fs.writeFileSync(path.join(extra, "skills", "penguin-extra", "SKILL.md"), "extra craft\n");
 
   const list = [
-    { dir: project, scope: "local" as const },
-    { dir: extra, scope: "global" as const },
-    { dir: homeCatalog, scope: "global" as const },
+    { dir: project, scope: "project" as const },
+    { dir: extra, scope: "catalog" as const },
+    { dir: homeCatalog, scope: "home" as const },
   ];
 
   const workflows = foundIn(list);
@@ -95,7 +97,7 @@ test("a third catalog root is scanned for workflows, adapters, and skills", asyn
   );
   assert.equal(workflows[0]?.file, path.join(project, "workflows", "local.ts"));
 
-  const extraCatalog = { dir: extra, scope: "global" as const };
+  const extraCatalog = { dir: extra, scope: "catalog" as const };
   const adapters = await installedIn(list);
   assert.equal(adapters.length, 1);
   assert.equal(adapters[0]?.name, "extra");

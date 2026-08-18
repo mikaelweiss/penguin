@@ -1,3 +1,5 @@
+import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "@mikaelweiss/penguin-engine";
+import { installed, load, loadAdapter, renderEnv } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -5,12 +7,9 @@ import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { installed, loadAdapter, renderEnv } from "../src/adapters.ts";
-import { load } from "../src/loader.ts";
-import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "../src/types.ts";
 import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
-const examples = fileURLToPath(new URL("../examples", import.meta.url));
+const examples = fileURLToPath(new URL("../packages/engine/examples", import.meta.url));
 const workflows = path.join(examples, "workflows");
 
 const codexFile = path.join(examples, "adapters", "codex.ts");

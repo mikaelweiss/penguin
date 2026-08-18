@@ -1,22 +1,22 @@
+import { type AdapterFound as Found } from "@mikaelweiss/penguin-engine/catalog";
+import type { ViewEvent } from "@mikaelweiss/penguin-engine/protocol";
+import { controlFor } from "@mikaelweiss/penguin-viewer";
+import type { TestRendererSetup } from "@opentui/core/testing";
+import { testRender } from "@opentui/react/test-utils";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import type { TestRendererSetup } from "@opentui/core/testing";
-import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode } from "react";
-import type { Found } from "../src/adapters.ts";
-import { Ask, Pick } from "../src/tui/ask.tsx";
-import { agentLabel, agentLine } from "../src/tui/attach.ts";
-import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
-import { Editor } from "../src/tui/editor.ts";
-import { controlFor } from "../src/tui/gate.ts";
-import { Choices } from "../src/tui/input.tsx";
-import { machineLine, strained } from "../src/tui/memory.ts";
-import { plainAttach } from "../src/tui/plain.ts";
-import { type Left, PANE, RunView } from "../src/tui/run-view.tsx";
-import type { ViewEvent } from "../src/types.ts";
+import { agentLabel, agentLine } from "../apps/cli/src/attach/attach.ts";
+import { watchAsLines } from "../apps/cli/src/attach/plain.ts";
+import { computerLine, strained } from "../apps/cli/src/machine/memory.ts";
+import { Ask, Pick } from "../apps/cli/src/tui/ask.tsx";
+import { Dashboard, type Open } from "../apps/cli/src/tui/dashboard.tsx";
+import { Editor } from "../apps/cli/src/tui/editor.ts";
+import { Choices } from "../apps/cli/src/tui/input.tsx";
+import { type Left, PANE, RunView } from "../apps/cli/src/tui/run-view/run-view.tsx";
 import { frameWith } from "./drive.tsx";
 
 type Box = {
@@ -288,7 +288,7 @@ test("the readout warns only when another run would oversubscribe the machine", 
   assert.equal(strained({ used: total / 2, total, load: 10, cores: 10 }), true);
   assert.equal(strained({ used: total * 0.95, total, load: 1, cores: 10 }), true);
   assert.equal(
-    machineLine({ used: 20 * 1024 ** 3, total, load: 8.53, cores: 10 }),
+    computerLine({ used: 20 * 1024 ** 3, total, load: 8.53, cores: 10 }),
     "ram 20/32 GB  load 8.5/10",
   );
 });
@@ -1014,7 +1014,7 @@ test("with no terminal a run prints plain lines and the result", async (t) => {
   }) as typeof process.stdout.write;
   let code: number;
   try {
-    code = await plainAttach("plan-1", dir, "agent claude");
+    code = await watchAsLines("plan-1", dir, "agent claude");
   } finally {
     process.stdout.write = write;
   }
@@ -2126,7 +2126,7 @@ test("every agent header label fits the pane the run view cuts it to", (t) => {
     role: "agent",
     name,
     description: "",
-    scope: "global",
+    scope: "home",
     file: `/adapters/${name}.ts`,
     definition: { role: "agent", name, description: "", build: () => ({}) },
   });

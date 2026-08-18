@@ -1,10 +1,10 @@
+import type { AgentAdapter, AgentTurn, ExecOptions, Host, ViewEvent } from "@mikaelweiss/penguin-engine";
+import { loadAdapter } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadAdapter } from "../src/adapters.ts";
-import type { AgentAdapter, AgentTurn, ExecOptions, Host, ViewEvent } from "../src/types.ts";
 
-const file = fileURLToPath(new URL("../examples/adapters/opencode.ts", import.meta.url));
+const file = fileURLToPath(new URL("../packages/engine/examples/adapters/opencode.ts", import.meta.url));
 
 type Played = { code?: number; stderr?: string };
 

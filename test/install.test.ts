@@ -1,8 +1,8 @@
+import { starterCatalog } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { starterCatalog } from "../src/catalogs.ts";
 import { sandbox } from "./helpers.ts";
 
 test("a fresh install enables the starter catalog and does not copy it", (t) => {
@@ -57,7 +57,10 @@ test("a fresh install leaves ship in the workflow list, from examples/", (t) => 
     listed.stdout,
     /^ship {2}--ticket <text> \[--rounds <number>\]\n {2}ticket to open pull request:/m,
   );
-  assert.match(listed.stdout, new RegExp(path.join(starterCatalog().dir, "workflows", "ship.ts")));
+  assert.match(
+    listed.stdout,
+    new RegExp(`starter  ${path.join(starterCatalog().dir, "workflows", "ship.ts")}`),
+  );
 });
 
 test("a home workflow of the same name overlays the starter", (t) => {

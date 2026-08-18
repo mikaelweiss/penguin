@@ -1,5 +1,6 @@
 {
-  "name": "@mikaelweiss/penguin",
+  "name": "penguin",
+  "private": true,
   "version": "0.0.6",
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "license": "Apache-2.0",
@@ -8,38 +9,25 @@
     "url": "git+https://github.com/mikaelweiss/penguin.git"
   },
   "type": "module",
-  "bin": {
-    "pn": "./src/cli.ts"
-  },
-  "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
-    }
-  },
-  "files": [
-    "src",
-    "examples"
-  ],
+  "workspaces": ["packages/*", "apps/*"],
   "engines": {
     "bun": ">=1.3.0"
   },
   "scripts": {
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && eslint .",
     "test": "bun test --parallel --timeout 30000 test/",
     "release": "./scripts/publish.sh",
-    "reinstall": "./scripts/reinstall.sh"
-  },
-  "dependencies": {
-    "@opentui/core": "^0.5.3",
-    "@opentui/react": "^0.5.3",
-    "react": "^19.2.8",
-    "zod": "^4.4.3"
+    "reinstall": "./scripts/reinstall.sh",
+    "graph": "nx graph"
   },
   "devDependencies": {
+    "@nx/eslint-plugin": "^22.4.0",
     "@types/bun": "^1.3.14",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.18",
-    "typescript": "^5.9.3"
+    "eslint": "^9.39.0",
+    "nx": "^22.4.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
   }
 }

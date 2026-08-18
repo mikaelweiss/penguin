@@ -16,8 +16,9 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "penguin": ["./src/index.ts"]
+      "penguin": ["./packages/engine/src/author/index.ts"],
+      "@mikaelweiss/penguin-viewer": ["./packages/viewer/src/index.ts"]
     }
   },
-  "include": ["src", "test", "examples"]
+  "include": ["packages", "apps", "test"]
 }
