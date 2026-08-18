@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { choices } from "../src/workflows.ts";
 import { sandbox } from "./helpers.ts";
 
 const writes = (text: string, params = "z.object({})") => `import { workflow } from "penguin";
@@ -159,6 +160,20 @@ test("a name that matches nothing names both places", (t) => {
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /no workflow file at .*nothing/);
   assert.match(failed.stderr, /no workflow named nothing in/);
+});
+
+test("a name in both scopes draws two labels, and a name in one draws its own", () => {
+  const both = [
+    { name: "ticket", scope: "local" as const, file: "/p/ticket.ts", description: "the local one", params: [] },
+    { name: "release", scope: "global" as const, file: "/h/release.ts", description: "ship it\nsecond line", params: [] },
+    { name: "ticket", scope: "global" as const, file: "/h/ticket.ts", description: "", params: [] },
+  ];
+
+  assert.deepEqual(choices(both), [
+    { label: "ticket (local)", note: "the local one" },
+    { label: "release", note: "ship it" },
+    { label: "ticket (global)" },
+  ]);
 });
 
 test("pn run still takes a path", (t) => {

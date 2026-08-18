@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { exited, sandbox } from "./helpers.ts";
+import { exited, sandbox, type Sandbox } from "./helpers.ts";
 
 const paramsWorkflow = `import { workflow } from "penguin";
 import { z } from "zod";
@@ -28,6 +28,30 @@ export default workflow({
 });
 `;
 
+const askWorkflow = `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "count things",
+  params: z.object({ count: z.number(), tag: z.string().optional() }),
+  async run({ view, params }) {
+    view.event({ message: String(params.count) });
+  },
+});
+`;
+
+const pickWorkflow = `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "pick things",
+  params: z.object({ mode: z.enum(["fast", "slow"]), rounds: z.number().optional() }),
+  async run({ view, params }) {
+    view.event({ message: params.mode });
+  },
+});
+`;
+
 const gateWorkflow = `import { workflow } from "penguin";
 import { z } from "zod";
 
@@ -39,6 +63,13 @@ export default workflow({
   },
 });
 `;
+
+function recorded(box: Sandbox, run: string): { workflow: string; params: unknown } {
+  return JSON.parse(fs.readFileSync(path.join(box.runDir(run), "run.json"), "utf8")) as {
+    workflow: string;
+    params: unknown;
+  };
+}
 
 test("params are coerced to the schema types", (t) => {
   const box = sandbox(t);
@@ -205,6 +236,8 @@ test("pn help prints the usage", (t) => {
   assert.equal(help.code, 0);
   assert.match(help.stdout, /pn list workflows\|skills\|adapters \[--verbose\]/);
   assert.match(help.stdout, /pn run <workflow> \[--param value \.\.\.\]/);
+  assert.match(help.stdout, /pn run -i\s+choose a workflow, then fill its params/);
+  assert.match(help.stdout, /pn run <workflow> -i\s+ask for the params the args did not fill/);
   assert.match(help.stdout, /pn run <workflow> --background/);
   assert.match(help.stdout, /pn ps/);
   assert.match(help.stdout, /pn attach <run>/);
@@ -307,10 +340,223 @@ test("run and list adapters write the penguin-env declaration", (t) => {
 test("run -i without a terminal is refused", (t) => {
   const box = sandbox(t);
   box.write("w.ts", quickWorkflow);
+  box.write(".penguin/count.ts", askWorkflow);
 
-  const done = box.penguin("run", "./w.ts", "-i");
+  const named = box.penguin("run", "./w.ts", "-i");
+
+  assert.equal(named.code, 1);
+  assert.match(named.stderr, /pn run -i needs a terminal/);
+  assert.equal(fs.existsSync(path.join(box.runs, "w-1")), false);
+
+  const bare = box.penguin("run", "-i");
+
+  assert.equal(bare.code, 1);
+  assert.match(bare.stderr, /pn run -i needs a terminal/);
+  assert.doesNotMatch(bare.stdout, /count/, "the choice drew without a terminal");
+  assert.equal(fs.existsSync(box.runs), false);
+});
+
+test("run -i picks a workflow, then fills the params the args did not", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+
+  const done = await box.tty(
+    [
+      { await: "which workflow?", send: "\r" },
+      { await: "--count <number>", send: "many\r" },
+      { await: "--count needs a number", send: "7\r" },
+      { await: "--tag <text>", send: "\r" },
+    ],
+    "run",
+    "-i",
+    "--background",
+  );
+
+  assert.equal(done.code, 0, done.output);
+  assert.match(done.stdout, /run count-1 started,/);
+  assert.deepEqual(recorded(box, "count-1").params, { count: 7 });
+});
+
+test("a string param keeps the characters typed into it", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+
+  const done = await box.tty(
+    [
+      { await: "which workflow?", send: "\r" },
+      { await: "--count <number>", send: "3\r" },
+      { await: "--tag <text>", send: "release 1\r" },
+    ],
+    "run",
+    "-i",
+    "--background",
+  );
+
+  assert.equal(done.code, 0, done.stderr);
+  assert.deepEqual(recorded(box, "count-1").params, { count: 3, tag: "release 1" });
+});
+
+test("an enum param draws a list, and a refused value keeps the skip note", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/pick.ts", pickWorkflow);
+
+  const done = await box.tty(
+    [
+      { await: "which workflow?", send: "\r" },
+      { await: "--mode <fast|slow>", send: "\x1b[B" },
+      { await: "( ) fast", send: "\r" },
+      { await: "--rounds <number>", send: "many\r" },
+      { await: "--rounds needs a number", send: "\r" },
+    ],
+    "run",
+    "-i",
+    "--background",
+  );
+
+  assert.equal(done.code, 0, done.stderr);
+  assert.deepEqual(recorded(box, "pick-1").params, { mode: "slow" });
+  const refused = done.stdout.indexOf("--rounds needs a number");
+  assert.notEqual(refused, -1, "the reason drew");
+  assert.notEqual(done.stdout.indexOf("enter skips", refused), -1, "the skip note stayed beside the reason");
+});
+
+test("run -i takes the params the args already filled", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+
+  const done = await box.tty(
+    [
+      { await: "which workflow?", send: "\r" },
+      { await: "--count <number>", send: "2\r" },
+    ],
+    "run",
+    "-i",
+    "--tag",
+    "beta",
+    "--background",
+  );
+
+  assert.equal(done.code, 0, done.output);
+  assert.deepEqual(recorded(box, "count-1").params, { tag: "beta", count: 2 });
+});
+
+test("an empty answer to a required param says it is required", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+
+  const done = await box.tty(
+    [
+      { await: "which workflow?", send: "\r" },
+      { await: "--count <number>", send: "\r" },
+      { await: "this one is required", send: "1\r" },
+      { await: "--tag <text>", send: "\r" },
+    ],
+    "run",
+    "-i",
+    "--background",
+  );
+
+  assert.equal(done.code, 0, done.output);
+  assert.deepEqual(recorded(box, "count-1").params, { count: 1 });
+});
+
+test("the choice runs the file it listed, not the first workflow of that name", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+  const installed = path.join(box.home, "count.ts");
+  fs.writeFileSync(installed, askWorkflow);
+
+  const done = await box.tty(
+    [
+      { await: "count (global)", send: "\x1b[B" },
+      { await: "count (global)", send: "\r" },
+      { await: "--count <number>", send: "4\r" },
+      { await: "--tag <text>", send: "\r" },
+    ],
+    "run",
+    "-i",
+    "--background",
+  );
+
+  assert.equal(done.code, 0, done.stderr);
+  assert.equal(recorded(box, "count-1").workflow, installed);
+});
+
+test("a workflow file gone by the time it is picked fails before a run is claimed", async (t) => {
+  const box = sandbox(t);
+  const file = box.write(".penguin/count.ts", askWorkflow);
+
+  const done = await box.tty([{ await: "which workflow?", send: "\r", remove: file }], "run", "-i");
 
   assert.equal(done.code, 1);
-  assert.match(done.stderr, /pn run -i needs a terminal/);
-  assert.equal(fs.existsSync(path.join(box.runs, "w-1")), false);
+  assert.match(done.stderr, /no workflow file at .*count\.ts/);
+  assert.equal(fs.existsSync(box.runs), false);
+});
+
+test("Ctrl-C at the workflow choice leaves no run behind", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+
+  const done = await box.tty([{ await: "which workflow?", send: "\x03" }], "run", "-i");
+
+  assert.equal(done.code, 130);
+  assert.equal(fs.existsSync(box.runs), false);
+});
+
+test("Ctrl-C during param entry removes the claimed directory", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+
+  const done = await box.tty(
+    [
+      { await: "which workflow?", send: "\r" },
+      { await: "--count <number>", send: "\x03" },
+    ],
+    "run",
+    "-i",
+  );
+
+  assert.equal(done.code, 130);
+  assert.deepEqual(fs.readdirSync(box.runs), []);
+  assert.equal(box.penguin("ps").stdout.includes("count"), false);
+});
+
+test("run -i with no workflow file says where they go, and draws no list", async (t) => {
+  const box = sandbox(t);
+
+  const done = await box.tty([], "run", "-i");
+
+  assert.equal(done.code, 0, done.output);
+  assert.match(done.stdout, /no workflow file in/);
+  assert.doesNotMatch(done.stdout, /which workflow\?/);
+  assert.equal(fs.existsSync(box.runs), false);
+});
+
+test("two run -i processes on one workflow claim different directories", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+  const steps = [
+    { await: "which workflow?", send: "\r" },
+    { await: "--count <number>", send: "5\r" },
+    { await: "--tag <text>", send: "\r" },
+  ];
+
+  const both = await Promise.all([
+    box.tty(steps, "run", "-i", "--background"),
+    box.tty(steps, "run", "-i", "--background"),
+  ]);
+
+  for (const done of both) assert.equal(done.code, 0, done.stderr);
+  assert.deepEqual(fs.readdirSync(box.runs).sort(), ["count-1", "count-2"]);
+});
+
+test("run with params and no workflow lists the workflows", (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/count.ts", askWorkflow);
+
+  const listed = box.penguin("run", "--tag", "x");
+
+  assert.equal(listed.code, 0, listed.output);
+  assert.match(listed.stdout, /^count\s+/m);
+  assert.match(listed.stdout, /run one with: pn run <workflow>/);
 });

@@ -26,6 +26,7 @@ usage:
   pn                                              the dashboard: the live runs, and what needs you
   pn list workflows|skills|adapters [--verbose]   show what penguin can use
   pn run <workflow> [--param value ...]           start a run and watch it
+  pn run -i                                       choose a workflow, then fill its params
   pn run <workflow> -i                            ask for the params the args did not fill
   pn run <workflow> --background                  start a run and leave it alone
   pn ps                                           the dashboard, or a plain table when piped
@@ -37,6 +38,8 @@ usage:
 <workflow> is a name from the list, or a path to a workflow file.
 In a run: type to send a message, q goes to the dashboard, Ctrl-C stops the run.
 `;
+
+const RUN_FLAGS = new Set(["--background", "-i", "--interactive"]);
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
@@ -149,25 +152,40 @@ function scopeOf(flag: string): Scope {
 async function runWorkflow(argv: string[]): Promise<number> {
   const background = argv.includes("--background");
   const asked = argv.includes("-i") || argv.includes("--interactive");
-  const [target, ...rest] = argv.filter(
-    (arg) => arg !== "--background" && arg !== "-i" && arg !== "--interactive",
-  );
-  if (target === undefined) return listWorkflows(true);
-  const source = sourceOf(target);
-  const definition = await load(source);
-  const values = parseParams(definition.params, rest);
   if (asked && !interactive()) throw new PenguinError("pn run -i needs a terminal");
+  const rest = argv.filter((arg) => !RUN_FLAGS.has(arg));
+  const first = rest[0];
+  const target = first !== undefined && !first.startsWith("-") ? first : undefined;
+  if (target === undefined && !asked) return listWorkflows(true);
+  const source = target === undefined ? await chooseWorkflow() : sourceOf(target);
+  if (source === undefined) return 0;
+  const definition = await load(source);
+  const values = parseParams(definition.params, target === undefined ? rest : rest.slice(1));
   const installed = await adapters.installed(process.cwd());
   adapters.writeEnv(process.cwd(), installed);
   const name = asked
     ? await startAsked(source, definition.params, values)
-    : createRun(source, checkedParams(definition.params, values, target));
+    : createRun(source, checkedParams(definition.params, values, target ?? short(source)));
   const pid = startRun(name);
   if (background) {
     say(`run ${name} started, ${agentLine(installed)}`);
     return 0;
   }
   return attach(name, pid);
+}
+
+/** The choice runs before any run directory is claimed, so Ctrl-C leaves nothing behind. */
+async function chooseWorkflow(): Promise<string | undefined> {
+  const list = await workflows.listed(process.cwd());
+  if (list.length === 0) {
+    say(`no workflow file in ${workflows.searched(process.cwd()).map(short).join(" or ")}`);
+    return undefined;
+  }
+  const { pickOne } = await import("./tui/ask.tsx");
+  const picked = await pickOne("which workflow?", workflows.choices(list));
+  const file = list[picked]?.file;
+  if (file !== undefined && !fs.existsSync(file)) throw new PenguinError(`no workflow file at ${file}`);
+  return file;
 }
 
 function checkedParams(
@@ -228,21 +246,24 @@ async function fillParam(
     if (picked < param.choices.length) values[param.name] = param.choices[picked] ?? "";
     return;
   }
+  const skips = param.optional ? ["enter skips"] : [];
+  let notes = skips;
   for (;;) {
     const answer = await askText(question, {
-      notes: param.optional ? ["enter skips"] : [],
+      notes,
       attach: () => pasteImage(attachments),
       interrupt,
     });
     if (answer === "") {
       if (param.optional) return;
+      notes = ["this one is required"];
       continue;
     }
     try {
       values[param.name] = coerce(param.kind, param.name, answer);
       return;
     } catch (error) {
-      say(messageOf(error));
+      notes = [messageOf(error), ...skips];
     }
   }
 }

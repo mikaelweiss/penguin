@@ -24,7 +24,10 @@ export async function screen(node: ReactNode, width = 100, height = 24): Promise
   return setup;
 }
 
-/** A markdown block parses off the main thread, so its frame needs real time, not render passes. */
+/**
+ * The first frame the predicate takes. `waitForFrame` stops as soon as the renderer is idle,
+ * and a markdown block parses off the render loop and draws after that.
+ */
 export async function frameWith(
   setup: TestRendererSetup,
   predicate: (frame: string) => boolean,
@@ -35,7 +38,7 @@ export async function frameWith(
     await setup.flush();
     const frame = setup.captureCharFrame();
     if (predicate(frame)) return frame;
-    if (Date.now() - started > timeoutMs) throw new Error(`timed out waiting for a frame\n${frame}`);
+    if (Date.now() - started > timeoutMs) throw new Error(`no frame took the predicate:\n${frame}`);
     await new Promise((done) => setTimeout(done, 20));
   }
 }

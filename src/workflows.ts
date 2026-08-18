@@ -37,6 +37,16 @@ export function render(list: Found[], verbose = false): string {
   );
 }
 
+/** One line per workflow to choose from. A name held by both scopes says which scope it is. */
+export function choices(list: Found[]): { label: string; note?: string }[] {
+  return list.map((entry) => {
+    const twice = list.some((other) => other !== entry && other.name === entry.name);
+    const label = twice ? `${entry.name} (${entry.scope})` : entry.name;
+    const note = entry.description.split("\n")[0] ?? "";
+    return note === "" ? { label } : { label, note };
+  });
+}
+
 async function detailsOf(file: string): Promise<Details> {
   try {
     const definition = await load(file);

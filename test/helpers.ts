@@ -7,7 +7,12 @@ import { fileURLToPath } from "node:url";
 
 export const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
+const runner = fileURLToPath(import.meta.url);
+
 export type Result = { code: number; stdout: string; stderr: string; output: string };
+
+/** One question the fake terminal waits for, and the keys it answers with. */
+export type TtyStep = { await: string; send?: string; remove?: string };
 
 export type Event = Record<string, unknown>;
 
@@ -105,6 +110,7 @@ export type Sandbox = {
   writeSkill(dir: string, name: string, text: string): void;
   penguin(...args: string[]): Result;
   penguinWith(extra: Record<string, string>, ...args: string[]): Result;
+  tty(steps: TtyStep[], ...args: string[]): Promise<Result>;
   start(...args: string[]): ChildProcess;
   write(relative: string, text: string): string;
   read(relative: string): string;
@@ -168,6 +174,62 @@ export function sandbox(t: TestContext): Sandbox {
       const stdout = done.stdout ?? "";
       const stderr = done.stderr ?? "";
       return { code: done.status ?? 1, stdout, stderr, output: stdout + stderr };
+    },
+    tty(steps, ...args) {
+      const child = spawn(process.execPath, [runner, ...args], {
+        cwd: project,
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      let read = 0;
+      let at = 0;
+      let sent = "";
+      let settle: ReturnType<typeof setTimeout> | undefined;
+      let quiet: ReturnType<typeof setTimeout> | undefined;
+      const answer = (): void => {
+        for (;;) {
+          const step = steps[at];
+          if (step === undefined) return quietly();
+          const found = stdout.indexOf(step.await, read);
+          if (found === -1) return quietly();
+          read = found + step.await.length;
+          at += 1;
+          if (step.remove !== undefined) fs.rmSync(step.remove, { force: true });
+          if (step.send !== undefined) {
+            sent = step.send;
+            child.stdin?.write(sent);
+          }
+        }
+      };
+      /** A key the question drops still draws nothing a second later, so send it again. */
+      const quietly = (): void => {
+        quiet = setTimeout(() => {
+          if (sent !== "") child.stdin?.write(sent);
+          quiet = setTimeout(() => child.kill("SIGKILL"), 15_000);
+        }, 1_500);
+      };
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+        clearTimeout(settle);
+        clearTimeout(quiet);
+        // The question takes keys once its frame is drawn and its handler is mounted.
+        settle = setTimeout(answer, 60);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+      // The last key can land on a run that already started and closed its pipe.
+      child.stdin?.on("error", () => {});
+      return new Promise((resolve) => {
+        child.on("close", (code) => {
+          clearTimeout(settle);
+          clearTimeout(quiet);
+          const missed = at === steps.length ? "" : `nothing drew ${JSON.stringify(steps[at]?.await)}\n`;
+          resolve({ code: code ?? 1, stdout, stderr: stderr + missed, output: stdout + stderr + missed });
+        });
+      });
     },
     start(...args) {
       return spawn(process.execPath, [cli, ...args], {
@@ -311,3 +373,20 @@ export function exited(child: ChildProcess): Promise<number> {
     child.on("close", (code) => resolve(code ?? 1));
   });
 }
+
+/**
+ * As a script, this file is the terminal `box.tty` spawns: penguin's pipes say they are
+ * a terminal, so it draws frames the parent reads and takes keys the parent writes.
+ */
+async function fakeTerminal(): Promise<void> {
+  const input = process.stdin as NodeJS.ReadStream & { setRawMode: (raw: boolean) => NodeJS.ReadStream };
+  input.isTTY = true;
+  input.setRawMode = () => input;
+  const output = process.stdout;
+  output.isTTY = true;
+  output.columns = 100;
+  output.rows = 30;
+  await import("../src/cli.ts");
+}
+
+if (import.meta.main) await fakeTerminal();

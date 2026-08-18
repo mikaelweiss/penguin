@@ -66,7 +66,7 @@ async function show<T>(view: (done: Done<T>) => ReactNode, options: AskOptions):
   process.exit(130);
 }
 
-function Ask({
+export function Ask({
   question,
   options,
   onDone,
@@ -136,7 +136,7 @@ function Ask({
   );
 }
 
-function Pick({
+export function Pick({
   question,
   choices,
   many,

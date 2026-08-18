@@ -6,6 +6,7 @@ import test, { type TestContext } from "node:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode } from "react";
+import { Ask, Pick } from "../src/tui/ask.tsx";
 import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
 import { Editor } from "../src/tui/editor.ts";
 import { controlFor } from "../src/tui/gate.ts";
@@ -534,6 +535,27 @@ test("q goes to the dashboard from a directly started run", async (t) => {
   }
 });
 
+test("a param question draws its notes under it, and nothing else", async () => {
+  const taken: (string | undefined)[] = [];
+  const setup = await screen(
+    <Ask
+      question="--count <number>"
+      options={{ notes: ["--count needs a number", "enter skips"] }}
+      onDone={(value) => taken.push(value)}
+    />,
+  );
+  try {
+    const frame = await setup.waitForFrame((text) => text.includes("--count <number>"));
+    const rows = frame.split("\n").map((row) => row.trimEnd()).filter((row) => row !== "");
+    assert.deepEqual(rows.slice(0, 3), ["--count <number>", "  --count needs a number", "  enter skips"]);
+    await type(setup, "7");
+    await press(setup, ["RETURN"]);
+    assert.deepEqual(taken, ["7"]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("a directly started run leaves penguin when it ends on screen", async (t) => {
   const box = sandbox(t);
   box.run("plan-1", [
@@ -566,6 +588,28 @@ test("Ctrl-C on a run whose process is gone goes to the dashboard", async (t) =>
       setup.mockInput.pressCtrlC();
     });
     assert.deepEqual(left, [{ back: true, code: 130 }]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a param question with choices takes the one the cursor sits on", async () => {
+  const taken: (number[] | undefined)[] = [];
+  const setup = await screen(
+    <Pick
+      question="which workflow?"
+      choices={[{ label: "count", note: "count things" }, { label: "ticket (global)" }]}
+      many={false}
+      options={{}}
+      onDone={(value) => taken.push(value)}
+    />,
+  );
+  try {
+    const frame = await setup.waitForFrame((text) => text.includes("which workflow?"));
+    assert.match(frame, /\(o\) count {2}count things/);
+    assert.match(frame, /\( \) ticket \(global\)/);
+    await press(setup, ["ARROW_DOWN", "RETURN"]);
+    assert.deepEqual(taken, [[1]]);
   } finally {
     setup.renderer.destroy();
   }
