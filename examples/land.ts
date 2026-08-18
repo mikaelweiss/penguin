@@ -26,6 +26,12 @@ export default workflow({
     let turns = 0;
     let clean = false;
 
+    const checkout = await vcs.head();
+    if (checkout.branch !== params.onto) {
+      await gate(`The checkout is on ${checkout.branch}, not ${params.onto}. Switch it, then answer.`);
+      return nowhere(`the checkout is on ${checkout.branch}`);
+    }
+
     for (let pass = 1; pass <= params.passes && !clean; pass++) {
       view.fact({ pass: `${pass}/${params.passes}` });
       const fetched = await vcs.fetch(params.onto, { cwd });
@@ -34,7 +40,16 @@ export default workflow({
         return nowhere(fetched.reason);
       }
 
-      let state = await vcs.rebase.onto(`origin/${params.onto}`, { cwd });
+      // The branch rebases onto the local target, so the target carries what origin just sent.
+      const advanced = await vcs.merge(`origin/${params.onto}`, { ffOnly: true });
+      if (!advanced.ok) {
+        await gate(
+          `${params.onto} and origin/${params.onto} have diverged: ${advanced.reason}\n\nReconcile them, then answer.`,
+        );
+        return nowhere(advanced.reason);
+      }
+
+      let state = await vcs.rebase.onto(params.onto, { cwd });
       const conflicted = state.conflicted;
       while (state.conflicted) {
         if (turns === params.resolutions) {
@@ -74,12 +89,6 @@ export default workflow({
       return nowhere("the pass bound ran out");
     }
 
-    const head = await vcs.head();
-    if (head.branch !== params.onto) {
-      await gate(`The checkout is on ${head.branch}, not ${params.onto}. Switch it, then answer.`);
-      return nowhere(`the checkout is on ${head.branch}`);
-    }
-
     const merged = await vcs.merge(params.branch, { ffOnly: true });
     if (!merged.ok) {
       await gate(`${params.onto} did not fast-forward to ${params.branch}: ${merged.reason}`);
@@ -89,6 +98,16 @@ export default workflow({
     const landed = await vcs.head();
     view.fact({ landed: `${params.onto} ${landed.sha}` });
     view.event({ message: `${params.branch} is on ${params.onto} at ${landed.sha}` });
+
+    if (cwd !== undefined) {
+      const removed = await vcs.worktree.remove(cwd);
+      if (!removed.ok) {
+        await gate(
+          `${params.branch} is on ${params.onto}, but the worktree at ${cwd} stayed: ${removed.reason}\n\nRemove it yourself, then answer.`,
+        );
+      }
+    }
+
     return { landed: true, sha: landed.sha, reason: "" };
   },
 });

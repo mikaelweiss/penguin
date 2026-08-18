@@ -54,13 +54,19 @@ export default adapter({
       return { ok: true, reason: "" };
     },
     rebase: {
-      onto: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),
+      onto: async (ref) => {
+        fs.appendFileSync(host.cwd + "/onto.txt", ref + "\\n");
+        return { ok: true, conflicted: false, files: [], reason: "" };
+      },
       continue: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),
       abort: async () => ({ ok: true, reason: "" }),
     },
     worktree: {
       add: async (name) => ({ ok: true, path: host.cwd + "/" + name, exists: false, reason: "" }),
-      remove: async () => ({ ok: true, reason: "" }),
+      remove: async (target) => {
+        fs.appendFileSync(host.cwd + "/removed.txt", target + "\\n");
+        return { ok: true, reason: "" };
+      },
     },
   }),
 });
@@ -68,13 +74,13 @@ export default adapter({
 
 const conflictVcs = fakeVcs
   .replace(
-    'onto: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),',
-    `onto: async () => {
-        if (fs.existsSync(host.cwd + "/rebased.txt"))
+    `        fs.appendFileSync(host.cwd + "/onto.txt", ref + "\\n");
+        return { ok: true, conflicted: false, files: [], reason: "" };`,
+    `        fs.appendFileSync(host.cwd + "/onto.txt", ref + "\\n");
+        if (fs.existsSync(host.cwd + "/stopped.txt"))
           return { ok: true, conflicted: false, files: [], reason: "" };
-        fs.writeFileSync(host.cwd + "/rebased.txt", "stopped");
-        return { ok: false, conflicted: true, files: ["src/footer.ts"], reason: "CONFLICT" };
-      },`,
+        fs.writeFileSync(host.cwd + "/stopped.txt", "stopped");
+        return { ok: false, conflicted: true, files: ["src/footer.ts"], reason: "CONFLICT" };`,
   )
   .replace(
     'continue: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),',
@@ -83,6 +89,55 @@ const conflictVcs = fakeVcs
         return { ok: true, conflicted: false, files: [], reason: "" };
       },`,
   );
+
+/** main carries a commit origin never got, so a branch based on origin cannot fast-forward it. */
+const aheadVcs = `import fs from "node:fs";
+import { adapter } from "penguin";
+
+export default adapter({
+  role: "vcs",
+  name: "git",
+  description: "fake vcs whose main is ahead of origin/main",
+  build: (host) => {
+    const at = (file, fallback) =>
+      fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : fallback;
+    const tip = host.cwd + "/tip.txt";
+    const base = host.cwd + "/base.txt";
+    return {
+      stageAll: async () => ({ ok: true, reason: "" }),
+      commit: async () => ({ ok: true, reason: "" }),
+      dirty: async () => ({ ok: true, dirty: false, reason: "" }),
+      head: async () => ({ ok: true, branch: "main", sha: at(tip, "main2"), reason: "" }),
+      fetch: async () => ({ ok: true, reason: "" }),
+      pull: async () => ({ ok: true, reason: "" }),
+      merge: async (branch, options) => {
+        fs.appendFileSync(host.cwd + "/merged.txt", branch + "\\n");
+        if (branch === "origin/main") return { ok: true, reason: "Already up to date." };
+        if (options?.ffOnly === true && at(base, "none") !== at(tip, "main2"))
+          return { ok: false, reason: "fatal: Not possible to fast-forward, aborting." };
+        fs.writeFileSync(tip, "landed1");
+        return { ok: true, reason: "" };
+      },
+      rebase: {
+        onto: async (ref) => {
+          fs.appendFileSync(host.cwd + "/onto.txt", ref + "\\n");
+          fs.writeFileSync(base, ref === "main" ? at(tip, "main2") : "origin1");
+          return { ok: true, conflicted: false, files: [], reason: "" };
+        },
+        continue: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),
+        abort: async () => ({ ok: true, reason: "" }),
+      },
+      worktree: {
+        add: async (name) => ({ ok: true, path: host.cwd + "/" + name, exists: false, reason: "" }),
+        remove: async (target) => {
+          fs.appendFileSync(host.cwd + "/removed.txt", target + "\\n");
+          return { ok: true, reason: "" };
+        },
+      },
+    };
+  },
+});
+`;
 
 const takenVcs = `import fs from "node:fs";
 import { adapter } from "penguin";
@@ -606,7 +661,14 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
     reason: "",
   });
   assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
-  assert.deepEqual(box.lines("merged.txt"), ["penguin-the-footer-scrolls true"]);
+  assert.deepEqual(box.lines("merged.txt"), [
+    "origin/main true",
+    "penguin-the-footer-scrolls true",
+  ]);
+  assert.deepEqual(box.lines("onto.txt"), ["main"]);
+  assert.deepEqual(box.lines("removed.txt"), [
+    path.join(box.project, "penguin-the-footer-scrolls"),
+  ]);
 
   const labels = activities(box, "ship-local-1").map((span) => span.label);
   assert.ok(labels.includes(await description("commit.ts")), labels.join(", "));
@@ -636,10 +698,66 @@ test("the catalog land workflow gives a rebase conflict to an agent, then moves 
     reason: "",
   });
   assert.deepEqual(box.lines("continued.txt"), ["continued"]);
-  assert.deepEqual(box.lines("merged.txt"), ["penguin-ABC-1 true"]);
+  assert.deepEqual(box.lines("merged.txt"), [
+    "origin/main true",
+    "origin/main true",
+    "penguin-ABC-1 true",
+  ]);
+  assert.deepEqual(box.lines("onto.txt"), ["main", "main"]);
+  assert.equal(box.exists("removed.txt"), false);
 
   const [prompt] = box.invocations("prompts.txt");
   assert.match(String(prompt), /src\/footer\.ts/);
+});
+
+test("the catalog land workflow lands on a target that is ahead of origin", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, "{}");
+  box.writeAdapter("git", aheadVcs);
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "land.ts"),
+    "--branch",
+    "penguin-ABC-1",
+    "--dir",
+    path.join(box.project, "tree"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+  const ended = await box.waitForEnd("land-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { landed: true, sha: "landed1", reason: "" });
+  assert.deepEqual(box.lines("onto.txt"), ["main"]);
+  assert.deepEqual(box.lines("merged.txt"), ["origin/main", "penguin-ABC-1"]);
+  assert.deepEqual(box.lines("removed.txt"), [path.join(box.project, "tree")]);
+});
+
+test("the catalog land workflow gates when the checkout is on another branch", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, "{}");
+  box.writeAdapter("git", fakeVcs.replace('branch: "main"', 'branch: "side"'));
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "land.ts"),
+    "--branch",
+    "penguin-ABC-1",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+  await box.waitForState("land-1", "blocked");
+  box.send("land-1", "ok");
+  const ended = await box.waitForEnd("land-1");
+
+  assert.deepEqual(ended["result"], {
+    landed: false,
+    sha: "",
+    reason: "the checkout is on side",
+  });
+  assert.equal(box.exists("merged.txt"), false);
+  assert.equal(box.exists("onto.txt"), false);
 });
 
 test("the catalog commit workflow writes nothing when the tree is clean", async (t) => {
