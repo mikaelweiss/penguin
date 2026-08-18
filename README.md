@@ -30,12 +30,11 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.penguin/` with nine workflows, their skills, four adapters, and a tsconfig for editor types. Two of them are pipelines:
+Install fills `~/.penguin/` with eight workflows, their skills, four adapters, and a tsconfig for editor types. One of them is a pipeline:
 
 - `pn run ticket --ticket ABC-123`: ticket to merged PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
-- `pn run fix --bug "..."`: reproduce the bug, fix it in a loop your repository's own checks close, then the pull request.
 
-The other seven are small workflows. Each one runs alone, and a pipeline calls all but `review-pr`:
+The other seven are small workflows. Each one runs alone, and the pipeline calls all but `review-pr` and `verify`:
 
 - `pn run triage --ticket ABC-123`: is the ticket ready to work on, why, and the tasks that build it.
 - `pn run plan --ticket ABC-123`: the plan and its acceptance checks: questions gate first, then an approve-or-revise gate.
@@ -45,7 +44,7 @@ The other seven are small workflows. Each one runs alone, and a pipeline calls a
 - `pn run pr`: open the pull request, then a gate loop that runs address-feedback until you answer done.
 - `pn run review-pr --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
 
-A pipeline is the small ones called as functions (Compose workflows, below).
+The pipeline is the small ones called as functions (Compose workflows, below).
 
 `~/.penguin/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, and `jira`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
@@ -97,8 +96,8 @@ run implement-1 started, agent claude
 
 ```
 $ pn list workflows
-fix  --bug <text> [--rounds <number>]
-  reproduce a bug, fix it against the repo checks, then the pull request
+implement  --task <text> [--acceptance <text>] [--dir <text>] [--rounds <number>]
+  implement a change and close the review findings
 
 ticket  --ticket <text>
   ticket to merged PR: triage splits the ticket, then plan, implement, review per

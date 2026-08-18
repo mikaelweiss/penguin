@@ -10,7 +10,6 @@ import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 const examples = fileURLToPath(new URL("../examples", import.meta.url));
 
 const workflowFiles = [
-  "fix.ts",
   "implement.ts",
   "make-workflow.ts",
   "plan.ts",
@@ -176,8 +175,12 @@ export default adapter({
 `;
 
 function catalogReady(box: Sandbox, result: string): void {
-  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), { recursive: true });
-  fs.cpSync(path.join(examples, "adapters"), path.join(box.home, "adapters"), { recursive: true });
+  fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), {
+    recursive: true,
+  });
+  fs.cpSync(path.join(examples, "adapters"), path.join(box.home, "adapters"), {
+    recursive: true,
+  });
   box.setAgent(result);
   box.setDefaults("agent fake");
 }
@@ -193,8 +196,15 @@ async function gateOf(box: Sandbox, run: string): Promise<string> {
   return String(box.lastState(run)?.["detail"]);
 }
 
-async function answerGate(box: Sandbox, run: string, opens: string, text: string): Promise<void> {
-  await waitFor(() => String(box.lastState(run)?.["detail"] ?? "").startsWith(opens));
+async function answerGate(
+  box: Sandbox,
+  run: string,
+  opens: string,
+  text: string,
+): Promise<void> {
+  await waitFor(() =>
+    String(box.lastState(run)?.["detail"] ?? "").startsWith(opens),
+  );
   box.send(run, text);
 }
 
@@ -203,7 +213,9 @@ type Span = { id: string; parent: string | undefined; label: string };
 function activities(box: Sandbox, run: string): Span[] {
   return box
     .events(run)
-    .filter((event) => event["type"] === "activity" && event["phase"] === "start")
+    .filter(
+      (event) => event["type"] === "activity" && event["phase"] === "start",
+    )
     .map((event) => ({
       id: String(event["id"]),
       parent: event["parent"] as string | undefined,
@@ -238,15 +250,23 @@ test("every catalog workflow loads with a description and params", async () => {
 
   for (const file of files) {
     const definition = await load(path.join(examples, file));
-    assert.ok(definition.description.trim() !== "", `${file} has no description`);
-    assert.ok(Object.keys(definition.params.shape).length > 0, `${file} takes no params`);
+    assert.ok(
+      definition.description.trim() !== "",
+      `${file} has no description`,
+    );
+    assert.ok(
+      Object.keys(definition.params.shape).length > 0,
+      `${file} takes no params`,
+    );
   }
 });
 
 test("the catalog composes the big workflows out of the small ones", async () => {
   const ticket = await load(path.join(examples, "ticket.ts"));
   const source = fs.readFileSync(path.join(examples, "ticket.ts"), "utf8");
-  const imports = [...source.matchAll(/from "\.\/([a-z-]+)\.ts"/g)].map((match) => match[1] ?? "");
+  const imports = [...source.matchAll(/from "\.\/([a-z-]+)\.ts"/g)].map(
+    (match) => match[1] ?? "",
+  );
   assert.deepEqual(imports.sort(), ["implement", "plan", "pr", "triage"]);
   assert.equal(typeof ticket, "function");
 });
@@ -259,7 +279,13 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
   );
   outsideReady(box);
 
-  const started = box.penguin("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "ticket.ts"),
+    "--ticket",
+    "ABC-1",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "ticket-1", "pin the footer", "approve");
@@ -272,25 +298,45 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
 
   const spans = activities(box, "ticket-1");
   const labels = spans.map((span) => span.label);
-  for (const file of ["triage.ts", "plan.ts", "implement.ts", "review.ts", "pr.ts"]) {
-    assert.ok(labels.includes(await description(file)), `${file} has no activity: ${labels}`);
+  for (const file of [
+    "triage.ts",
+    "plan.ts",
+    "implement.ts",
+    "review.ts",
+    "pr.ts",
+  ]) {
+    assert.ok(
+      labels.includes(await description(file)),
+      `${file} has no activity: ${labels}`,
+    );
   }
 
   const reviews = await description("review.ts");
   const reviewed = spans.find((span) => span.label === reviews);
   assert.ok(reviewed !== undefined);
-  assert.ok(ancestors(spans, reviewed).includes(await description("implement.ts")));
+  assert.ok(
+    ancestors(spans, reviewed).includes(await description("implement.ts")),
+  );
 
   const worktree = path.join(box.project, "penguin-ABC-1");
   const dirs = box.sessions().map((line) => line.cwd);
-  assert.ok(dirs.includes(worktree), `no session ran in the worktree: ${dirs.join(", ")}`);
+  assert.ok(
+    dirs.includes(worktree),
+    `no session ran in the worktree: ${dirs.join(", ")}`,
+  );
 });
 
 test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"plan":"pin the footer","acceptance":"the footer stays"}');
+  catalogReady(
+    box,
+    '{"plan":"pin the footer","acceptance":"the footer stays"}',
+  );
   outsideReady(box);
-  box.setAgent('{"plan":"pin the footer","acceptance":"the footer stays"}', "prompts.txt");
+  box.setAgent(
+    '{"plan":"pin the footer","acceptance":"the footer stays"}',
+    "prompts.txt",
+  );
 
   const started = box.penguin(
     "run",
@@ -314,9 +360,15 @@ test("the catalog plan workflow reads a jira key and its comments, given by posi
 
 test("the catalog plan workflow reads a github issue and its comments", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"plan":"pin the footer","acceptance":"the footer stays"}');
+  catalogReady(
+    box,
+    '{"plan":"pin the footer","acceptance":"the footer stays"}',
+  );
   outsideReady(box);
-  box.setAgent('{"plan":"pin the footer","acceptance":"the footer stays"}', "prompts.txt");
+  box.setAgent(
+    '{"plan":"pin the footer","acceptance":"the footer stays"}',
+    "prompts.txt",
+  );
 
   const started = box.penguin(
     "run",
@@ -340,7 +392,13 @@ test("the catalog ticket workflow stops at the triage gate", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"actionable":false,"reason":"no repro","tasks":[]}');
 
-  const started = box.penguin("run", path.join(examples, "ticket.ts"), "--ticket", "ABC-1", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "ticket.ts"),
+    "--ticket",
+    "ABC-1",
+    "--background",
+  );
 
   assert.equal(started.code, 0, started.output);
   assert.equal(await gateOf(box, "ticket-1"), "Not actionable: no repro");
@@ -353,12 +411,26 @@ test("the catalog ticket workflow stops at the triage gate", async (t) => {
 
 test("the catalog triage workflow gates a split before returning it", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"actionable":true,"reason":"two seams","tasks":["first slice","second slice"]}');
+  catalogReady(
+    box,
+    '{"actionable":true,"reason":"two seams","tasks":["first slice","second slice"]}',
+  );
 
-  const started = box.penguin("run", path.join(examples, "triage.ts"), "--ticket", "ABC-1", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "triage.ts"),
+    "--ticket",
+    "ABC-1",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "triage-1", "The ticket splits into 2 tasks", "approve");
+  await answerGate(
+    box,
+    "triage-1",
+    "The ticket splits into 2 tasks",
+    "approve",
+  );
   const ended = await box.waitForEnd("triage-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
@@ -404,7 +476,10 @@ test("the catalog implement workflow runs alone in the invoking repository", asy
 
 test("the catalog implement workflow stops after its round bound", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"verdict":"changes_needed","findings":"the flag is still there"}');
+  catalogReady(
+    box,
+    '{"verdict":"changes_needed","findings":"the flag is still there"}',
+  );
 
   const started = box.penguin(
     "run",
@@ -425,50 +500,18 @@ test("the catalog implement workflow stops after its round bound", async (t) => 
   assert.equal(box.sessions().length, 4);
 });
 
-test("the catalog fix workflow gates when the bug does not reproduce", async (t) => {
-  const box = sandbox(t);
-  catalogReady(box, '{"reproduced":false,"notes":"the page loads"}');
-
-  const started = box.penguin("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
-
-  assert.equal(started.code, 0, started.output);
-  assert.equal(await gateOf(box, "fix-1"), "Not reproduced: the page loads");
-  box.send("fix-1", "ok");
-  assert.equal((await box.waitForEnd("fix-1"))["phase"], "done");
-});
-
-test("the catalog fix workflow verifies the fix and opens the pull request", async (t) => {
-  const box = sandbox(t);
-  catalogReady(
-    box,
-    '{"reproduced":true,"notes":"the list is empty","passing":true,"details":"3 tests pass"}',
-  );
-  outsideReady(box);
-
-  const started = box.penguin("run", path.join(examples, "fix.ts"), "--bug", "BUG-2", "--background");
-  assert.equal(started.code, 0, started.output);
-
-  await answerGate(box, "fix-1", "PR is up:", "done");
-  const ended = await box.waitForEnd("fix-1");
-
-  assert.equal(ended["phase"], "done", JSON.stringify(ended));
-  assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
-  assert.deepEqual(runNames(box), ["fix-1"]);
-
-  const labels = activities(box, "fix-1").map((span) => span.label);
-  assert.deepEqual(labels, [
-    "round 1 of 3",
-    await description("verify.ts"),
-    await description("pr.ts"),
-  ]);
-});
-
 test("the catalog review-pr workflow approves a clean PR and follows it to the close", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"blockers":[],"nonBlockers":["tiny nit"]}');
   outsideReady(box);
 
-  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
   const ended = await box.waitForEnd("review-pr-1");
 
@@ -488,7 +531,13 @@ test("the catalog review-pr workflow gates on blockers and posts without approvi
   catalogReady(box, '{"blockers":["the flag is wrong"],"nonBlockers":[]}');
   outsideReady(box);
 
-  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "review-pr-1", "### Blockers", "send");
@@ -502,7 +551,10 @@ test("the catalog review-pr workflow gates on blockers and posts without approvi
     "### Non-blockers",
     "none",
   ]);
-  assert.ok(!box.exists("approved.txt"), "the PR was approved despite a blocker");
+  assert.ok(
+    !box.exists("approved.txt"),
+    "the PR was approved despite a blocker",
+  );
 });
 
 test("the catalog review-pr workflow reviews in the worktree that is already there", async (t) => {
@@ -511,7 +563,13 @@ test("the catalog review-pr workflow reviews in the worktree that is already the
   outsideReady(box);
   box.writeAdapter("git", takenVcs);
 
-  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "review-pr-1", "A worktree already sits at", "use");
@@ -519,7 +577,9 @@ test("the catalog review-pr workflow reviews in the worktree that is already the
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
-  assert.deepEqual(box.lines("removed.txt"), [path.join(box.project, "review-pr-42")]);
+  assert.deepEqual(box.lines("removed.txt"), [
+    path.join(box.project, "review-pr-42"),
+  ]);
 });
 
 test("the catalog review-pr workflow replaces the worktree that is already there", async (t) => {
@@ -528,7 +588,13 @@ test("the catalog review-pr workflow replaces the worktree that is already there
   outsideReady(box);
   box.writeAdapter("git", takenVcs);
 
-  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "review-pr-1", "A worktree already sits at", "replace");
@@ -546,7 +612,13 @@ test("the catalog review-pr workflow stops when the user exits the worktree gate
   outsideReady(box);
   box.writeAdapter("git", takenVcs);
 
-  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "review-pr-1", "A worktree already sits at", "exit");
@@ -554,14 +626,23 @@ test("the catalog review-pr workflow stops when the user exits the worktree gate
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], { rounds: 0, posted: 0 });
-  assert.ok(!box.exists("removed.txt"), "the worktree was touched after the exit");
+  assert.ok(
+    !box.exists("removed.txt"),
+    "the worktree was touched after the exit",
+  );
 });
 
 test("the catalog review-pr workflow gates when the PR does not read", async (t) => {
   const box = sandbox(t);
   catalogReady(box, "none");
 
-  const started = box.penguin("run", path.join(examples, "review-pr.ts"), "--pr", "42", "--background");
+  const started = box.penguin(
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
 
   assert.equal(started.code, 0, started.output);
   const question = await gateOf(box, "review-pr-1");
@@ -590,7 +671,10 @@ test("the catalog make-workflow workflow designs, writes, and reviews the new wo
   const ended = await box.waitForEnd("make-workflow-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
-  assert.deepEqual(ended["result"], { file: "new-thing.ts", run: "pn run new-thing" });
+  assert.deepEqual(ended["result"], {
+    file: "new-thing.ts",
+    run: "pn run new-thing",
+  });
 
   const labels = activities(box, "make-workflow-1").map((span) => span.label);
   assert.deepEqual(labels, ["round 1 of 3"]);
@@ -629,12 +713,17 @@ test("the catalog make-workflow workflow stops after its round bound", async (t)
 
 function skillsNamedBy(file: string): string[] {
   const source = fs.readFileSync(path.join(examples, file), "utf8");
-  return [...source.matchAll(/\.run\("([^"]+)"/g)].map((match) => match[1] ?? "").sort();
+  return [...source.matchAll(/\.run\("([^"]+)"/g)]
+    .map((match) => match[1] ?? "")
+    .sort();
 }
 
 test("every skill the catalog ships is named by a catalog workflow", () => {
   const named = new Set(workflowFiles.flatMap((file) => skillsNamedBy(file)));
-  assert.deepEqual([...named].sort(), fs.readdirSync(path.join(examples, "skills")).sort());
+  assert.deepEqual(
+    [...named].sort(),
+    fs.readdirSync(path.join(examples, "skills")).sort(),
+  );
 
   for (const skill of named) {
     assert.ok(
@@ -650,7 +739,11 @@ test("every catalog skill follows the SKILL.md format", () => {
   assert.ok(names.length > 0);
 
   for (const name of names) {
-    assert.match(name, /^penguin-[a-z0-9]+(-[a-z0-9]+)*$/, `${name} is not a penguin- prefixed skill name`);
+    assert.match(
+      name,
+      /^penguin-[a-z0-9]+(-[a-z0-9]+)*$/,
+      `${name} is not a penguin- prefixed skill name`,
+    );
     assert.ok(name.length <= 64, `${name} is longer than 64 characters`);
 
     const text = fs.readFileSync(path.join(dir, name, "SKILL.md"), "utf8");
@@ -663,17 +756,32 @@ test("every catalog skill follows the SKILL.md format", () => {
         .map((line) => line.split(/:(.*)/s))
         .map(([key, value]) => [key ?? "", (value ?? "").trim()]),
     );
-    assert.deepEqual([...fields.keys()].sort(), ["description", "name"], `${name} has extra keys`);
-    assert.equal(fields.get("name"), name, `the name of ${name} is not the directory name`);
+    assert.deepEqual(
+      [...fields.keys()].sort(),
+      ["description", "name"],
+      `${name} has extra keys`,
+    );
+    assert.equal(
+      fields.get("name"),
+      name,
+      `the name of ${name} is not the directory name`,
+    );
     const description = fields.get("description") ?? "";
     assert.ok(description.length > 0 && description.length <= 1024);
-    assert.match(description, /Use (when|after|before)/, `${name} says nothing about when to use it`);
+    assert.match(
+      description,
+      /Use (when|after|before)/,
+      `${name} says nothing about when to use it`,
+    );
   }
 });
 
 test("the catalog adapters and tsconfig are ready to copy", () => {
   for (const name of ["claude", "git", "gh", "jira"]) {
-    assert.ok(fs.existsSync(path.join(examples, "adapters", `${name}.ts`)), name);
+    assert.ok(
+      fs.existsSync(path.join(examples, "adapters", `${name}.ts`)),
+      name,
+    );
   }
 
   const text = fs.readFileSync(path.join(examples, "tsconfig.json"), "utf8");
