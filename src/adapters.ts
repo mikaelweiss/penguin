@@ -95,7 +95,7 @@ export function pick(list: Found[], role: string, name?: string): Picked {
 }
 
 export function writeEnv(cwd: string, list: Found[]): void {
-  for (const catalog of catalogs.roots(cwd)) {
+  for (const catalog of [catalogs.projectCatalog(cwd), catalogs.homeCatalog()]) {
     if (fs.existsSync(catalog.dir)) writeEnvFile(catalog.dir, list);
   }
 }

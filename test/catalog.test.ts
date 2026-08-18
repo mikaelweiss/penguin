@@ -494,7 +494,7 @@ test("the shipped defaults pick claude when a second agent adapter is installed"
 test("a default naming an agent that is not installed fails the run and names the file", (t) => {
   const box = sandbox(t);
   freshHome(box);
-  fs.rmSync(path.join(box.home, "adapters", "claude.ts"));
+  fs.rmSync(path.join(box.home, "catalogs"));
   box.setAgent("none");
   box.write("skill.md", "do the thing\n");
   box.write("w.ts", agentWorkflow);
@@ -502,10 +502,7 @@ test("a default naming an agent that is not installed fails the run and names th
   const failed = box.penguin("run", "./w.ts");
 
   assert.equal(failed.code, 1, failed.output);
-  assert.match(
-    failed.stdout,
-    /no agent adapter named claude\. Installed: codex, cursor, fake, opencode, pi\./,
-  );
+  assert.match(failed.stdout, /no agent adapter named claude\. Installed: fake\./);
   assert.ok(
     failed.stdout.includes(`Edit ${path.join(box.home, "defaults")} to choose one.`),
     failed.output,

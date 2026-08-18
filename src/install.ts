@@ -2,9 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { installed, writeEnv } from "./adapters.ts";
 import { intro } from "./animate.ts";
-import { catalog } from "./catalog.gen.ts";
 import * as catalogs from "./catalogs.ts";
-import { runsRoot, type Scope, short, userRoot } from "./paths.ts";
+import { catalogsFile, defaultsFile, runsRoot, type Scope, short, userRoot } from "./paths.ts";
 import { link, shared, type Source, sources } from "./skills.ts";
 import { interactive } from "./tui/tty.ts";
 
@@ -18,7 +17,7 @@ export async function install(): Promise<void> {
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(runsRoot(), { recursive: true });
   if (fresh) {
-    copyCatalog();
+    enableStarter(dir);
     writeEnv(process.cwd(), await installed(process.cwd()));
   }
   await syncSkills("global", true);
@@ -26,13 +25,12 @@ export async function install(): Promise<void> {
   say(hint);
 }
 
-function copyCatalog(): void {
-  const dir = catalogs.homeCatalog().dir;
-  for (const [name, content] of Object.entries(catalog)) {
-    const target = path.join(dir, name);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, content);
-  }
+function enableStarter(dir: string): void {
+  fs.writeFileSync(catalogsFile(), "starter\n");
+  const shipped = catalogs.starterCatalog().dir;
+  const defaults = fs.readFileSync(path.join(shipped, "defaults"), "utf8");
+  fs.writeFileSync(defaultsFile(), defaults.endsWith("\n") ? defaults : `${defaults}\n`);
+  fs.copyFileSync(path.join(shipped, "tsconfig.json"), path.join(dir, "tsconfig.json"));
 }
 
 export async function firstRun(): Promise<boolean> {

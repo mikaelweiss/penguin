@@ -18,6 +18,18 @@ export default adapter({
 });
 `;
 
+function withHome(t: TestContext): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-home-"));
+  const prior = process.env["PENGUIN_HOME"];
+  process.env["PENGUIN_HOME"] = dir;
+  t.after(() => {
+    if (prior === undefined) delete process.env["PENGUIN_HOME"];
+    else process.env["PENGUIN_HOME"] = prior;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return dir;
+}
+
 function catalogTree(t: TestContext): { project: string; extra: string; homeCatalog: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-catalogs-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -31,11 +43,31 @@ function catalogTree(t: TestContext): { project: string; extra: string; homeCata
   return { project, extra, homeCatalog };
 }
 
-test("roots is the project catalog then the home catalog", () => {
+test("roots is the project catalog then the home catalog", (t) => {
+  const dir = withHome(t);
   const cwd = "/repo";
   assert.deepEqual(catalogs.roots(cwd), [catalogs.projectCatalog(cwd), catalogs.homeCatalog()]);
+  assert.equal(catalogs.homeCatalog().dir, dir);
   assert.equal(catalogs.forScope(cwd, "local").dir, catalogs.projectCatalog(cwd).dir);
   assert.equal(catalogs.forScope(cwd, "global").dir, catalogs.homeCatalog().dir);
+});
+
+test("a catalogs file with starter enables examples/ after the home", (t) => {
+  const dir = withHome(t);
+  fs.writeFileSync(path.join(dir, "catalogs"), "starter\n");
+  const cwd = "/repo";
+  assert.deepEqual(
+    catalogs.roots(cwd).map((catalog) => catalog.dir),
+    [path.join(cwd, ".penguin"), dir, catalogs.starterCatalog().dir],
+  );
+});
+
+test("a catalogs file path line is a catalog root", (t) => {
+  const dir = withHome(t);
+  const extra = path.join(dir, "team");
+  fs.mkdirSync(extra);
+  fs.writeFileSync(path.join(dir, "catalogs"), `${extra}\n`);
+  assert.equal(catalogs.roots("/repo").at(-1)?.dir, extra);
 });
 
 test("a third catalog root is scanned for workflows, adapters, and skills", async (t) => {

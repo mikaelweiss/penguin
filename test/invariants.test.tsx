@@ -567,7 +567,8 @@ test("invariant 9: the first penguin command installs, and sync keeps a skill yo
   assert.equal(first.code, 0, first.output);
   assert.match(first.stdout, new RegExp(`created ${box.home}`));
   assert.equal(fs.existsSync(box.runs), true);
-  assert.equal(fs.existsSync(path.join(box.home, "adapters", "claude.ts")), true);
+  assert.equal(fs.readFileSync(path.join(box.home, "catalogs"), "utf8"), "starter\n");
+  assert.equal(fs.existsSync(path.join(box.home, "adapters", "claude.ts")), false);
   assert.equal(fs.readlinkSync(path.join(box.home, "skills", "claude")), claude);
 
   const second = box.penguin("ps");

@@ -41,6 +41,10 @@ export function defaultsFile(): string {
   return path.join(home(), "defaults");
 }
 
+export function catalogsFile(): string {
+  return path.join(home(), "catalogs");
+}
+
 export function credentialsDir(): string {
   return path.join(home(), "credentials");
 }
