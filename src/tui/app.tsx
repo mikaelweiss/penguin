@@ -22,7 +22,7 @@ export function App({ start, onDone }: { start: Start; onDone(left: Left): void 
       setScreen({
         kind: "run",
         name: target.name,
-        agent: "",
+        agent: target.agent ?? "",
         ...(target.node === undefined ? {} : { node: target.node }),
         ownsExit: false,
       });

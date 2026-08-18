@@ -1,6 +1,7 @@
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
+import { Launcher } from "./launcher.tsx";
 import type { Attention } from "./projection.ts";
 import { cut } from "./text.ts";
 import { glyph, ink, stateColor } from "./theme.ts";
@@ -9,7 +10,7 @@ import { age, Feed, type RunRow, runRows, stateOf } from "./watch.ts";
 const RESCAN = 2000;
 const SPIN = 200;
 
-export type Open = { name: string; node?: string };
+export type Open = { name: string; node?: string; agent?: string };
 
 type Need = { run: string; item: Attention };
 
@@ -30,6 +31,7 @@ export function Dashboard({
   const [cursor, setCursor] = useState(0);
   const [frame, setFrame] = useState(0);
   const [showDone, setShowDone] = useState(false);
+  const [launching, setLaunching] = useState(false);
 
   const live = rows.filter((row) => row.live);
   const done = rows.filter((row) => !row.live);
@@ -91,7 +93,9 @@ export function Dashboard({
 
   useKeyboard((key: KeyEvent) => {
     if (key.eventType === "release") return;
+    if (launching) return;
     if (key.name === "q" || (key.ctrl && key.name === "c")) return onExit();
+    if (key.name === "n") return setLaunching(true);
     if (key.name === "up" || key.name === "k") return setCursor(Math.max(0, at - 1));
     if (key.name === "down" || key.name === "j") return setCursor(Math.min(lines.length - 1, at + 1));
     if (key.name === "left" || key.name === "h") return setCursor(0);
@@ -111,6 +115,18 @@ export function Dashboard({
       return onOpen({ name: line.need.run, node: line.need.item.node });
     }
   });
+
+  if (launching) {
+    return (
+      <Launcher
+        onClose={() => setLaunching(false)}
+        onStarted={(started) => {
+          setLaunching(false);
+          onOpen({ name: started.name, agent: started.agent });
+        }}
+      />
+    );
+  }
 
   const now = Date.now();
   return (
@@ -157,7 +173,7 @@ export function Dashboard({
           />
         ))}
         <text fg={ink.faint}>
-          {`  arrows or hjkl move, enter opens, d ${showDone ? "hides" : "shows"} done, q quits`}
+          {`  arrows or hjkl move, enter opens, n starts a workflow, d ${showDone ? "hides" : "shows"} done, q quits`}
         </text>
       </box>
     </box>

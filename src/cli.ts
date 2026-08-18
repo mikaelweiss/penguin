@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { z } from "zod";
 import * as adapters from "./adapters.ts";
 import { pasteImage } from "./clipboard.ts";
@@ -16,6 +14,7 @@ import { type Asked, coerce, parseParams, unfilled, validate } from "./params.ts
 import { attachmentsDir, type Scope, short } from "./paths.ts";
 import { render as renderRuns, rows } from "./runs.ts";
 import * as skills from "./skills.ts";
+import { startRun } from "./start.ts";
 import { agentLine, attach, dashboard } from "./tui/attach.ts";
 import { interactive } from "./tui/tty.ts";
 import * as workflows from "./workflows.ts";
@@ -154,7 +153,7 @@ async function runWorkflow(argv: string[]): Promise<number> {
   const name = asked
     ? await startAsked(source, definition.params, values)
     : createRun(source, checkedParams(definition.params, values, target));
-  const pid = start(name);
+  const pid = startRun(name);
   if (background) {
     say(`run ${name} started, ${agentLine(installed)}`);
     return 0;
@@ -237,19 +236,6 @@ async function fillParam(
       say(messageOf(error));
     }
   }
-}
-
-function start(name: string): number {
-  // A compiled binary has no entry file on disk and re-runs itself.
-  const entry = fileURLToPath(import.meta.url);
-  const args = fs.existsSync(entry) ? [entry, "_run", name] : ["_run", name];
-  const child = spawn(process.execPath, args, {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-  return child.pid ?? 0;
 }
 
 async function runProcess(argv: string[]): Promise<number> {
