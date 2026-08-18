@@ -13,9 +13,17 @@ const HEAD = "255;250;235";
 const START = [250, 204, 21];
 const END = [220, 38, 38];
 
-export type Look = { color: boolean; delay: number };
+type Look = { color: boolean; delay: number };
 
-export async function wordmark(word: string, look: Look): Promise<void> {
+export async function intro(): Promise<void> {
+  await wordmark("penguin", { color: color(), delay: 65 });
+}
+
+function color(): boolean {
+  return process.env["NO_COLOR"] === undefined && process.env["TERM"] !== "dumb";
+}
+
+async function wordmark(word: string, look: Look): Promise<void> {
   const pixels = spread(word);
   const width = pixels[0]?.length ?? 0;
   const cell = scale(width);

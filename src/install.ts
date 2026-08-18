@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { installed, writeEnv } from "./adapters.ts";
-import { wordmark } from "./animate.ts";
+import { intro } from "./animate.ts";
 import { catalog } from "./catalog.gen.ts";
 import { home, homeSkills, projectSkills, runsRoot, type Scope, short, userRoot } from "./paths.ts";
 import { interactive } from "./tui/tty.ts";
@@ -12,7 +12,7 @@ const hint =
 
 export async function install(): Promise<void> {
   const fresh = !fs.existsSync(home());
-  if (interactive()) await wordmark("penguin", { color: color(), delay: 65 });
+  if (interactive()) await intro();
   fs.mkdirSync(home(), { recursive: true });
   fs.mkdirSync(runsRoot(), { recursive: true });
   if (fresh) {
@@ -81,10 +81,6 @@ function report(target: string, chosen: Source[]): void {
     const win = index === 0 && overlap ? "  (preferred)" : "";
     say(`  ${source.name} -> ${short(source.dir)}${win}`);
   }
-}
-
-function color(): boolean {
-  return process.env["NO_COLOR"] === undefined && process.env["TERM"] !== "dumb";
 }
 
 function say(text: string): void {

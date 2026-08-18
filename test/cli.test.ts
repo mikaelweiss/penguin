@@ -209,9 +209,21 @@ test("pn help prints the usage", (t) => {
   assert.match(help.stdout, /pn ps/);
   assert.match(help.stdout, /pn attach <run>/);
   assert.match(help.stdout, /pn sync-skills/);
+  assert.match(help.stdout, /pn intro/);
   assert.match(help.stdout, /the dashboard: the live runs, and what needs you/);
   assert.match(help.stdout, /q goes to the dashboard, Ctrl-C stops the run/);
   assert.doesNotMatch(help.stdout, /resume/);
+});
+
+test("intro without a terminal is refused", (t) => {
+  const box = sandbox(t);
+
+  const failed = box.penguin("intro");
+
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /pn intro needs a terminal/);
+  assert.equal(failed.stdout, "");
+  assert.equal(fs.existsSync(box.runs), false);
 });
 
 test("an unknown command names it and prints the usage", (t) => {

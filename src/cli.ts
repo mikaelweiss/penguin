@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { z } from "zod";
 import * as adapters from "./adapters.ts";
+import { intro } from "./animate.ts";
 import { pasteImage } from "./clipboard.ts";
 import { allocateRun, createRun, discardRun, finishRun } from "./create.ts";
 import { execute } from "./engine.ts";
@@ -30,6 +31,7 @@ usage:
   pn ps                                           the dashboard, or a plain table when piped
   pn attach <run>                                 watch a run, with its history first
   pn install                                      set up ~/.penguin and choose your skill directories
+  pn intro                                        play the penguin wordmark again
   pn sync-skills [--global|--local]               choose your skill directories again
 
 <workflow> is a name from the list, or a path to a workflow file.
@@ -48,6 +50,7 @@ async function main(argv: string[]): Promise<number> {
     if (command === undefined) return 0;
     say("");
   }
+  if (command === "intro") return playIntro();
   if (command === "run") return runWorkflow(rest);
   if (command === "list") return listWhat(rest);
   if (command === "ps") return listRuns();
@@ -63,6 +66,12 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   throw new PenguinError(`unknown command ${command}\n\n${usage}`);
+}
+
+async function playIntro(): Promise<number> {
+  if (!interactive()) throw new PenguinError("pn intro needs a terminal");
+  await intro();
+  return 0;
 }
 
 async function listWhat(argv: string[]): Promise<number> {
