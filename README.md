@@ -167,7 +167,7 @@ async function gh(cmd: string): Promise<CommandResult> {
 }
 ```
 
-The run blocks with the line the adapter wrote, your terminal draws `done` and `skip`, and `done` runs the same command over. `skip` hands the failure back to the workflow. Only the gate on a failed agent step says `stop`, and that one ends the run. The `gh` adapter asks for gh absent, gh signed out, a checkout with no remote, and a branch that is not pushed. A workflow that calls `ctx.github.pr.create()` sees none of it.
+The run blocks with the line the adapter wrote, your terminal draws `done` and `skip`, and `done` runs the same command over. `skip` hands the failure back to the workflow. The `gh` adapter asks for gh absent, gh signed out, a checkout with no remote, and a branch that is not pushed. A workflow that calls `ctx.github.pr.create()` sees none of it.
 
 ## Watch a run
 
