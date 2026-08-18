@@ -664,6 +664,24 @@ test("a paste at a gate with options lands on the typing row", async (t) => {
   }
 });
 
+test("a failed image paste at a gate with options names the reason", async (t) => {
+  const box = sandbox(t);
+  noTools(t);
+  box.run("review-1", optionGate(ONE_OF), { live: true });
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("approve"));
+    await act(async () => {
+      setup.mockInput.pressKey("v", { ctrl: true });
+    });
+    await setup.flush();
+    const frame = await shown(setup, "no image in the clipboard");
+    assert.match(frame, /approve/, "the options left the screen");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("a cursor past the last option draws as the typing row", async () => {
   const editor = new Editor();
   editor.insert("mine");
