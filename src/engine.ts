@@ -102,6 +102,9 @@ type TurnCall = {
 /** The event types that carry a position in the activity tree. */
 const placed = new Set(["session", "agent", "gate", "step", "event", "wait"]);
 
+/** What a failed agent step offers: run it again, or end the run. */
+const RETRY = z.union([z.enum(["retry", "stop"]), z.string()]);
+
 class Execution {
   private dir: string;
   private record: RunRecord;
@@ -411,12 +414,19 @@ class Execution {
         }
         const answer = await this.paused(() =>
           this.gateUntil(
-            `The agent step ${call.skill} failed twice: ${failure} Reply to run the step again.`,
+            `The agent step ${call.skill} failed twice: ${failure} Reply to run the step again, or stop to end the run.`,
             halted,
+            RETRY,
           ),
         );
         if (answer === undefined) return this.endStep(id, label, activity, false, undefined);
+        if (answer.trim() === "stop") {
+          throw new PenguinError(`the agent step ${call.skill} was stopped: ${failure}`);
+        }
       }
+    } catch (error) {
+      this.emit({ type: "step", phase: "end", id, label, ok: false, activity });
+      throw error;
     } finally {
       this.end(id);
     }
@@ -471,9 +481,14 @@ class Execution {
     }
   }
 
-  private async gateUntil(question: string, halted: Promise<void>): Promise<string | undefined> {
+  private async gateUntil(
+    question: string,
+    halted: Promise<void>,
+    shape?: z.ZodType,
+  ): Promise<string | undefined> {
     const id = this.nextGateId();
-    this.emit({ type: "gate", phase: "asked", id, question });
+    const schema = shape === undefined ? undefined : jsonSchema(shape);
+    this.emit({ type: "gate", phase: "asked", id, question, schema });
     const reader = this.read(question, id);
     const message = await Promise.race([reader.message, halted.then(() => undefined)]);
     if (message === undefined) {

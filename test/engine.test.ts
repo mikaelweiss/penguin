@@ -115,6 +115,45 @@ export default workflow({
   assert.equal((await box.waitForEnd("w-1"))["phase"], "stopped");
 });
 
+test("stop at the failed step gate ends the run and names the step", async (t) => {
+  const box = sandbox(t);
+  box.setAgent("invalid", "prompts.txt");
+  box.write("skill.md", "triage the ticket\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skill.md", { result: z.object({ actionable: z.boolean() }) });
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+
+  const asked = box.events("w-1").find((event) => event["phase"] === "asked");
+  assert.deepEqual((asked?.["schema"] as { anyOf?: { enum?: string[] }[] })?.anyOf?.[0]?.enum, [
+    "retry",
+    "stop",
+  ]);
+
+  box.send("w-1", "stop");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["phase"], "error");
+  assert.match(String(ended["reason"]), /the agent step \.\/skill\.md was stopped/);
+  assert.equal(box.invocations("prompts.txt").length, 2, "stop ran no third attempt");
+  const steps = box.events("w-1").filter((event) => event["type"] === "step");
+  assert.equal(steps.at(-1)?.["ok"], false, "the stopped step closed");
+});
+
+
 test("a turn with a blocked schema resolves to the envelope the agent filled", async (t) => {
   const box = sandbox(t);
   const prompts = path.join(box.project, "prompts.txt");

@@ -49,7 +49,7 @@ for (let round = 1; round <= 3; round++) {
 
 Options: `use` names the agent adapter implementation when more than one is installed, `cwd` sets the session's working directory, `name` labels the session (a viewer shows it, and a message targets it; the default is the implementation name plus a counter), and any other field passes through to the adapter (every shipped agent adapter reads `model`).
 
-`session.run(skill, {input, result, blocked})` returns a **turn**. `skill` is a skill name or a path to a markdown file (skills below). `result` is a plain `z.object` schema. Await the turn for the result: on a schema mismatch the engine sends the validation error back into the same conversation and retries once, then gates to a human. A turn with no `result` resolves to null.
+`session.run(skill, {input, result, blocked})` returns a **turn**. `skill` is a skill name or a path to a markdown file (skills below). `result` is a plain `z.object` schema. Await the turn for the result: on a schema mismatch the engine sends the validation error back into the same conversation and retries once, then gates to a human, who runs the step again or stops the run. A turn with no `result` resolves to null.
 
 `blocked` is a second plain `z.object` schema, for a turn that may end needing the user. With both schemas the turn resolves to `{result}` or `{blocked}`, and the agent fills exactly one: a value that fills both, or neither, is a schema mismatch like any other. An agent has no channel to the user, so this envelope is how a question travels: the workflow reads which envelope came back, gates what blocks, and the next `session.run` on the same handle carries the answers into the same conversation. `blocked` without `result` fails the run.
 
