@@ -85,8 +85,8 @@ function asked(box: Sandbox, run: string): Event[] {
 }
 
 function keep(box: Sandbox, values: Record<string, string>): void {
-  fs.mkdirSync(path.join(box.home, "credentials"), { recursive: true });
-  fs.writeFileSync(path.join(box.home, "credentials", "tracker.json"), JSON.stringify(values));
+  fs.mkdirSync(box.credentials, { recursive: true });
+  fs.writeFileSync(path.join(box.credentials, "tracker.json"), JSON.stringify(values));
 }
 
 /** A blocked run whose adapter says the site refused the stored values, with a viewer on it. */
@@ -123,18 +123,18 @@ function useEditor(t: TestContext, command: string): void {
 }
 
 function store(box: Sandbox, name: string): Record<string, string> {
-  const file = path.join(box.home, "credentials", `${name}.json`);
+  const file = path.join(box.credentials, `${name}.json`);
   if (!fs.existsSync(file)) return {};
   return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, string>;
 }
 
 test("the store keeps one record per credential, readable by the user alone", (t) => {
   const box = sandbox(t);
-  const prior = process.env["PENGUIN_HOME"];
-  process.env["PENGUIN_HOME"] = box.home;
+  const prior = process.env["XDG_STATE_HOME"];
+  process.env["XDG_STATE_HOME"] = box.state;
   t.after(() => {
-    if (prior === undefined) delete process.env["PENGUIN_HOME"];
-    else process.env["PENGUIN_HOME"] = prior;
+    if (prior === undefined) delete process.env["XDG_STATE_HOME"];
+    else process.env["XDG_STATE_HOME"] = prior;
   });
 
   assert.deepEqual(credentials.read("jira"), {});
@@ -142,7 +142,7 @@ test("the store keeps one record per credential, readable by the user alone", (t
   assert.deepEqual(credentials.read("jira"), { site: "acme.atlassian.net", token: TOKEN });
   assert.equal(where, credentials.where("jira"));
 
-  const file = path.join(box.home, "credentials", "jira.json");
+  const file = path.join(box.credentials, "jira.json");
   assert.equal(fs.statSync(file).mode & 0o777, 0o600, "only the user can read the file");
   assert.equal(fs.statSync(path.dirname(file)).mode & 0o777, 0o700);
 
@@ -208,7 +208,8 @@ test("invariant 12: a credential reaches the store, never the run's files", asyn
   assert.ok(shown.includes("acme.tracker.test"), "a field that is not secret shows");
 
   const ready = box.events("w-1").find((event) => event["phase"] === "ready");
-  assert.equal(ready?.["where"], path.join(box.home, "credentials", "tracker.json"));
+  const shortStore = `~${box.credentials.slice(box.userHome.length)}`;
+  assert.equal(ready?.["where"], path.join(shortStore, "tracker.json"));
   assert.equal(asked(box, "w-1").length, 1, "one ask took one credential");
 });
 

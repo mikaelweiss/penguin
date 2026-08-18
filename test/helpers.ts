@@ -105,6 +105,7 @@ export type Sandbox = {
   home: string;
   state: string;
   runs: string;
+  credentials: string;
   userHome: string;
   project: string;
   writeSkill(dir: string, name: string, text: string): void;
@@ -141,6 +142,7 @@ export function sandbox(t: TestContext): Sandbox {
   const userHome = path.join(root, "user-home");
   const state = path.join(userHome, ".local", "state");
   const runs = path.join(state, "penguin", "runs");
+  const credentialsDir = path.join(state, "penguin", "credentials");
   const project = path.join(root, "project");
   fs.mkdirSync(home);
   fs.mkdirSync(userHome);
@@ -156,6 +158,7 @@ export function sandbox(t: TestContext): Sandbox {
     home,
     state,
     runs,
+    credentials: credentialsDir,
     userHome,
     project,
     writeSkill(dir, name, text) {

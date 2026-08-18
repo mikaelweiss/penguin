@@ -144,7 +144,7 @@ const creds = await host.credential({
 });
 ```
 
-The first time a workflow reaches that call, the run blocks and your terminal shows the link that makes the key, then takes one field at a time. A secret field echoes stars. The terminal writes the values to `~/.penguin/credentials/jira.json`, mode 0600, and tells the run only that the file now holds them, so nothing lands in `events.jsonl` or `inbox.jsonl`. Every run after that finds them and asks nothing.
+The first time a workflow reaches that call, the run blocks and your terminal shows the link that makes the key, then takes one field at a time. A secret field echoes stars. The terminal writes the values to `~/.local/state/penguin/credentials/jira.json`, mode 0600, and tells the run only that the file now holds them, so nothing lands in `events.jsonl` or `inbox.jsonl`. Every run after that finds them and asks nothing.
 
 An environment variable wins over the stored file, which is how a server or a cron job supplies the same values. `rejected: "<why>"` says the provider refused what penguin had: your terminal shows the reason and four fixes, try again, type every value again, open the file in your editor, or stop the run, and the adapter calls again with whatever you leave behind. The `jira` adapter does that whenever your site answers 401, 403, or 404.
 
@@ -199,7 +199,7 @@ The call validates the arguments against the callee's params schema, runs the ca
 
 ## Where the state lives
 
-`~/.penguin/` holds your workflow files, `adapters/`, `skills/`, `credentials/`, `defaults`, and `runs/`. `~/.penguin/runs/<run>/` holds `run.json`, `events.jsonl`, `inbox.jsonl`, the session transcripts, and the lock. Every event the run emits appends to `events.jsonl`, so any other program tails the same file. To discard a run, delete the directory. Set `PENGUIN_HOME` to move the whole tree.
+`~/.penguin/` holds your workflow files, `adapters/`, `skills/`, `helpers/`, and `defaults`. Runs and credentials live under the state root `~/.local/state/penguin/`, so refreshing the catalog leaves them in place. `~/.local/state/penguin/runs/<run>/` holds `run.json`, `events.jsonl`, `inbox.jsonl`, the session transcripts, and the lock. Every event the run emits appends to `events.jsonl`, so any other program tails the same file. To discard a run, delete the directory. Set `PENGUIN_HOME` to move the catalog and `XDG_STATE_HOME` to move the state.
 
 `<repo>/.penguin/` holds the workflow files, skills, and adapters of one repository, and ships in git.
 

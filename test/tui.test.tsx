@@ -21,6 +21,7 @@ import { frameWith } from "./drive.tsx";
 
 type Box = {
   home: string;
+  credentials: string;
   run(name: string, events: ViewEvent[], options?: { live?: boolean; workflow?: string }): string;
 };
 
@@ -45,6 +46,7 @@ function sandbox(t: TestContext): Box {
   });
   return {
     home,
+    credentials: path.join(state, "penguin", "credentials"),
     run(name, events, options) {
       const dir = path.join(runs, name);
       fs.mkdirSync(dir, { recursive: true });
@@ -958,7 +960,7 @@ test("a credential goes to the store, and never to the screen or the inbox", asy
     assert.ok(!masked.includes("s3cr3t-value"), "the secret reached the screen");
     assert.match(masked, /\*{12}/);
     await press(setup, ["RETURN"]);
-    const stored = JSON.parse(fs.readFileSync(path.join(box.home, "credentials", "jira.json"), "utf8")) as Record<
+    const stored = JSON.parse(fs.readFileSync(path.join(box.credentials, "jira.json"), "utf8")) as Record<
       string,
       string
     >;
