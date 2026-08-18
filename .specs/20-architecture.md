@@ -2,10 +2,10 @@
 
 ## Components
 
-- **CLI (TypeScript)**: one npm package, one `pn` command, the whole engine: command parsing, step dispatch, adapter loading, the event bus. It runs on system Node (24 or newer).
+- **CLI (TypeScript)**: one npm package, one `pn` command, the whole engine: command parsing, step dispatch, adapter loading, the event bus. It runs on Bun (1.3 or newer).
 - **Run process**: one detached process per run. It executes the run function, holds the lock, appends events and transcripts, and reads messages. It owns no terminal, and it outlives the terminal that started it.
 - **Viewer**: the terminal side of a run. `pn run` attaches one on start, and `pn attach` joins one later. A viewer renders the event history, follows new events, and sends messages. It owns the bottom of the screen, the input field and the status line under it, and the view adapter owns the scroll above. Closing a viewer never touches the run.
-- **Workflow and adapter loading**: penguin imports the files directly. Node strips the types on import. A workflow imports `penguin`, `zod`, other workflow files, and shared TypeScript files by relative path.
+- **Workflow and adapter loading**: penguin imports the files directly. Bun runs the TypeScript as it is. A loader plugin maps the bare `penguin` and `zod` imports in a definition file, and in the files it reaches by relative path, to the installed package. A workflow imports `penguin`, `zod`, other workflow files, and shared TypeScript files by relative path.
 - **penguin package (TypeScript)**: the functions authors import (`workflow`, `adapter`) and their types, part of penguin itself, with zod as a bundled dependency. The catalog ships a `tsconfig.json` that maps `penguin` and `zod` to the installed package (`30-defaults.md`), so the author's editor resolves the same types. The user's repo needs no npm install.
 
 ## Storage
@@ -44,11 +44,11 @@ Two roles the engine treats specially:
 
 ## Events
 
-Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended with its activity, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, gates asked and answered, credentials asked and ready. An agent event carries its kind: what the agent said, what it thought, a tool call, or raw output. A tool call event carries the tool name and one line for what the call acts on, which is the adapter's reading of the tool arguments. How any of it looks on a screen is the view adapter's choice. A gate asked event carries the answer shape as a JSON schema when the gate has one. A credential event carries the fields by name, never a value. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
+Every step, state change, question, message, and view call becomes one typed event: run started and ended, step started and ended, activity spans, facts, workflow events, artifacts, watch declarations, agent output by session, waits started and ended, gates asked and answered, credentials asked and ready. Every session, agent, gate, step, workflow event, and wait event carries the activity it happened in, and the engine stamps it, never the adapter. An activity carries its parent, so the stamped events nest into one tree. An activity the engine opens for a composed call also carries a detail: the callee's params as `name: value` pairs, cut short, which tells ten parallel calls of one workflow apart. A wait event pairs a start with an end, and the start carries the label the run shows while it is idle. A gate carries one id across its ask, its answer, and every re-ask of the same call. An agent event carries its kind: what the agent said, what it thought, a tool call, or raw output. A tool call event carries the tool name and one line for what the call acts on, which is the adapter's reading of the tool arguments. How any of it looks on a screen is the view adapter's choice. A gate asked event carries the answer shape as a JSON schema when the gate has one. A credential event carries the fields by name, never a value. The engine appends each one to `events.jsonl` and hands it to the view adapter. A viewer renders the history from the file first, then follows live, so a viewer that joins late sees what a live one saw. An out-of-process UI tails the same file: no port, no daemon, and it works after the run ends.
 
 ## Messages
 
-A message is one line sent into a run: `{text, session?}`. A viewer's input field appends it to `inbox.jsonl`, addressed to the run or to the session the viewer has selected. The run process delivers each message once, in order, to the earliest waiting reader (`ctx.gate` or `ctx.messages.next()`). A message no reader awaits waits in the file. Only the workflow gives a message meaning: it stops a turn, feeds a new turn, or sits in the queue (`10-workflow-model.md`, messages).
+A message is one line sent into a run: `{text, session?, gate?}`. A viewer's input field appends it to `inbox.jsonl`, addressed to the run or to the session the viewer has selected. The `gate` field names the gate the message answers, by the id the gate asked event carries, which answers one gate out of the many a run asks at once. The run process delivers each message once, in order: to the waiting reader that holds the named gate, else to the earliest waiting reader (`ctx.gate` or `ctx.messages.next()`). A message that names a gate no reader holds takes the same path as an unnamed one, because that gate is answered already or never existed. A message no reader awaits waits in the file. The name is routing alone, and the message a workflow reads holds the text and the session. Only the workflow gives a message meaning: it stops a turn, feeds a new turn, or sits in the queue (`10-workflow-model.md`, messages).
 
 ## Credentials
 
@@ -125,7 +125,7 @@ Each one line, each pinned by a test:
 2. Every event appends to `events.jsonl`, and a viewer that joins late renders the same story a live viewer saw.
 3. `q` detaches and the run continues. Ctrl-C stops the run, and the stop is recorded.
 4. Done is final: no command revives a done run, and attach to one is read-only.
-5. The engine delivers each message at most once, in order, and each gate ask consumes exactly one message.
+5. The engine delivers each message at most once: to the waiting reader whose gate it addresses, else to the earliest waiting reader, in order, and each gate ask consumes exactly one message.
 6. `turn.stop()` kills the agent process, and the session's next turn continues the same conversation.
 7. A workflow call validates the callee's params before the callee runs, and a composed call creates no run.
 8. The engine depends on no adapter and no definition. The engine test suite passes with an empty `~/.penguin/`, and a workflow that names a missing role or agent fails plainly.
@@ -137,3 +137,5 @@ Each one line, each pinned by a test:
 14. A run directory without a `run.json` is invisible to every command, and discarding one never touches a finished run.
 15. A paste sends as one message with its newlines, and a collapsed paste sends its full text, never the token.
 16. The viewer alone draws the bottom of the screen: the status line is one line however long the detail, and nothing writes over the input field.
+17. Every session, agent, gate, step, and wait event carries the activity it happened in, and a wait start pairs with a wait end.
+18. A message that addresses a gate no reader holds falls back to the ordinary queue, and never delivers twice.

@@ -8,7 +8,12 @@ export type CommandResult = {
   stderr: string;
 };
 
-export type Message = { text: string; session?: string };
+export type Message = {
+  text: string;
+  session?: string;
+  /** Which gate the message answers. Routing only: a delivered message never carries it. */
+  gate?: string;
+};
 
 export type ViewEvent =
   | {
@@ -19,10 +24,20 @@ export type ViewEvent =
       result?: unknown;
     }
   | { type: "state"; state: "running" | "blocked" | "idle"; detail?: string }
-  | { type: "session"; id: string; name: string; use: string }
+  | { type: "session"; id: string; name: string; use: string; activity?: string }
   | { type: "message"; text: string; session?: string }
-  | { type: "activity"; phase: "start"; id: string; parent?: string; label: string }
+  | {
+      type: "activity";
+      phase: "start";
+      id: string;
+      parent?: string;
+      label: string;
+      /** What tells two calls of the same label apart: a compact summary of the params. */
+      detail?: string;
+    }
   | { type: "activity"; phase: "end"; id: string; outcome: "ok" | "failed" }
+  | { type: "wait"; phase: "start"; id: string; label: string; activity?: string }
+  | { type: "wait"; phase: "end"; id: string; activity?: string }
   | { type: "step"; phase: "start"; id: string; label: string; activity?: string }
   | { type: "step"; phase: "end"; id: string; label: string; ok: boolean; activity?: string }
   | { type: "fact"; values: Record<string, string | number | boolean> }
@@ -44,8 +59,15 @@ export type ViewEvent =
       detail?: string;
       activity?: string;
     }
-  | { type: "gate"; phase: "asked"; question: string; schema?: Record<string, unknown> }
-  | { type: "gate"; phase: "answered"; question: string; answer: string }
+  | {
+      type: "gate";
+      phase: "asked";
+      id: string;
+      question: string;
+      schema?: Record<string, unknown>;
+      activity?: string;
+    }
+  | { type: "gate"; phase: "answered"; id: string; question: string; answer: string; activity?: string }
   | {
       type: "credential";
       phase: "asked";

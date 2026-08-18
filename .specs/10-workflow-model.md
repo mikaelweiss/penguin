@@ -57,7 +57,7 @@ Options: `use` names the agent adapter implementation when more than one is inst
 
 ## Messages
 
-`ctx.messages.next()` returns the next message sent into the run: `{text, session?}`. An attached viewer sends messages, addressed to the run or to a named session. The engine delivers each message once, in order, to the earliest waiting reader. A gate is a reader too: each ask posts its question and takes the next message as the answer.
+`ctx.messages.next()` returns the next message sent into the run: `{text, session?}`. An attached viewer sends messages, addressed to the run or to a named session. The engine delivers each message once, in order, to the earliest waiting reader. A gate is a reader too: each ask posts its question and takes the next message as the answer. A message may also name one gate, and that gate takes it while the other gates keep waiting (`20-architecture.md`, messages). The name never reaches the workflow: a delivered message holds the text and the session.
 
 A workflow chooses what a message means. Race it against a turn to allow interruption. Read it between turns to queue it. Never read it to ignore it.
 

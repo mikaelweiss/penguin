@@ -1,11 +1,12 @@
 #!/bin/bash
+set -euo pipefail
 
-npm uninstall -g penguin
+cd "$(dirname "$0")/.."
+
+bun unlink || true
 
 rm -rf ~/.penguin
 
-npm install
+bun install
 
-npm run build
-
-npm install -g .
+bun link

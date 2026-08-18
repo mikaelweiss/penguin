@@ -386,7 +386,7 @@ test("the jira adapter asks for the site, the email, and the token, with the tok
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const api = definition.build(host) as {
@@ -468,7 +468,7 @@ test("the jira adapter hands a refused call back to the user, with the reason", 
   globalThis.fetch = (async () => {
     tries += 1;
     return refusals.shift() ?? new Response(JSON.stringify({ key: "ABC-1", fields: {} }), { status: 200 });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const api = definition.build(host) as {

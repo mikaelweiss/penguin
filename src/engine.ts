@@ -76,7 +76,7 @@ function runner(definition: Workflow): (ctx: Ctx<unknown>) => Promise<unknown> {
 
 type ActivityStore = { id: string };
 
-type Reader = { question: string | undefined; resolve(message: Message): void };
+type Reader = { question: string | undefined; gate: string | undefined; resolve(message: Message): void };
 
 type Step = { id: string; label: string; paused: boolean };
 
@@ -99,6 +99,9 @@ type TurnCall = {
   bump: () => void;
 };
 
+/** The event types that carry a position in the activity tree. */
+const placed = new Set(["session", "agent", "gate", "step", "event", "wait"]);
+
 class Execution {
   private dir: string;
   private record: RunRecord;
@@ -108,6 +111,8 @@ class Execution {
   private built = new Map<string, unknown>();
   private counter = 0;
   private activityCounter = 0;
+  private gateCounter = 0;
+  private waitCounter = 0;
   private named = new Map<string, number>();
   private steps: Step[] = [];
   private waits: Wait[] = [];
@@ -133,6 +138,19 @@ class Execution {
     this.inbox?.stop();
     this.inbox = undefined;
     killActive();
+  }
+
+  /** Every event leaves the engine here, stamped with the activity it happened in. */
+  private emit(event: ViewEvent): void {
+    this.bus.emit(placed.has(event.type) ? this.place(event) : event);
+  }
+
+  private place(event: ViewEvent): ViewEvent {
+    const carrier = event as ViewEvent & { activity?: string };
+    if (carrier.activity !== undefined) return event;
+    const activity = this.als.getStore()?.id;
+    if (activity === undefined) return event;
+    return { ...carrier, activity } as ViewEvent;
   }
 
   ctx<Params>(params: Params): Ctx<Params> {
@@ -176,36 +194,39 @@ class Execution {
         `invalid params for the workflow "${definition.description}": ${issues(checked.error)}`,
       );
     }
-    return this.activity(definition.description, () => runner(definition)(this.ctx(checked.data)));
+    return this.activity(
+      definition.description,
+      () => runner(definition)(this.ctx(checked.data)),
+      summary(checked.data),
+    );
   }
 
   private view(): View {
     return {
       activity: <T>(label: string, body: () => Promise<T>): Promise<T> => this.activity(label, body),
-      fact: (values) => this.bus.emit({ type: "fact", values }),
+      fact: (values) => this.emit({ type: "fact", values }),
       event: (entry) =>
-        this.bus.emit({
+        this.emit({
           type: "event",
           level: entry.level ?? "info",
           message: entry.message,
           data: entry.data,
-          activity: this.als.getStore()?.id,
         }),
-      artifact: (entry) => this.bus.emit({ type: "artifact", ...entry }),
-      watch: (readouts) => this.bus.emit({ type: "watch", ...readouts }),
+      artifact: (entry) => this.emit({ type: "artifact", ...entry }),
+      watch: (readouts) => this.emit({ type: "watch", ...readouts }),
     };
   }
 
-  private async activity<T>(label: string, body: () => Promise<T>): Promise<T> {
+  private async activity<T>(label: string, body: () => Promise<T>, detail?: string): Promise<T> {
     const id = `a${this.activityCounter++}`;
     const parent = this.als.getStore()?.id;
-    this.bus.emit({ type: "activity", phase: "start", id, parent, label });
+    this.emit({ type: "activity", phase: "start", id, parent, label, detail });
     try {
       const value = await this.als.run({ id }, body);
-      this.bus.emit({ type: "activity", phase: "end", id, outcome: "ok" });
+      this.emit({ type: "activity", phase: "end", id, outcome: "ok" });
       return value;
     } catch (error) {
-      this.bus.emit({ type: "activity", phase: "end", id, outcome: "failed" });
+      this.emit({ type: "activity", phase: "end", id, outcome: "failed" });
       throw error;
     }
   }
@@ -252,14 +273,14 @@ class Execution {
     const id = this.nextId();
     const label = `${role}.${method}`;
     const activity = this.als.getStore()?.id;
-    this.bus.emit({ type: "step", phase: "start", id, label, activity });
+    this.emit({ type: "step", phase: "start", id, label, activity });
     this.begin(id, label);
     try {
       const value = (await fn(...args)) ?? null;
-      this.bus.emit({ type: "step", phase: "end", id, label, ok: true, activity });
+      this.emit({ type: "step", phase: "end", id, label, ok: true, activity });
       return value;
     } catch (error) {
-      this.bus.emit({ type: "step", phase: "end", id, label, ok: false, activity });
+      this.emit({ type: "step", phase: "end", id, label, ok: false, activity });
       throw error;
     } finally {
       this.end(id);
@@ -273,7 +294,7 @@ class Execution {
     if ("conflict" in picked) throw new PenguinError(picked.conflict);
     const id = crypto.randomUUID();
     const label = name === undefined || name === "" ? this.sessionName(picked.found.name) : name;
-    this.bus.emit({ type: "session", id, name: label, use: picked.found.name });
+    this.emit({ type: "session", id, name: label, use: picked.found.name });
     const api = this.build(picked.found, this.agentHost()) as AgentAdapter;
     let attempts = 0;
     const run = (
@@ -343,7 +364,7 @@ class Execution {
     const schema = turnSchema(call);
     const label = `agent ${call.skill}`;
     const activity = this.als.getStore()?.id;
-    this.bus.emit({ type: "step", phase: "start", id, label, activity });
+    this.emit({ type: "step", phase: "start", id, label, activity });
     this.begin(id, label);
     try {
       for (let round = 0; ; round++) {
@@ -380,7 +401,7 @@ class Execution {
           } else {
             failure = outcome.error;
           }
-          this.bus.emit({
+          this.emit({
             type: "event",
             level: "warn",
             message: `step ${id} failed: ${failure}`,
@@ -407,7 +428,7 @@ class Execution {
     ok: boolean,
     value: unknown,
   ): unknown {
-    this.bus.emit({ type: "step", phase: "end", id, label, ok, activity });
+    this.emit({ type: "step", phase: "end", id, label, ok, activity });
     return value;
   }
 
@@ -429,43 +450,44 @@ class Execution {
   }
 
   private async gate(question: string, shape?: z.ZodType): Promise<unknown> {
+    const id = this.nextGateId();
     const schema = shape === undefined ? undefined : jsonSchema(shape);
     for (;;) {
-      this.bus.emit({ type: "gate", phase: "asked", question, schema });
-      const { message } = this.read(question);
+      this.emit({ type: "gate", phase: "asked", id, question, schema });
+      const { message } = this.read(question, id);
       const answer = await message;
-      if (shape === undefined) return this.answered(question, answer);
+      if (shape === undefined) return this.answered(id, question, answer);
       const taken = coerce(shape, answer.text);
       if ("value" in taken) {
-        this.answered(question, answer);
+        this.answered(id, question, answer);
         return taken.value;
       }
-      this.bus.emit({
+      this.emit({
         type: "event",
         level: "warn",
         message: `the answer "${answer.text}" does not fit: ${taken.problem}`,
-        activity: this.als.getStore()?.id,
       });
     }
   }
 
   private async gateUntil(question: string, halted: Promise<void>): Promise<string | undefined> {
-    this.bus.emit({ type: "gate", phase: "asked", question });
-    const reader = this.read(question);
+    const id = this.nextGateId();
+    this.emit({ type: "gate", phase: "asked", id, question });
+    const reader = this.read(question, id);
     const message = await Promise.race([reader.message, halted.then(() => undefined)]);
     if (message === undefined) {
       reader.cancel();
       return undefined;
     }
-    return this.answered(question, message);
+    return this.answered(id, question, message);
   }
 
-  private answered(question: string, message: Message): string {
-    this.bus.emit({ type: "gate", phase: "answered", question, answer: message.text });
+  private answered(id: string, question: string, message: Message): string {
+    this.emit({ type: "gate", phase: "answered", id, question, answer: message.text });
     return message.text;
   }
 
-  private read(question?: string): { message: Promise<Message>; cancel(): void } {
+  private read(question?: string, gate?: string): { message: Promise<Message>; cancel(): void } {
     const queued = this.queued.shift();
     if (queued !== undefined) {
       return { message: Promise.resolve(queued), cancel: () => {} };
@@ -474,7 +496,7 @@ class Execution {
     const message = new Promise<Message>((resolve) => {
       settle = resolve;
     });
-    const reader: Reader = { question, resolve: settle };
+    const reader: Reader = { question, gate, resolve: settle };
     this.readers.push(reader);
     this.refresh();
     return {
@@ -498,7 +520,7 @@ class Execution {
     for (;;) {
       const taken = this.take(request);
       if (taken.missing.length === 0) {
-        this.bus.emit({ type: "credential", phase: "ready", name: request.name, where: taken.where });
+        this.emit({ type: "credential", phase: "ready", name: request.name, where: taken.where });
         return taken.values;
       }
       await this.paused(() => this.ask(request, taken.missing));
@@ -533,7 +555,7 @@ class Execution {
   }
 
   private ask(request: CredentialRequest, missing: CredentialField[]): Promise<void> {
-    this.bus.emit({
+    this.emit({
       type: "credential",
       phase: "asked",
       name: request.name,
@@ -547,7 +569,7 @@ class Execution {
 
   /** The provider refused what penguin had. A viewer offers the fixes and picks none itself. */
   private refused(request: CredentialRequest, reason: string): Promise<void> {
-    this.bus.emit({
+    this.emit({
       type: "credential",
       phase: "rejected",
       name: request.name,
@@ -576,9 +598,10 @@ class Execution {
   }
 
   private ingest(line: string): void {
-    let parsed: { text?: unknown; session?: unknown; credential?: unknown };
+    type Line = { text?: unknown; session?: unknown; gate?: unknown; credential?: unknown };
+    let parsed: Line;
     try {
-      parsed = JSON.parse(line) as { text?: unknown; session?: unknown; credential?: unknown };
+      parsed = JSON.parse(line) as Line;
     } catch {
       return;
     }
@@ -591,11 +614,21 @@ class Execution {
       text: parsed.text,
       session: typeof parsed.session === "string" ? parsed.session : undefined,
     };
-    this.bus.emit({ type: "message", text: message.text, session: message.session });
-    const reader = this.readers.shift();
+    this.emit({ type: "message", text: message.text, session: message.session });
+    const gate = typeof parsed.gate === "string" ? parsed.gate : undefined;
+    const reader = this.pick(gate);
     if (reader === undefined) this.queued.push(message);
     else reader.resolve(message);
     this.refresh();
+  }
+
+  /**
+   * The reader a message goes to: the one holding the gate it addresses, else the
+   * earliest waiting reader. A gate no reader holds takes the unaddressed path.
+   */
+  private pick(gate: string | undefined): Reader | undefined {
+    const addressed = gate === undefined ? -1 : this.readers.findIndex((one) => one.gate === gate);
+    return this.readers.splice(addressed === -1 ? 0 : addressed, 1)[0];
   }
 
   private begin(id: string, label: string): void {
@@ -614,7 +647,7 @@ class Execution {
     const key = `${next.state}\n${next.detail ?? ""}`;
     if (key === this.state) return;
     this.state = key;
-    this.bus.emit({ type: "state", state: next.state, detail: next.detail });
+    this.emit({ type: "state", state: next.state, detail: next.detail });
   }
 
   private stateNow(): State {
@@ -636,7 +669,7 @@ class Execution {
         runCommand(cmd, this.resolveCwd(options?.cwd), { stdin: options?.stdin }),
       exec: (argv, options) => runArgv(argv, this.resolveCwd(options?.cwd), options),
       wait: <T>(label: string, body: () => Promise<T>): Promise<T> => this.wait(label, body),
-      emit: (event: ViewEvent) => this.bus.emit(event),
+      emit: (event: ViewEvent) => this.emit(event),
       credential: (request: CredentialRequest) => this.credential(request),
     };
   }
@@ -655,14 +688,17 @@ class Execution {
   }
 
   private async wait<T>(label: string, body: () => Promise<T>): Promise<T> {
+    const id = `w${this.waitCounter++}`;
     const entry: Wait = { label };
     this.waits.push(entry);
+    this.emit({ type: "wait", phase: "start", id, label });
     this.refresh();
     try {
       return await body();
     } finally {
       const index = this.waits.indexOf(entry);
       if (index !== -1) this.waits.splice(index, 1);
+      this.emit({ type: "wait", phase: "end", id });
       this.refresh();
     }
   }
@@ -682,6 +718,24 @@ class Execution {
     this.counter += 1;
     return id;
   }
+
+  private nextGateId(): string {
+    return `g${this.gateCounter++}`;
+  }
+}
+
+/** What tells ten parallel calls of one workflow apart in a tree. */
+function summary(params: unknown): string | undefined {
+  if (params === null || typeof params !== "object") return undefined;
+  const parts = Object.entries(params as Record<string, unknown>).map(
+    ([name, value]) => `${name}: ${short(value)}`,
+  );
+  return parts.length === 0 ? undefined : parts.join(", ");
+}
+
+function short(value: unknown): string {
+  const text = typeof value === "string" ? value : String(value);
+  return text.length > 40 ? `${text.slice(0, 40)}...` : text;
 }
 
 function shownField(field: CredentialField): {

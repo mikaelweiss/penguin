@@ -78,6 +78,25 @@ export default adapter({
 });
 `;
 
+const clockSource = `import fs from "node:fs";
+import { adapter } from "penguin";
+
+export default adapter({
+  role: "clock",
+  name: "clock",
+  description: "test clock",
+  build: (host) => ({
+    until: (file) =>
+      host.wait("new commits", () =>
+        new Promise((resolve) => {
+          const tick = () => (fs.existsSync(file) ? resolve(file) : setTimeout(tick, 20));
+          tick();
+        }),
+      ),
+  }),
+});
+`;
+
 export type Sandbox = {
   home: string;
   userHome: string;
@@ -93,12 +112,13 @@ export type Sandbox = {
   invocations(relative: string): string[];
   setAgent(result: string, marker?: string, name?: string): void;
   withShell(): void;
+  withClock(): void;
   writeAdapter(name: string, source: string, scope?: "home" | "project"): void;
   setDefaults(text: string): void;
   sessions(): SessionLine[];
   runDir(run: string): string;
   events(run: string): Event[];
-  send(run: string, text: string, session?: string): void;
+  send(run: string, text: string, session?: string, gate?: string): void;
   holder(run: string): number | undefined;
   lastState(run: string): Event | undefined;
   ended(run: string): Event | undefined;
@@ -183,6 +203,9 @@ export function sandbox(t: TestContext): Sandbox {
     withShell() {
       box.writeAdapter("shell", shellSource);
     },
+    withClock() {
+      box.writeAdapter("clock", clockSource);
+    },
     writeAdapter(name, source, scope = "home") {
       const dir = scope === "home" ? path.join(home, "adapters") : path.join(project, ".penguin", "adapters");
       fs.mkdirSync(dir, { recursive: true });
@@ -211,8 +234,8 @@ export function sandbox(t: TestContext): Sandbox {
         .filter((line) => line.trim() !== "")
         .map((line) => JSON.parse(line) as Event);
     },
-    send(run, text, session) {
-      const line = { at: new Date().toISOString(), text, session };
+    send(run, text, session, gate) {
+      const line = { at: new Date().toISOString(), text, session, gate };
       fs.appendFileSync(path.join(box.runDir(run), "inbox.jsonl"), `${JSON.stringify(line)}\n`);
     },
     holder(run) {

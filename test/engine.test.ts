@@ -762,27 +762,7 @@ export default workflow({
 
 test("host.wait shows the run idle with the label", async (t) => {
   const box = sandbox(t);
-  box.writeAdapter(
-    "clock",
-    `import fs from "node:fs";
-import { adapter } from "penguin";
-
-export default adapter({
-  role: "clock",
-  name: "clock",
-  description: "test clock",
-  build: (host) => ({
-    until: (file) =>
-      host.wait("new commits", () =>
-        new Promise((resolve) => {
-          const tick = () => (fs.existsSync(file) ? resolve(file) : setTimeout(tick, 20));
-          tick();
-        }),
-      ),
-  }),
-});
-`,
-  );
+  box.withClock();
   box.write(
     "w.ts",
     `import { workflow } from "penguin";
@@ -808,6 +788,149 @@ export default workflow({
   const ended = await box.waitForEnd("w-1");
 
   assert.equal(ended["result"], "arrived");
+});
+
+test("a wait pairs a start and an end event, and the plain view prints the label", (t) => {
+  const box = sandbox(t);
+  box.withClock();
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({ file: z.string() }),
+  async run({ params, clock, view }) {
+    await view.activity("watching", () => clock.until(params.file));
+    return "arrived";
+  },
+});
+`,
+  );
+  const file = path.join(box.project, "commit.txt");
+  fs.writeFileSync(file, "");
+
+  const done = box.penguin("run", "./w.ts", "--file", file);
+
+  assert.equal(done.code, 0, done.output);
+  assert.match(done.stdout, /^new commits$/m, "the plain view shows the idle wait");
+  const events = box.events("w-1");
+  const activity = events.find((event) => event["type"] === "activity");
+  const waits = events.filter((event) => event["type"] === "wait");
+  assert.deepEqual(
+    waits.map((event) => [event["phase"], event["id"]]),
+    [
+      ["start", "w0"],
+      ["end", "w0"],
+    ],
+    "one wait, one start, one end",
+  );
+  assert.equal(waits[0]?.["label"], "new commits");
+  assert.deepEqual(
+    waits.map((event) => event["activity"]),
+    [activity?.["id"], activity?.["id"]],
+    "both ends carry the activity the wait happened in",
+  );
+});
+
+test("a session event and an agent event carry the activity the turn ran in", (t) => {
+  const box = sandbox(t);
+  box.setAgent("none");
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent, view }) {
+    await view.activity("round 1", async () => {
+      await agent({ name: "worker" }).run("./skill.md");
+    });
+    await agent({ name: "loner" }).run("./skill.md");
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
+
+  const events = box.events("w-1");
+  const activity = events.find((event) => event["type"] === "activity");
+  const sessions = events.filter((event) => event["type"] === "session");
+  assert.deepEqual(
+    sessions.map((event) => [event["name"], event["activity"]]),
+    [
+      ["worker", activity?.["id"]],
+      ["loner", undefined],
+    ],
+    "a session outside every activity carries none",
+  );
+  const inside = sessions[0]?.["id"];
+  const said = events.filter((event) => event["type"] === "agent" && event["session"] === inside);
+  assert.equal(said.length, 1);
+  assert.equal(said[0]?.["activity"], activity?.["id"]);
+  assert.equal(said[0]?.["text"], "agent ran\n");
+});
+
+test("a composed call carries a summary of its params, and view.activity carries none", (t) => {
+  const box = sandbox(t);
+  box.write(
+    "greet.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "greet someone",
+  params: z.object({ name: z.string(), loud: z.boolean() }),
+  async run({ params }) {
+    return params.loud ? params.name.toUpperCase() : params.name;
+  },
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+import greet from "./greet.ts";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run(ctx) {
+    return await ctx.view.activity("round 1", () =>
+      Promise.all([
+        greet(ctx, { name: "ada", loud: true }),
+        greet(ctx, { name: "${"long".repeat(15)}", loud: false }),
+      ]),
+    );
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts").code, 0);
+
+  const starts = box
+    .events("w-1")
+    .filter((event) => event["type"] === "activity" && event["phase"] === "start");
+  assert.deepEqual(
+    starts.map((event) => [event["label"], event["detail"]]),
+    [
+      ["round 1", undefined],
+      ["greet someone", "name: ada, loud: true"],
+      ["greet someone", `name: ${"long".repeat(15).slice(0, 40)}..., loud: false`],
+    ],
+    "the detail tells two calls of one workflow apart, and a long value is cut",
+  );
+  assert.deepEqual(
+    starts.map((event) => event["parent"]),
+    [undefined, starts[0]?.["id"], starts[0]?.["id"]],
+  );
 });
 
 test("a composed call is one activity and returns its value to the caller", (t) => {

@@ -7,10 +7,10 @@ A workflow is one TypeScript file: a params schema and a run function over `ctx`
 ## Install
 
 ```sh
-npm install -g @mikaelweiss/penguin
+bun install -g @mikaelweiss/penguin
 ```
 
-penguin needs Node 24 or newer. Your repository needs no npm install.
+penguin needs Bun 1.3 or newer, and it runs on Bun only. Your repository needs no install of its own.
 
 The first penguin command sets up `~/.penguin/` and copies the starter catalog into it:
 

@@ -13,5 +13,5 @@ The specs describe the present system, and only the present system. They contain
 
 - Every engine invariant in `20-architecture.md` is pinned by a test. A change that touches one updates its test.
 - Spec and code move together: a behavior change lands with its spec edit in the same commit.
-- Quality gates for every change: `tsc --noEmit` and the test suite (`node --test`) pass under system Node.
+- Quality gates for every change: `tsc --noEmit` and the test suite (`bun test`) pass.
 - Personal workflow ideas go in `WORKFLOWS.md`, not in the specs.

@@ -6,11 +6,9 @@ ALIASES=("falcra")
 
 cd "$(dirname "$0")/.."
 
-trap 'npm pkg set name="$CANONICAL"' EXIT
-
-npm run build
+trap 'bun pm pkg set name="$CANONICAL"' EXIT
 
 for name in "$CANONICAL" "${ALIASES[@]}"; do
-  npm pkg set name="$name"
-  npm publish --access public --ignore-scripts
+  bun pm pkg set name="$name"
+  bun publish --access public --ignore-scripts
 done

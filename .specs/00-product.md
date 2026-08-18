@@ -8,7 +8,7 @@ penguin splits the two concerns. Structured control flow belongs to an engine. C
 
 ## What penguin is
 
-A TypeScript CLI on Node. It runs one workflow as one live process against any repository or folder, with any coding agent CLI. A workflow is a TypeScript file: a params schema plus a run function over `ctx`. Workflows compose: one workflow calls another as a function. Everything outside the run function is an adapter: agents, git, GitHub, the display. The terminal is a viewer: it attaches to a run, watches, sends messages, and detaches. The run keeps going without it, and the full history is files on disk.
+A TypeScript CLI on Bun. It runs one workflow as one live process against any repository or folder, with any coding agent CLI. A workflow is a TypeScript file: a params schema plus a run function over `ctx`. Workflows compose: one workflow calls another as a function. Everything outside the run function is an adapter: agents, git, GitHub, the display. The terminal is a viewer: it attaches to a run, watches, sends messages, and detaches. The run keeps going without it, and the full history is files on disk.
 
 ## Principles
 

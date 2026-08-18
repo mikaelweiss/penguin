@@ -34,6 +34,8 @@ function lineOf(event: ViewEvent): string | undefined {
       return event.phase === "start" ? `step ${event.id} ${event.label}` : undefined;
     case "activity":
       return event.phase === "start" ? event.label : undefined;
+    case "wait":
+      return event.phase === "start" ? event.label : undefined;
     case "fact":
       return Object.entries(event.values)
         .map(([name, value]) => `${name}: ${value}`)

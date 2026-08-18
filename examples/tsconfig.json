@@ -1,5 +1,5 @@
 {
-  // "paths" points at the penguin install. Run `npm root -g` to find it.
+  // "paths" points at the penguin install. Run `bun pm ls -g` to find it.
   "compilerOptions": {
     "target": "es2023",
     "lib": ["es2023"],
@@ -10,7 +10,7 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "penguin": ["./node_modules/@mikaelweiss/penguin/dist/index.d.ts", "../src/index.ts"],
+      "penguin": ["./node_modules/@mikaelweiss/penguin/src/index.ts", "../src/index.ts"],
       "zod": [
         "./node_modules/@mikaelweiss/penguin/node_modules/zod",
         "./node_modules/zod",

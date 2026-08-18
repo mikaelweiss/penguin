@@ -212,6 +212,148 @@ export default workflow({
   );
 });
 
+test("invariant 5: a message answers the gate it addresses, an unaddressed one the earliest", async (t) => {
+  const box = sandbox(t);
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ gate }) {
+    const [first, second] = await Promise.all([gate("first?"), gate("second?")]);
+    return \`\${first}|\${second}\`;
+  },
+});
+`,
+  );
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await waitFor(() => asks(box.events("w-1")).length === 2);
+
+  const second = asks(box.events("w-1")).find((event) => event["question"] === "second?");
+  box.send("w-1", "two", undefined, String(second?.["id"]));
+  await waitFor(() => answers(box.events("w-1")).length === 1);
+
+  const answered = answers(box.events("w-1"))[0];
+  assert.deepEqual(
+    [answered?.["id"], answered?.["question"], answered?.["answer"]],
+    [second?.["id"], "second?", "two"],
+    "the addressed gate took it, not the earlier one",
+  );
+  assert.equal(box.ended("w-1"), undefined, "the first gate is still asked");
+  assert.equal(box.lastState("w-1")?.["detail"], "first?");
+
+  box.send("w-1", "one");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["result"], "one|two");
+  assert.deepEqual(
+    answers(box.events("w-1")).map((event) => event["answer"]),
+    ["two", "one"],
+  );
+});
+
+test("invariant 18: a message to a gate no reader holds waits in the queue", async (t) => {
+  const box = sandbox(t);
+  box.withClock();
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({ file: z.string() }),
+  async run({ params, clock, gate }) {
+    await clock.until(params.file);
+    const first = await gate("first?");
+    const second = await gate("second?");
+    return \`\${first}|\${second}\`;
+  },
+});
+`,
+  );
+  const file = path.join(box.project, "commit.txt");
+  assert.equal(box.penguin("run", "./w.ts", "--file", file, "--background").code, 0);
+  await box.waitForState("w-1", "idle");
+
+  box.send("w-1", "ghost", undefined, "g99");
+  await waitFor(() => box.events("w-1").some((event) => event["type"] === "message"));
+
+  assert.deepEqual(answers(box.events("w-1")), [], "no gate holds g99, so nothing answered");
+  assert.equal(box.lastState("w-1")?.["state"], "idle");
+
+  fs.writeFileSync(file, "");
+  await box.waitForState("w-1", "blocked");
+
+  assert.equal(box.lastState("w-1")?.["detail"], "second?", "the first gate took the queued message");
+  assert.deepEqual(
+    answers(box.events("w-1")).map((event) => [event["question"], event["answer"]]),
+    [["first?", "ghost"]],
+    "the queued message answered one gate, and only one",
+  );
+
+  box.send("w-1", "again");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["result"], "ghost|again");
+});
+
+test("invariant 17: every placed event carries its activity, and waits pair", async (t) => {
+  const box = sandbox(t);
+  box.withShell();
+  box.withClock();
+  box.setAgent("none");
+  box.write("skill.md", "do the thing\n");
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({ file: z.string() }),
+  async run({ params, agent, clock, gate, shell, view }) {
+    await view.activity("round 1", async () => {
+      await shell.run("true");
+      await agent().run("./skill.md");
+      await clock.until(params.file);
+      await gate("go on?");
+    });
+    return "over";
+  },
+});
+`,
+  );
+  const file = path.join(box.project, "commit.txt");
+  assert.equal(box.penguin("run", "./w.ts", "--file", file, "--background").code, 0);
+  await box.waitForState("w-1", "idle");
+  fs.writeFileSync(file, "");
+  await box.waitForState("w-1", "blocked");
+  box.send("w-1", "yes");
+  assert.equal((await box.waitForEnd("w-1"))["result"], "over");
+
+  const events = box.events("w-1");
+  const activity = events.find((event) => event["type"] === "activity");
+  const placed = events.filter((event) =>
+    ["session", "agent", "gate", "step", "wait"].includes(String(event["type"])),
+  );
+  assert.ok(placed.length >= 8, `too few placed events: ${placed.length}`);
+  for (const event of placed) {
+    assert.equal(event["activity"], activity?.["id"], JSON.stringify(event));
+  }
+  const waits = events.filter((event) => event["type"] === "wait");
+  assert.deepEqual(
+    waits.map((event) => [event["phase"], event["id"], event["label"]]),
+    [
+      ["start", "w0", "new commits"],
+      ["end", "w0", undefined],
+    ],
+  );
+});
+
 test("invariant 6: turn.stop kills the agent process, and the next turn continues", async (t) => {
   const box = sandbox(t);
   box.setAgent("none", "prompts.txt");
@@ -621,6 +763,10 @@ export default workflow({
 
 function asks(events: Event[]): Event[] {
   return events.filter((event) => event["phase"] === "asked");
+}
+
+function answers(events: Event[]): Event[] {
+  return events.filter((event) => event["phase"] === "answered");
 }
 
 function alive(pid: number): boolean {
