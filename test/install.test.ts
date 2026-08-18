@@ -29,6 +29,26 @@ test("a fresh install fills the home with the catalog", (t) => {
   assert.match(env, /vcs: ReturnType/);
 });
 
+test("a fresh install chooses the claude agent in the defaults file", (t) => {
+  const box = sandbox(t);
+  fs.rmSync(box.home, { recursive: true });
+
+  const first = box.penguin("ps");
+
+  assert.equal(first.code, 0, first.output);
+  assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent claude\n");
+});
+
+test("install keeps the defaults file a home already has", (t) => {
+  const box = sandbox(t);
+  box.setDefaults("agent mine");
+
+  const again = box.penguin("install");
+
+  assert.equal(again.code, 0, again.output);
+  assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent mine\n");
+});
+
 test("a fresh install leaves ship in the workflow list", (t) => {
   const box = sandbox(t);
   fs.rmSync(box.home, { recursive: true });

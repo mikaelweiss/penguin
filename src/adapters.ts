@@ -57,17 +57,17 @@ export type Picked = { found: Found } | { missing: string } | { conflict: string
 
 export function pick(list: Found[], role: string, name?: string): Picked {
   const implementations = list.filter((entry) => entry.role === role);
-  const wanted = name ?? defaults().get(role);
+  const chosen = defaults().get(role);
+  const wanted = name ?? chosen;
   if (wanted !== undefined) {
     const found = implementations.find((entry) => entry.name === wanted);
     if (found !== undefined) return { found };
+    if (implementations.length === 0) {
+      return { missing: `no ${role} adapter is installed. pn list adapters shows what penguin found.` };
+    }
     const names = implementations.map((entry) => entry.name).join(", ");
-    return {
-      missing:
-        implementations.length === 0
-          ? `no ${role} adapter is installed. pn list adapters shows what penguin found.`
-          : `no ${role} adapter named ${wanted}. Installed: ${names}.`,
-    };
+    const fix = name === undefined ? ` Edit ${defaultsFile()} to choose one.` : "";
+    return { missing: `no ${role} adapter named ${wanted}. Installed: ${names}.${fix}` };
   }
   const first = implementations[0];
   if (first === undefined) {

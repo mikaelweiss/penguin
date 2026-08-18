@@ -283,6 +283,36 @@ export default adapter({
 });
 `;
 
+const quietWorkflow = `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ view }) {
+    view.event({ message: "nothing to do" });
+  },
+});
+`;
+
+const agentWorkflow = `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ agent }) {
+    await agent().run("./skill.md");
+  },
+});
+`;
+
+function freshHome(box: Sandbox): void {
+  fs.rmSync(box.home, { recursive: true });
+  const first = box.penguin("ps");
+  assert.equal(first.code, 0, first.output);
+}
+
 function catalogReady(box: Sandbox, result: string): void {
   fs.cpSync(path.join(examples, "skills"), path.join(box.home, "skills"), {
     recursive: true,
@@ -368,6 +398,40 @@ test("every catalog workflow loads with a description and params", async () => {
       `${file} takes no params`,
     );
   }
+});
+
+test("the shipped defaults pick claude when a second agent adapter is installed", (t) => {
+  const box = sandbox(t);
+  freshHome(box);
+  box.setAgent("none");
+  box.write("w.ts", quietWorkflow);
+
+  const started = box.penguin("run", "./w.ts", "--background");
+
+  assert.equal(started.code, 0, started.output);
+  assert.equal(started.stdout, "run w-1 started, agent claude\n");
+});
+
+test("a default naming an agent that is not installed fails the run and names the file", (t) => {
+  const box = sandbox(t);
+  freshHome(box);
+  fs.rmSync(path.join(box.home, "adapters", "claude.ts"));
+  box.setAgent("none");
+  box.write("skill.md", "do the thing\n");
+  box.write("w.ts", agentWorkflow);
+
+  const failed = box.penguin("run", "./w.ts");
+
+  assert.equal(failed.code, 1, failed.output);
+  assert.match(
+    failed.stdout,
+    /no agent adapter named claude\. Installed: codex, fake\./,
+  );
+  assert.ok(
+    failed.stdout.includes(`Edit ${path.join(box.home, "defaults")} to choose one.`),
+    failed.output,
+  );
+  assert.match(String(box.ended("w-1")?.["reason"]), /no agent adapter named claude/);
 });
 
 test("the catalog composes the pipelines out of the steps", async () => {
