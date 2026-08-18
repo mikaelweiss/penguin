@@ -22,6 +22,9 @@ function stubHost(credential: Host["credential"]): Host {
     exec: async () => 0,
     wait: <T,>(_label: string, body: () => Promise<T>) => body(),
     emit: () => {},
+    gate: (() => {
+      throw new Error("the jira adapter asks no gate");
+    }) as Host["gate"],
     credential,
   };
 }

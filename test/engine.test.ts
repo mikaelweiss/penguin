@@ -153,7 +153,6 @@ export default workflow({
   assert.equal(steps.at(-1)?.["ok"], false, "the stopped step closed");
 });
 
-
 test("a turn with a blocked schema resolves to the envelope the agent filled", async (t) => {
   const box = sandbox(t);
   const prompts = path.join(box.project, "prompts.txt");
@@ -914,6 +913,55 @@ export default workflow({
   assert.equal(ended["result"], "worker:look at the diff");
   const message = box.events("w-1").find((event) => event["type"] === "message");
   assert.equal(message?.["session"], "worker");
+});
+
+test("host.gate blocks the run, and the answer goes back to the adapter", async (t) => {
+  const box = sandbox(t);
+  box.writeAdapter(
+    "locked",
+    `import { adapter } from "penguin";
+import { z } from "zod";
+
+export default adapter({
+  role: "vault",
+  name: "locked",
+  description: "a vault that needs unlocking first",
+  build: (host) => ({
+    async open() {
+      const said = await host.gate("Unlock the vault, then reply done.", z.enum(["done", "stop"]));
+      return said === "done" ? "open" : "shut";
+    },
+  }),
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ vault }) {
+    return await vault.open();
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  await box.waitForState("w-1", "blocked");
+  assert.match(String(box.lastState("w-1")?.["detail"]), /Unlock the vault/);
+
+  const asked = box.events("w-1").find((event) => event["phase"] === "asked");
+  assert.deepEqual((asked?.["schema"] as { enum?: string[] })?.enum, ["done", "stop"]);
+
+  box.send("w-1", "done");
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["phase"], "done");
+  assert.equal(ended["result"], "open");
 });
 
 test("host.wait shows the run idle with the label", async (t) => {

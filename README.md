@@ -150,6 +150,25 @@ An environment variable wins over the stored file, which is how a server or a cr
 
 Workflow code writes none of this. `ctx.jira.issue.get("ABC-123")` is the whole story.
 
+### What only you can fix
+
+Some failures are nobody's to solve but yours: a CLI that is signed out, a tool that is not installed, a branch the remote does not have. `host.gate` hands the fix over and runs the call again:
+
+```typescript
+const Ready = z.union([z.enum(["done", "skip"]), z.string()]);
+
+async function gh(cmd: string): Promise<CommandResult> {
+  for (;;) {
+    const done = await host.shell(cmd);
+    const fix = blocking(done);
+    if (fix === undefined) return done;
+    if ((await host.gate(fix, Ready)) === "skip") return done;
+  }
+}
+```
+
+The run blocks with the line the adapter wrote, your terminal draws `done` and `skip`, and `done` runs the same command over. `skip` hands the failure back to the workflow. Only the gate on a failed agent step says `stop`, and that one ends the run. The `gh` adapter asks for gh absent, gh signed out, a checkout with no remote, and a branch that is not pushed. A workflow that calls `ctx.github.pr.create()` sees none of it.
+
 ## Watch a run
 
 A run is in one of four states. **running**: a step is executing. **blocked**: the run waits on you, at a gate or at `ctx.messages.next()`. **idle**: the run waits on the outside world. **done**: the run function returned, you stopped it, or an error ended it. Done is final. To act again, start a new run.

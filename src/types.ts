@@ -194,6 +194,13 @@ export type Host = {
   wait<T>(label: string, body: () => Promise<T>): Promise<T>;
   emit(event: ViewEvent): void;
   /**
+   * A question for the user, the same gate a workflow asks. The run shows blocked
+   * with the question until a viewer answers. An adapter asks it when only a person
+   * can clear the way: sign in to a CLI, install a tool, push a branch.
+   */
+  gate(question: string): Promise<string>;
+  gate<Shape extends z.ZodType>(question: string, shape: Shape): Promise<z.infer<Shape>>;
+  /**
    * The values the adapter needs from the user, one field per value. Environment
    * variables win, then the stored record. Anything still missing blocks the run
    * until a viewer takes it and writes it to the store.

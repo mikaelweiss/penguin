@@ -16,7 +16,8 @@ export default workflow({
     }
 
     view.artifact({ title: "Pull request", url: pr.url });
-    while ((await gate(`PR is up: ${pr.url}`, Feedback)) !== "done") {
+    const news = pr.existed ? "PR was open already" : "PR is up";
+    while ((await gate(`${news}: ${pr.url}`, Feedback)) !== "done") {
       const fixer = agent({ cwd: params.dir });
       await fixer.run("penguin-address-feedback");
     }

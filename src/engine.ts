@@ -686,6 +686,8 @@ class Execution {
       exec: (argv, options) => runArgv(argv, this.resolveCwd(options?.cwd), options),
       wait: <T>(label: string, body: () => Promise<T>): Promise<T> => this.wait(label, body),
       emit: (event: ViewEvent) => this.emit(event),
+      gate: ((question: string, shape?: z.ZodType) =>
+        this.paused(() => this.gate(question, shape))) as Host["gate"],
       credential: (request: CredentialRequest) => this.credential(request),
     };
   }

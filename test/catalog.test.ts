@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { installed, loadAdapter, renderEnv } from "../src/adapters.ts";
@@ -401,6 +402,16 @@ function catalogReady(box: Sandbox, result: string): void {
   });
   box.setAgent(result);
   box.setDefaults("agent fake");
+}
+
+/** A gh on PATH that fails one way every time, whatever the machine's own gh would say. */
+function failingGh(t: TestContext, stderr: string): Record<string, string> {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-gh-")));
+  fs.writeFileSync(path.join(dir, "gh"), `#!/bin/sh\ncat >/dev/null\necho ${JSON.stringify(stderr)} >&2\nexit 1\n`, {
+    mode: 0o755,
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return { PATH: `${dir}${path.delimiter}${process.env["PATH"] ?? ""}` };
 }
 
 function outsideReady(box: Sandbox): void {
@@ -1079,7 +1090,8 @@ test("the catalog review-pr workflow gates when the PR does not read", async (t)
   const box = sandbox(t);
   catalogReady(box, "none");
 
-  const started = box.penguin(
+  const started = box.penguinWith(
+    failingGh(t, "no pull request found for 42"),
     "run",
     path.join(examples, "review-pr.ts"),
     "--pr",
@@ -1091,6 +1103,27 @@ test("the catalog review-pr workflow gates when the PR does not read", async (t)
   const question = await gateOf(box, "review-pr-1");
   assert.ok(question.startsWith("gh pr view 42 failed:"), question);
   box.send("review-pr-1", "ok");
+  assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
+});
+
+test("the catalog gh adapter holds a signed out gh before the workflow sees it", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, "none");
+
+  const started = box.penguinWith(
+    failingGh(t, "not logged in to github.com. use 'gh auth login' to authenticate with this host"),
+    "run",
+    path.join(examples, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+
+  assert.equal(started.code, 0, started.output);
+  assert.match(await gateOf(box, "review-pr-1"), /gh auth login/);
+
+  box.send("review-pr-1", "skip");
+  await answerGate(box, "review-pr-1", "gh pr view 42 failed:", "ok");
   assert.equal((await box.waitForEnd("review-pr-1"))["phase"], "done");
 });
 
@@ -1331,6 +1364,7 @@ function codexHost(script: (argv: string[]) => Scripted): {
     emit: (event) => {
       events.push(event);
     },
+    gate: (async () => "") as Host["gate"],
     credential: (async () => ({})) as Host["credential"],
   };
   return { host, runs, events };
