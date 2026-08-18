@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { allocateRun, discardRun, finishRun, readRun } from "../src/create.ts";
-import { rows } from "../src/runs.ts";
-import { type Left, PANE, RunView } from "../src/tui/run-view.tsx";
+import { allocateRun, discardRun, finishRun, readRun, rows } from "@mikaelweiss/penguin-engine";
+import { type Left, PANE, RunView } from "../apps/cli/src/tui/run-view.tsx";
 import { frameWith, homed, paste, press, screen } from "./drive.tsx";
 import { type Event, sandbox, waitFor } from "./helpers.ts";
 

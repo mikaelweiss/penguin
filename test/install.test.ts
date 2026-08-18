@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { starterCatalog } from "../src/catalogs.ts";
+import { starterCatalog } from "@mikaelweiss/penguin-engine";
 import { sandbox } from "./helpers.ts";
 
 test("a fresh install enables the starter catalog and does not copy it", (t) => {

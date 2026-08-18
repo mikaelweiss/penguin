@@ -1,6 +1,6 @@
 # Catalog
 
-The npm package carries an `examples/` directory. That directory is the starter catalog. Install enables it with one line, `starter`, in `~/.penguin/catalogs`. penguin reads the files from `examples/` itself. It does not copy them into the home.
+The engine package (`@mikaelweiss/penguin-engine`) carries an `examples/` directory. That directory is the starter catalog. Install enables it with one line, `starter`, in `~/.penguin/catalogs`. penguin reads the files from `examples/` itself. It does not copy them into the home.
 
 - `examples/adapters/claude.ts`: the `agent` role on the claude CLI: sessions over `--session-id` and `--resume`, stream-json into typed agent events (text, thinking, and each tool call with what it acts on), results over `--json-schema`, and `--permission-mode` at `acceptEdits`, which a `permission` session option overrides. A run has nobody to ask, so a denied edit costs the whole turn.
 - `examples/adapters/codex.ts`: the `agent` role on the codex CLI: one codex thread per penguin session, started on the first turn and resumed by id after, the `--json` stream into typed agent events (text, thinking, and each tool call with what it acts on), results over `--output-schema`, and the model and the sandbox mode as `-c` overrides.
@@ -26,7 +26,7 @@ The npm package carries an `examples/` directory. That directory is the starter 
 - `examples/make-workflow.ts`: an idea to a new workflow: a design held at an approval gate, then a write-and-review loop with a `rounds` bound, into the home or the project.
 - `examples/skills/`: the step skills, one directory each, in the Agent Skills format (`20-architecture.md`, skills): `penguin-triage`, `penguin-plan`, `penguin-baseline`, `penguin-implement`, `penguin-review`, `penguin-commit`, `penguin-resolve-conflicts`, `penguin-triage-pr`, `penguin-review-pr`, `penguin-address-feedback`, `penguin-design-workflow`, `penguin-write-workflow`, `penguin-review-workflow`. The `penguin-` prefix keeps them clear of the skills `pn sync-skills` links in.
 - `examples/defaults`: the role choices the catalog ships, one line, `agent claude`. More than one agent adapter arrives together, and this line says which one a run takes (`20-architecture.md`, adapters). Install writes it into a fresh home.
-- `examples/tsconfig.json`: maps `penguin` and `zod` to the installed package for editor types, and includes the adapters and the generated `penguin-env.d.ts`. Install copies this file into a fresh home so personal workflow files typecheck.
+- `examples/tsconfig.json`: maps `penguin` to the installed CLI package and `zod` to the engine package for editor types, and includes the adapters and the generated `penguin-env.d.ts`. Install copies this file into a fresh home so personal workflow files typecheck.
 - `examples/penguin-env.d.ts`: the generated ctx types for the shipped adapters. penguin rewrites it after install (`20-architecture.md`, storage).
 
 The big workflows call the small ones (`10-workflow-model.md`, composition), and every workflow also runs alone. The name says which is which: a step is one bare verb (`plan`, `baseline`, `implement`, `review`, `commit`, `land`, `triage`, `work`), and a pipeline is a compound or an outcome (`ship`, `ship-local`, `open-pr`, `review-pr`, `pr-queue`, `make-workflow`).

@@ -4,8 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { act } from "react";
-import { short } from "../src/paths.ts";
-import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
+import { short } from "@mikaelweiss/penguin-engine";
+import { Dashboard, type Open } from "../apps/cli/src/tui/dashboard.tsx";
 import { frameWith, homed, press, screen, typeText } from "./drive.tsx";
 import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 

@@ -3,10 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-bun unlink || true
+(cd apps/cli && bun unlink) || true
 
 rm -rf ~/.penguin
 
 bun install
 
-bun link
+(cd apps/cli && bun link)

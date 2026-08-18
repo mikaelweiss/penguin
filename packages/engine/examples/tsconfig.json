@@ -1,0 +1,23 @@
+{
+  // "paths" points at the penguin install. Run `bun pm ls -g` to find it.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "penguin": ["./node_modules/@mikaelweiss/penguin/src/index.ts", "../src/author.ts"],
+      "zod": [
+        "../node_modules/zod",
+        "../../../node_modules/zod",
+        "./node_modules/@mikaelweiss/penguin-engine/node_modules/zod",
+        "./node_modules/@mikaelweiss/penguin/node_modules/@mikaelweiss/penguin-engine/node_modules/zod"
+      ]
+    }
+  },
+  "include": ["*.ts", "adapters/*.ts"]
+}

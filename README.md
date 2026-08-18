@@ -30,7 +30,7 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install enables the starter catalog (`examples/` in the penguin package) and writes a `defaults` file that picks the agent, plus a tsconfig for editor types. `pn list workflows` shows those workflows. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
+Install enables the starter catalog (`examples/` in the engine package) and writes a `defaults` file that picks the agent, plus a tsconfig for editor types. `pn list workflows` shows those workflows. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
 
 - `pn run ship --ticket ABC-123`: ticket to open PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
 - `pn run ship-local --ticket "the footer scrolls"`: the same work, landed instead of proposed. It commits, holds until you answer done, then rebases onto main and moves main to it.

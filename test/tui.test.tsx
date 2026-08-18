@@ -6,17 +6,16 @@ import test, { type TestContext } from "node:test";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode } from "react";
-import type { Found } from "../src/adapters.ts";
-import { Ask, Pick } from "../src/tui/ask.tsx";
-import { agentLabel, agentLine } from "../src/tui/attach.ts";
-import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
-import { Editor } from "../src/tui/editor.ts";
-import { controlFor } from "../src/tui/gate.ts";
-import { Choices } from "../src/tui/input.tsx";
-import { machineLine, strained } from "../src/tui/memory.ts";
-import { plainAttach } from "../src/tui/plain.ts";
-import { type Left, PANE, RunView } from "../src/tui/run-view.tsx";
-import type { ViewEvent } from "../src/types.ts";
+import { type AdapterFound as Found, type ViewEvent } from "@mikaelweiss/penguin-engine";
+import { controlFor } from "@mikaelweiss/penguin-viewer";
+import { Ask, Pick } from "../apps/cli/src/tui/ask.tsx";
+import { agentLabel, agentLine } from "../apps/cli/src/tui/attach.ts";
+import { Dashboard, type Open } from "../apps/cli/src/tui/dashboard.tsx";
+import { Editor } from "../apps/cli/src/tui/editor.ts";
+import { Choices } from "../apps/cli/src/tui/input.tsx";
+import { machineLine, strained } from "../apps/cli/src/tui/memory.ts";
+import { plainAttach } from "../apps/cli/src/tui/plain.ts";
+import { type Left, PANE, RunView } from "../apps/cli/src/tui/run-view.tsx";
 import { frameWith } from "./drive.tsx";
 
 type Box = {

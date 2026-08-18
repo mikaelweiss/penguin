@@ -4,12 +4,10 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { installed, loadAdapter, renderEnv } from "../src/adapters.ts";
-import { load } from "../src/loader.ts";
-import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "../src/types.ts";
+import { installed, load, loadAdapter, renderEnv, type AgentAdapter, type AgentTurn, type Host, type ViewEvent } from "@mikaelweiss/penguin-engine";
 import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
-const examples = fileURLToPath(new URL("../examples", import.meta.url));
+const examples = fileURLToPath(new URL("../packages/engine/examples", import.meta.url));
 
 const codexFile = path.join(examples, "adapters", "codex.ts");
 

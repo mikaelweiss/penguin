@@ -1,0 +1,29 @@
+import type { z } from "zod";
+import { type Ctx, type Workflow, type WorkflowDefinition } from "./ctx.ts";
+import { PenguinError } from "./errors.ts";
+import { COMPOSE } from "./types.ts";
+
+type Composer = {
+  [COMPOSE]?: (definition: unknown, params: unknown) => Promise<unknown>;
+};
+
+export function workflow<Schema extends z.ZodObject, R>(
+  definition: WorkflowDefinition<Schema, R>,
+): Workflow<Schema, R> {
+  if (typeof definition.description !== "string" || definition.description.trim() === "") {
+    throw new PenguinError("a workflow needs a description");
+  }
+  const call = (ctx: Ctx<unknown>, params: z.input<Schema>): Promise<R> => {
+    const compose = (ctx as unknown as Composer)[COMPOSE];
+    if (compose === undefined) {
+      throw new PenguinError("a workflow call takes the run ctx as its first argument");
+    }
+    return compose(called, params) as Promise<R>;
+  };
+  const called = Object.assign(call, {
+    description: definition.description,
+    params: definition.params,
+    run: definition.run,
+  });
+  return called;
+}

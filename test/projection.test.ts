@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Projection } from "../src/tui/projection.ts";
-import type { ViewEvent } from "../src/types.ts";
+import { type ViewEvent } from "@mikaelweiss/penguin-engine";
+import { Projection } from "@mikaelweiss/penguin-viewer";
 
 /** A JSON round trip drops an undefined field, so the builders never set one. */
 function clean(event: Record<string, unknown>): ViewEvent {

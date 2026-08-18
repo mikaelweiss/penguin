@@ -4,11 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadAdapter } from "../src/adapters.ts";
-import { runArgv } from "../src/spawn.ts";
-import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "../src/types.ts";
+import { loadAdapter, type AgentAdapter, type AgentTurn, type Host, type ViewEvent } from "@mikaelweiss/penguin-engine";
+import { runArgv } from "./helpers.ts";
 
-const cursorFile = fileURLToPath(new URL("../examples/adapters/cursor.ts", import.meta.url));
+const cursorFile = fileURLToPath(new URL("../packages/engine/examples/adapters/cursor.ts", import.meta.url));
 
 type Call = { argv: string[]; cwd: string; stdin: string };
 

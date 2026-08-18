@@ -3,10 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { installedIn } from "../src/adapters.ts";
-import * as catalogs from "../src/catalogs.ts";
-import { searchPathIn } from "../src/skills.ts";
-import { foundIn } from "../src/workflows.ts";
+import { catalogs, foundIn, installedIn, searchPathIn } from "@mikaelweiss/penguin-engine";
 
 const extraAdapter = `import { adapter } from "penguin";
 
