@@ -10,18 +10,22 @@ import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 const examples = fileURLToPath(new URL("../examples", import.meta.url));
 
 const workflowFiles = [
+  "commit.ts",
   "implement.ts",
+  "land.ts",
   "make-workflow.ts",
+  "open-pr.ts",
   "plan.ts",
-  "pr.ts",
   "review-pr.ts",
   "review.ts",
-  "ticket.ts",
+  "ship-local.ts",
+  "ship.ts",
   "triage.ts",
-  "verify.ts",
+  "work.ts",
 ];
 
-const fakeVcs = `import { adapter } from "penguin";
+const fakeVcs = `import fs from "node:fs";
+import { adapter } from "penguin";
 
 export default adapter({
   role: "vcs",
@@ -29,8 +33,27 @@ export default adapter({
   description: "fake vcs",
   build: (host) => ({
     stageAll: async () => ({ ok: true, reason: "" }),
-    commit: async () => ({ ok: true, reason: "" }),
+    commit: async (message) => {
+      fs.appendFileSync(host.cwd + "/committed.txt", message + "\\n");
+      return { ok: true, reason: "" };
+    },
+    dirty: async () => ({
+      ok: true,
+      dirty: !fs.existsSync(host.cwd + "/clean.txt"),
+      reason: "",
+    }),
+    head: async () => ({ ok: true, branch: "main", sha: "abc1234", reason: "" }),
+    fetch: async () => ({ ok: true, reason: "" }),
     pull: async () => ({ ok: true, reason: "" }),
+    merge: async (branch, options) => {
+      fs.appendFileSync(host.cwd + "/merged.txt", branch + " " + String(options?.ffOnly) + "\\n");
+      return { ok: true, reason: "" };
+    },
+    rebase: {
+      onto: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),
+      continue: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),
+      abort: async () => ({ ok: true, reason: "" }),
+    },
     worktree: {
       add: async (name) => ({ ok: true, path: host.cwd + "/" + name, exists: false, reason: "" }),
       remove: async () => ({ ok: true, reason: "" }),
@@ -38,6 +61,24 @@ export default adapter({
   }),
 });
 `;
+
+const conflictVcs = fakeVcs
+  .replace(
+    'onto: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),',
+    `onto: async () => {
+        if (fs.existsSync(host.cwd + "/rebased.txt"))
+          return { ok: true, conflicted: false, files: [], reason: "" };
+        fs.writeFileSync(host.cwd + "/rebased.txt", "stopped");
+        return { ok: false, conflicted: true, files: ["src/footer.ts"], reason: "CONFLICT" };
+      },`,
+  )
+  .replace(
+    'continue: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),',
+    `continue: async () => {
+        fs.appendFileSync(host.cwd + "/continued.txt", "continued\\n");
+        return { ok: true, conflicted: false, files: [], reason: "" };
+      },`,
+  );
 
 const takenVcs = `import fs from "node:fs";
 import { adapter } from "penguin";
@@ -49,7 +90,16 @@ export default adapter({
   build: (host) => ({
     stageAll: async () => ({ ok: true, reason: "" }),
     commit: async () => ({ ok: true, reason: "" }),
+    dirty: async () => ({ ok: true, dirty: true, reason: "" }),
+    head: async () => ({ ok: true, branch: "main", sha: "abc1234", reason: "" }),
+    fetch: async () => ({ ok: true, reason: "" }),
     pull: async () => ({ ok: true, reason: "" }),
+    merge: async () => ({ ok: true, reason: "" }),
+    rebase: {
+      onto: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),
+      continue: async () => ({ ok: true, conflicted: false, files: [], reason: "" }),
+      abort: async () => ({ ok: true, reason: "" }),
+    },
     worktree: {
       add: async (name) => {
         const target = host.cwd + "/" + name;
@@ -261,17 +311,32 @@ test("every catalog workflow loads with a description and params", async () => {
   }
 });
 
-test("the catalog composes the big workflows out of the small ones", async () => {
-  const ticket = await load(path.join(examples, "ticket.ts"));
-  const source = fs.readFileSync(path.join(examples, "ticket.ts"), "utf8");
-  const imports = [...source.matchAll(/from "\.\/([a-z-]+)\.ts"/g)].map(
-    (match) => match[1] ?? "",
+test("the catalog composes the pipelines out of the steps", async () => {
+  const importsOf = (file: string): string[] =>
+    [
+      ...fs
+        .readFileSync(path.join(examples, file), "utf8")
+        .matchAll(/from "\.\/([a-z-]+)\.ts"/g),
+    ]
+      .map((match) => match[1] ?? "")
+      .sort();
+
+  assert.deepEqual(importsOf("ship.ts"), ["open-pr", "work"]);
+  assert.deepEqual(importsOf("ship-local.ts"), [
+    "commit",
+    "implement",
+    "land",
+    "work",
+  ]);
+  assert.deepEqual(importsOf("work.ts"), ["implement", "plan", "triage"]);
+  assert.equal(typeof (await load(path.join(examples, "ship.ts"))), "function");
+  assert.equal(
+    typeof (await load(path.join(examples, "ship-local.ts"))),
+    "function",
   );
-  assert.deepEqual(imports.sort(), ["implement", "plan", "pr", "triage"]);
-  assert.equal(typeof ticket, "function");
 });
 
-test("the catalog ticket workflow runs triage to the pull request", async (t) => {
+test("the catalog ship workflow runs triage to the pull request", async (t) => {
   const box = sandbox(t);
   catalogReady(
     box,
@@ -281,29 +346,30 @@ test("the catalog ticket workflow runs triage to the pull request", async (t) =>
 
   const started = box.penguin(
     "run",
-    path.join(examples, "ticket.ts"),
+    path.join(examples, "ship.ts"),
     "--ticket",
     "ABC-1",
     "--background",
   );
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "ticket-1", "pin the footer", "approve");
-  await answerGate(box, "ticket-1", "PR is up:", "done");
-  const ended = await box.waitForEnd("ticket-1");
+  await answerGate(box, "ship-1", "pin the footer", "approve");
+  await answerGate(box, "ship-1", "PR is up:", "done");
+  const ended = await box.waitForEnd("ship-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
-  assert.deepEqual(runNames(box), ["ticket-1"]);
+  assert.deepEqual(runNames(box), ["ship-1"]);
 
-  const spans = activities(box, "ticket-1");
+  const spans = activities(box, "ship-1");
   const labels = spans.map((span) => span.label);
   for (const file of [
+    "work.ts",
     "triage.ts",
     "plan.ts",
     "implement.ts",
     "review.ts",
-    "pr.ts",
+    "open-pr.ts",
   ]) {
     assert.ok(
       labels.includes(await description(file)),
@@ -388,25 +454,28 @@ test("the catalog plan workflow reads a github issue and its comments", async (t
   assert.match(String(prompt), /it also jumps on resize/);
 });
 
-test("the catalog ticket workflow stops at the triage gate", async (t) => {
+test("the catalog ship workflow stops at the triage gate", async (t) => {
   const box = sandbox(t);
   catalogReady(box, '{"actionable":false,"reason":"no repro","tasks":[]}');
 
   const started = box.penguin(
     "run",
-    path.join(examples, "ticket.ts"),
+    path.join(examples, "ship.ts"),
     "--ticket",
     "ABC-1",
     "--background",
   );
 
   assert.equal(started.code, 0, started.output);
-  assert.equal(await gateOf(box, "ticket-1"), "Not actionable: no repro");
-  box.send("ticket-1", "ok");
-  assert.equal((await box.waitForEnd("ticket-1"))["phase"], "done");
+  assert.equal(await gateOf(box, "ship-1"), "Not actionable: no repro");
+  box.send("ship-1", "ok");
+  assert.equal((await box.waitForEnd("ship-1"))["phase"], "done");
 
-  const labels = activities(box, "ticket-1").map((span) => span.label);
-  assert.deepEqual(labels, [await description("triage.ts")]);
+  const labels = activities(box, "ship-1").map((span) => span.label);
+  assert.deepEqual(labels, [
+    await description("work.ts"),
+    await description("triage.ts"),
+  ]);
 });
 
 test("the catalog triage workflow gates a split before returning it", async (t) => {
@@ -498,6 +567,99 @@ test("the catalog implement workflow stops after its round bound", async (t) => 
   assert.equal(result.approved, false);
   assert.equal(result.findings.length, 2);
   assert.equal(box.sessions().length, 4);
+});
+
+test("the catalog ship-local workflow commits, holds, then lands the branch on main", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","findings":"none","message":"fix: pin the footer"}',
+  );
+  outsideReady(box);
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "ship-local.ts"),
+    "--ticket",
+    "the footer scrolls",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "ship-local-1", "pin the footer", "approve");
+  await answerGate(
+    box,
+    "ship-local-1",
+    "penguin-the-footer-scrolls is ready",
+    "done",
+  );
+  const ended = await box.waitForEnd("ship-local-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], {
+    landed: true,
+    sha: "abc1234",
+    reason: "",
+  });
+  assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
+  assert.deepEqual(box.lines("merged.txt"), ["penguin-the-footer-scrolls true"]);
+
+  const labels = activities(box, "ship-local-1").map((span) => span.label);
+  assert.ok(labels.includes(await description("commit.ts")), labels.join(", "));
+  assert.ok(labels.includes(await description("land.ts")), labels.join(", "));
+});
+
+test("the catalog land workflow gives a rebase conflict to an agent, then moves main", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"resolved":true,"notes":"kept both sides"}');
+  box.writeAdapter("git", conflictVcs);
+  box.setAgent('{"resolved":true,"notes":"kept both sides"}', "prompts.txt");
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "land.ts"),
+    "--branch",
+    "penguin-ABC-1",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+  const ended = await box.waitForEnd("land-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], {
+    landed: true,
+    sha: "abc1234",
+    reason: "",
+  });
+  assert.deepEqual(box.lines("continued.txt"), ["continued"]);
+  assert.deepEqual(box.lines("merged.txt"), ["penguin-ABC-1 true"]);
+
+  const [prompt] = box.invocations("prompts.txt");
+  assert.match(String(prompt), /src\/footer\.ts/);
+});
+
+test("the catalog commit workflow writes nothing when the tree is clean", async (t) => {
+  const box = sandbox(t);
+  catalogReady(box, '{"message":"fix: pin the footer"}');
+  box.writeAdapter("git", fakeVcs);
+  box.write("clean.txt", "clean");
+
+  const started = box.penguin(
+    "run",
+    path.join(examples, "commit.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+  const ended = await box.waitForEnd("commit-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], {
+    committed: false,
+    message: "",
+    reason: "",
+  });
+  assert.equal(box.exists("committed.txt"), false);
+  assert.equal(box.sessions().length, 0);
 });
 
 test("the catalog review-pr workflow approves a clean PR and follows it to the close", async (t) => {

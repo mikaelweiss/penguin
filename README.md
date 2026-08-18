@@ -30,21 +30,25 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install fills `~/.penguin/` with eight workflows, their skills, four adapters, and a tsconfig for editor types. One of them is a pipeline:
+Install fills `~/.penguin/` with twelve workflows, their skills, four adapters, and a tsconfig for editor types. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
 
-- `pn run ticket --ticket ABC-123`: ticket to merged PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
+- `pn run ship --ticket ABC-123`: ticket to open PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
+- `pn run ship-local --ticket "the footer scrolls"`: the same work, landed instead of proposed. It commits, holds until you answer done, then rebases onto main and moves main to it.
+- `pn run review-pr --pr 42`: review an open PR, post the findings, approve when nothing blocks, and review again on every push until it closes.
+- `pn run make-workflow --idea "..."`: design, write, and review a new workflow.
 
-The other seven are small workflows. Each one runs alone, and the pipeline calls all but `review-pr` and `verify`:
+A step is one bare verb. Each one runs alone, and the pipelines call them:
 
+- `pn run work --ticket ABC-123`: triage, then plan and implement each task in a worktree. The middle of both pipelines.
 - `pn run triage --ticket ABC-123`: is the ticket ready to work on, why, and the tasks that build it.
 - `pn run plan --ticket ABC-123`: the plan and its acceptance checks: questions gate first, then an approve-or-revise gate.
 - `pn run implement --task "..."`: implement in the current repository, review each round, up to `--rounds`.
 - `pn run review --acceptance acceptance.md`: one review of the working tree against the checks.
-- `pn run verify`: run the checks of your repository and report what fails.
-- `pn run pr`: open the pull request, then a gate loop that runs address-feedback until you answer done.
-- `pn run review-pr --pr 42`: fetch the PR diff, review it into a findings file, then a gate that posts it as a PR comment.
+- `pn run commit`: the agent writes the message, penguin stages and commits.
+- `pn run land --branch penguin-ABC-1`: rebase the branch onto main until it is clean, with an agent on each conflict, then fast-forward main to it.
+- `pn run open-pr`: open the pull request, then a gate loop that runs address-feedback until you answer done.
 
-The pipeline is the small ones called as functions (Compose workflows, below).
+The pipelines are the steps called as functions (Compose workflows, below).
 
 `~/.penguin/adapters/` holds the adapters: `claude` (the agent), `git`, `gh`, and `jira`. Every catalog entry is an ordinary file after the copy: edit, delete, or replace it freely.
 
@@ -59,7 +63,7 @@ import { z } from "zod";
 const Triage = z.object({ actionable: z.boolean(), reason: z.string(), tasks: z.array(z.string()) });
 
 export default workflow({
-  description: "ticket to merged PR",
+  description: "ticket to open pull request",
   params: z.object({ ticket: z.string() }),
 
   async run({ params, agent, github, gate }) {
@@ -79,10 +83,10 @@ export default workflow({
 pn list workflows                 # name, params, and description
 pn list skills --verbose          # plus scope, source, and file
 pn list adapters                  # role, implementation, and description
-pn run ticket --ticket ABC-123    # by name, or by path: pn run ./ticket.ts
-pn run ticket --ticket ABC-123 --background
+pn run ship --ticket ABC-123      # by name, or by path: pn run ./ship.ts
+pn run ship --ticket ABC-123 --background
 pn ps                             # the live runs
-pn attach ticket-1                # watch one again
+pn attach ship-1                  # watch one again
 ```
 
 `list` is how you see what penguin has. Each entry is a block: the name and the params it takes, then the description under it. `--verbose` adds a line for where the entry comes from. `run` validates the params against the schema, creates the run, starts the run process, and attaches your terminal to it. With no workflow it lists them. It opens with one line, the run name and the agent it uses:
@@ -99,9 +103,9 @@ $ pn list workflows
 implement  --task <text> [--acceptance <text>] [--dir <text>] [--rounds <number>]
   implement a change and close the review findings
 
-ticket  --ticket <text>
-  ticket to merged PR: triage splits the ticket, then plan, implement, review per
-  task, then the pull request
+ship  --ticket <text> [--rounds <number>]
+  ticket to open pull request: triage splits the ticket, then plan and implement
+  per task in a worktree, then the pull request
 ```
 
 A param prints as `--name <text>`, a boolean as `--name`, and an enum as `--name <one|two>`. Brackets mark an optional param. A long description wraps to the width of the terminal.

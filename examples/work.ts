@@ -2,41 +2,55 @@ import { workflow } from "penguin";
 import { z } from "zod";
 import implement from "./implement.ts";
 import plan from "./plan.ts";
-import pr from "./pr.ts";
 import triage from "./triage.ts";
 
+function slug(ticket: string): string {
+  const cut = ticket.trim().replaceAll(/[^A-Za-z0-9]+/g, "-").slice(0, 40);
+  const trimmed = cut.replaceAll(/^-+|-+$/g, "");
+  return trimmed === "" ? "work" : trimmed;
+}
+
 export default workflow({
-  description: "ticket to merged PR: triage splits the ticket, then plan, implement, review per task, then the pull request",
-  params: z.object({ ticket: z.string() }),
+  description: "triage a ticket, then plan and implement each task in a worktree",
+  params: z.object({
+    ticket: z.string(),
+    rounds: z.number().int().min(1).default(3),
+  }),
 
   async run(ctx) {
     const { params, vcs, view, gate } = ctx;
+    const nothing = { done: false, path: "", branch: "", acceptance: "" };
+
     const triaged = await triage(ctx, { ticket: params.ticket });
     if (!triaged.actionable) {
       await gate(`Not actionable: ${triaged.reason}`);
-      return;
+      return nothing;
     }
 
-    const ws = await vcs.worktree.add(`penguin-${params.ticket}`);
+    const branch = `penguin-${slug(params.ticket)}`;
+    const ws = await vcs.worktree.add(branch);
     if (!ws.ok) {
       await gate(`No worktree: ${ws.reason}`);
-      return;
+      return nothing;
     }
     view.watch({ elapsed: true, diff: ws.path });
 
+    const checks: string[] = [];
     const total = triaged.tasks.length;
     for (const [index, task] of triaged.tasks.entries()) {
       await view.activity(`task ${index + 1} of ${total}`, async () => {
         const planned = await plan(ctx, { ticket: task, dir: ws.path });
+        checks.push(planned.acceptance);
         const built = await implement(ctx, {
           task: planned.plan,
           acceptance: planned.acceptance,
           dir: ws.path,
+          rounds: params.rounds,
         });
         if (!built.approved) await gate("The review did not approve the change. Take a look.");
       });
     }
 
-    return pr(ctx, { dir: ws.path });
+    return { done: true, path: ws.path, branch, acceptance: checks.join("\n\n") };
   },
 });
