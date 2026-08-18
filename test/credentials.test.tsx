@@ -8,7 +8,7 @@ import { loadAdapter } from "../src/adapters.ts";
 import * as credentials from "../src/credentials.ts";
 import { type Left, RunView } from "../src/tui/run-view.tsx";
 import type { CredentialRequest, Host } from "../src/types.ts";
-import { homed, press, screen, typeText } from "./drive.tsx";
+import { frameWith, homed, press, screen, typeText } from "./drive.tsx";
 import { type Event, type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
 const jiraFile = fileURLToPath(new URL("../examples/adapters/jira.ts", import.meta.url));
@@ -103,7 +103,7 @@ async function refusedRun(
     <RunView name="w-1" agent="agent none" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   t.after(() => setup.renderer.destroy());
-  await setup.waitForFrame((text) => text.includes("What now?"));
+  await frameWith(setup, (text) => text.includes("What now?"));
   return { setup, left };
 }
 
@@ -180,10 +180,10 @@ test("invariant 12: a credential reaches the store, never the run's files", asyn
   let ended: Event;
   let shown = "";
   try {
-    await setup.waitForFrame((text) => text.includes("Your tracker site"));
+    await frameWith(setup, (text) => text.includes("Your tracker site"));
     await typeText(setup, "acme.tracker.test");
     await press(setup, ["RETURN"]);
-    await setup.waitForFrame((text) => text.includes("A tracker API token"));
+    await frameWith(setup, (text) => text.includes("A tracker API token"));
     await typeText(setup, TOKEN);
     shown = setup.captureCharFrame();
     await press(setup, ["RETURN"]);
@@ -260,10 +260,10 @@ test("a refused credential takes every value again", async (t) => {
   const { setup } = await refusedRun(t, box);
 
   await press(setup, ["ARROW_DOWN", "RETURN"]);
-  await setup.waitForFrame((text) => text.includes("Your tracker site"));
+  await frameWith(setup, (text) => text.includes("Your tracker site"));
   await typeText(setup, "new.tracker.test");
   await press(setup, ["RETURN"]);
-  await setup.waitForFrame((text) => text.includes("A tracker API token"));
+  await frameWith(setup, (text) => text.includes("A tracker API token"));
   await typeText(setup, TOKEN);
   const shown = setup.captureCharFrame();
   await press(setup, ["RETURN"]);

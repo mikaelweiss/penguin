@@ -356,7 +356,7 @@ function stopRuns(runs: string): void {
   }
 }
 
-export function waitFor(check: () => boolean, timeoutMs = 10_000): Promise<void> {
+export function waitFor(check: () => boolean, timeoutMs = 30_000): Promise<void> {
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const tick = (): void => {

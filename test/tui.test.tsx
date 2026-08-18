@@ -13,6 +13,7 @@ import { controlFor } from "../src/tui/gate.ts";
 import { plainAttach } from "../src/tui/plain.ts";
 import { type Left, RunView } from "../src/tui/run-view.tsx";
 import type { ViewEvent } from "../src/types.ts";
+import { frameWith } from "./drive.tsx";
 
 type Box = {
   home: string;
@@ -111,15 +112,15 @@ test("the dashboard lists the live runs, and d reveals the done ones", async (t)
   ]);
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   try {
-    const first = await setup.waitForFrame((text) => text.includes("plan-1"));
+    const first = await frameWith(setup, (text) => text.includes("plan-1"));
     assert.match(first, /plan-1 {2}\/work\/plan\.ts {2}running: drafting the plan/);
     assert.ok(!first.includes("ticket-2"), "a done run listed with the live ones");
     await press(setup, ["d"]);
-    const revealed = await setup.waitForFrame((text) => text.includes("ticket-2"));
+    const revealed = await frameWith(setup, (text) => text.includes("ticket-2"));
     assert.match(revealed, /^ done *$/m);
     assert.match(revealed, /ticket-2 {2}\/work\/ticket-2\.ts {2}done/);
     await press(setup, ["d"]);
-    const hidden = await setup.waitForFrame((text) => !text.includes("ticket-2"));
+    const hidden = await frameWith(setup, (text) => !text.includes("ticket-2"));
     assert.ok(!hidden.includes("ticket-2"), "d left the done run on the screen");
   } finally {
     setup.renderer.destroy();
@@ -136,10 +137,10 @@ test("a run whose process died lists as done", async (t) => {
   fs.writeFileSync(path.join(dead, "lock"), "0");
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   try {
-    const first = await setup.waitForFrame((text) => text.includes("plan-1"));
+    const first = await frameWith(setup, (text) => text.includes("plan-1"));
     assert.ok(!first.includes("ticket-2"), "a run with a dead lock listed as live");
     await press(setup, ["d"]);
-    const revealed = await setup.waitForFrame((text) => text.includes("ticket-2"));
+    const revealed = await frameWith(setup, (text) => text.includes("ticket-2"));
     assert.match(revealed, /ticket-2 {2}\/work\/ticket-2\.ts {2}done/);
   } finally {
     setup.renderer.destroy();
@@ -156,9 +157,9 @@ test("enter on a revealed done run opens it", async (t) => {
   const opened: Open[] = [];
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await frameWith(setup, (text) => text.includes("plan-1"));
     await press(setup, ["d"]);
-    await setup.waitForFrame((text) => text.includes("ticket-2"));
+    await frameWith(setup, (text) => text.includes("ticket-2"));
     await press(setup, ["ARROW_DOWN", "RETURN"]);
     assert.deepEqual(opened, [{ name: "ticket-2" }]);
   } finally {
@@ -184,9 +185,9 @@ test("right jumps to the first needs-you line, and a hidden done run does not sh
   ]);
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("Land the branch?"));
+    await frameWith(setup, (text) => text.includes("Land the branch?"));
     await press(setup, ["l"]);
-    const frame = await setup.waitForFrame((text) => / > review-1 {2}review-1 {2}Ship these findings\?/.test(text));
+    const frame = await frameWith(setup, (text) => / > review-1 {2}review-1 {2}Ship these findings\?/.test(text));
     assert.match(frame, / > review-1 {2}review-1 {2}Ship these findings\?/);
     assert.ok(!/ > review-1 {2}review-1 {2}Land the branch\?/.test(frame), "right skipped the first need");
   } finally {
@@ -212,11 +213,11 @@ test("right jumps to the needs-you list with the done section open", async (t) =
   ]);
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("Land the branch?"));
+    await frameWith(setup, (text) => text.includes("Land the branch?"));
     await press(setup, ["d"]);
-    await setup.waitForFrame((text) => text.includes("ticket-2"));
+    await frameWith(setup, (text) => text.includes("ticket-2"));
     await press(setup, ["l"]);
-    const frame = await setup.waitForFrame((text) => / > review-1 {2}review-1 {2}Ship these findings\?/.test(text));
+    const frame = await frameWith(setup, (text) => / > review-1 {2}review-1 {2}Ship these findings\?/.test(text));
     assert.match(frame, / > review-1 {2}review-1 {2}Ship these findings\?/);
     assert.ok(!/ > .*ticket-2 {2}/.test(frame), "right stopped on a done run");
   } finally {
@@ -236,9 +237,9 @@ test("d with no live run selects the first done run", async (t) => {
   ]);
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("no live run"));
+    await frameWith(setup, (text) => text.includes("no live run"));
     await press(setup, ["d"]);
-    const revealed = await setup.waitForFrame((text) => text.includes("ticket-1"));
+    const revealed = await frameWith(setup, (text) => text.includes("ticket-1"));
     assert.match(revealed, / > .*ticket-1 {2}/);
     assert.ok(!/ > .*ticket-2 {2}/.test(revealed), "d selected the last done run");
   } finally {
@@ -260,7 +261,7 @@ test("needs you names the run, the path, and the question", async (t) => {
   );
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   try {
-    const frame = await setup.waitForFrame((text) => text.includes("Ship these findings?"));
+    const frame = await frameWith(setup, (text) => text.includes("Ship these findings?"));
     assert.match(frame, /needs you/);
     assert.match(frame, /review-1 {2}review-1 \/ review round 1 {2}Ship these findings\?/);
   } finally {
@@ -284,7 +285,7 @@ test("the run tree draws nested activities with their state glyphs", async (t) =
   );
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await setup.waitForFrame((text) => text.includes("write the plan"));
+    const frame = await frameWith(setup, (text) => text.includes("write the plan"));
     assert.match(frame, /plan the work ticket: 42/);
     assert.match(frame, /✓ write the plan/);
     assert.match(frame, /planner/);
@@ -312,7 +313,7 @@ test("an enum gate draws a list, and the choice sends one gate-addressed message
   );
   const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("approve") && text.includes("reject"));
+    await frameWith(setup, (text) => text.includes("approve") && text.includes("reject"));
     await press(setup, ["ARROW_DOWN", "RETURN"]);
     assert.deepEqual(inbox(dir), [
       { at: inbox(dir)[0]?.["at"], text: "reject", gate: "g-1" },
@@ -334,7 +335,7 @@ test("typing a message sends it to the run", async (t) => {
   );
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("to run"));
+    await frameWith(setup, (text) => text.includes("to run"));
     await type(setup, "wrap it up");
     await press(setup, ["RETURN"]);
     const sent = inbox(dir);
@@ -370,10 +371,10 @@ test("a credential goes to the store, and never to the screen or the inbox", asy
   );
   const setup = await screen(<RunView name="ticket-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("Jira needs a credential"));
+    await frameWith(setup, (text) => text.includes("Jira needs a credential"));
     await type(setup, "acme.atlassian.net");
     await press(setup, ["RETURN"]);
-    await setup.waitForFrame((text) => text.includes("the API token"));
+    await frameWith(setup, (text) => text.includes("the API token"));
     await type(setup, "s3cr3t-value");
     const masked = setup.captureCharFrame();
     assert.ok(!masked.includes("s3cr3t-value"), "the secret reached the screen");
@@ -403,7 +404,7 @@ test("a done run opens read-only, with no input bar", async (t) => {
   ]);
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
   try {
-    const frame = await setup.waitForFrame((text) => text.includes("this run is done"));
+    const frame = await frameWith(setup, (text) => text.includes("this run is done"));
     assert.ok(!frame.includes("to run >"), "a done run offered an input bar");
   } finally {
     setup.renderer.destroy();
@@ -456,9 +457,9 @@ test("a message to the selected session names it", async (t) => {
   );
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
-    await setup.waitForFrame((text) => text.includes("planner"));
+    await frameWith(setup, (text) => text.includes("planner"));
     await press(setup, ["ARROW_DOWN"]);
-    await setup.waitForFrame((text) => text.includes("to planner"));
+    await frameWith(setup, (text) => text.includes("to planner"));
     await type(setup, "focus on the tests");
     await press(setup, ["RETURN"]);
     const sent = inbox(dir);
@@ -483,7 +484,7 @@ test("a paste of many lines sends as one message with its newlines", async (t) =
   const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   const pasted = ["one", "two", "three", "four", "five", "six", "seven"].join("\n");
   try {
-    await setup.waitForFrame((text) => text.includes("to run"));
+    await frameWith(setup, (text) => text.includes("to run"));
     await act(async () => {
       await setup.mockInput.pasteBracketedText(pasted);
     });
@@ -511,7 +512,7 @@ test("q leaves a run opened from the dashboard back to it", async (t) => {
     />,
   );
   try {
-    await setup.waitForFrame((text) => text.includes("to run"));
+    await frameWith(setup, (text) => text.includes("to run"));
     await press(setup, ["q"]);
     assert.deepEqual(left, [{ back: true, code: 0 }]);
   } finally {
@@ -527,7 +528,7 @@ test("q goes to the dashboard from a directly started run", async (t) => {
     <RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   try {
-    await setup.waitForFrame((text) => text.includes("to run"));
+    await frameWith(setup, (text) => text.includes("to run"));
     await press(setup, ["q"]);
     assert.deepEqual(left, [{ back: true, code: 0 }]);
   } finally {
@@ -545,7 +546,7 @@ test("a param question draws its notes under it, and nothing else", async () => 
     />,
   );
   try {
-    const frame = await setup.waitForFrame((text) => text.includes("--count <number>"));
+    const frame = await frameWith(setup, (text) => text.includes("--count <number>"));
     const rows = frame.split("\n").map((row) => row.trimEnd()).filter((row) => row !== "");
     assert.deepEqual(rows.slice(0, 3), ["--count <number>", "  --count needs a number", "  enter skips"]);
     await type(setup, "7");
@@ -567,7 +568,7 @@ test("a directly started run leaves penguin when it ends on screen", async (t) =
     <RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   try {
-    await setup.waitForFrame((text) => text.includes("this run is done"));
+    await frameWith(setup, (text) => text.includes("this run is done"));
     assert.deepEqual(left, [{ back: false, code: 1, note: "run plan-1 failed: the step blew up" }]);
   } finally {
     setup.renderer.destroy();
@@ -582,7 +583,7 @@ test("Ctrl-C on a run whose process is gone goes to the dashboard", async (t) =>
     <RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   try {
-    await setup.waitForFrame((text) => text.includes("to run"));
+    await frameWith(setup, (text) => text.includes("to run"));
     await act(async () => {
       fs.rmSync(path.join(dir, "lock"));
       setup.mockInput.pressCtrlC();
@@ -605,7 +606,7 @@ test("a param question with choices takes the one the cursor sits on", async () 
     />,
   );
   try {
-    const frame = await setup.waitForFrame((text) => text.includes("which workflow?"));
+    const frame = await frameWith(setup, (text) => text.includes("which workflow?"));
     assert.match(frame, /\(o\) count {2}count things/);
     assert.match(frame, /\( \) ticket \(global\)/);
     await press(setup, ["ARROW_DOWN", "RETURN"]);

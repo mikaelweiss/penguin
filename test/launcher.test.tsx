@@ -6,7 +6,7 @@ import type { TestRendererSetup } from "@opentui/core/testing";
 import { act } from "react";
 import { short } from "../src/paths.ts";
 import { Dashboard, type Open } from "../src/tui/dashboard.tsx";
-import { homed, press, screen, typeText } from "./drive.tsx";
+import { frameWith, homed, press, screen, typeText } from "./drive.tsx";
 import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
 const ESC_FLUSH = 60;
@@ -93,7 +93,7 @@ test("n lists every workflow with its params and its description", async (t) => 
   const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  const frame = await setup.waitForFrame((text) => text.includes("take a note and a mode"));
+  const frame = await frameWith(setup, (text) => text.includes("take a note and a mode"));
 
   assert.match(frame, /notes {2}--note <text> --mode <fast\|slow>/);
 });
@@ -107,11 +107,11 @@ test("esc closes the launcher, and claims no run", async (t) => {
 
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
-  await setup.waitForFrame((text) => text.includes("no live run"));
+  await frameWith(setup, (text) => text.includes("no live run"));
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("take a note"));
+  await frameWith(setup, (text) => text.includes("take a note"));
   await escape(setup);
-  const frame = await setup.waitForFrame((text) => text.includes("no live run"));
+  const frame = await frameWith(setup, (text) => text.includes("no live run"));
 
   assert.match(frame, /n starts a workflow/);
   assert.deepEqual(opened, []);
@@ -134,13 +134,13 @@ test("invariant 1: the launcher owns the keyboard while it is open", async (t) =
     />,
   );
   t.after(() => setup.renderer.destroy());
-  await setup.waitForFrame((text) => text.includes("no live run"));
+  await frameWith(setup, (text) => text.includes("no live run"));
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("no workflow file in"));
+  await frameWith(setup, (text) => text.includes("no workflow file in"));
   await press(setup, ["q", "RETURN", "ARROW_DOWN", "d"]);
   assert.match(setup.captureCharFrame(), /no workflow file in/);
   await escape(setup);
-  const frame = await setup.waitForFrame((text) => text.includes("no live run"));
+  const frame = await frameWith(setup, (text) => text.includes("no live run"));
 
   assert.equal(exits, 0, "q under the launcher left penguin");
   assert.deepEqual(opened, []);
@@ -156,7 +156,7 @@ test("a workflow with no param starts on one enter, and its run opens", async (t
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("say hello and stop"));
+  await frameWith(setup, (text) => text.includes("say hello and stop"));
   await press(setup, ["RETURN"]);
   await waitFor(() => opened.length > 0);
   const ended = await box.waitForEnd("hello-1");
@@ -179,7 +179,7 @@ test("the view opens on a run the process already holds", async (t) => {
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("wait for one answer"));
+  await frameWith(setup, (text) => text.includes("wait for one answer"));
   await press(setup, ["RETURN"]);
   await waitFor(() => opened.length > 0);
   const holder = box.holder("hold-1");
@@ -202,12 +202,12 @@ test("the launcher asks each param in order and writes the answers into the run"
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("take a note and a mode"));
+  await frameWith(setup, (text) => text.includes("take a note and a mode"));
   await press(setup, ["RETURN"]);
-  await setup.waitForFrame((text) => text.includes("--note <text>"));
+  await frameWith(setup, (text) => text.includes("--note <text>"));
   await typeText(setup, "write it down");
   await press(setup, ["RETURN"]);
-  const list = await setup.waitForFrame((text) => text.includes("--mode <fast|slow>"));
+  const list = await frameWith(setup, (text) => text.includes("--mode <fast|slow>"));
   await press(setup, ["ARROW_DOWN", "RETURN"]);
   await waitFor(() => opened.length > 0);
 
@@ -229,16 +229,16 @@ test("an empty answer skips an optional param, and a bad one asks again", async 
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("count the things"));
+  await frameWith(setup, (text) => text.includes("count the things"));
   await press(setup, ["RETURN"]);
-  await setup.waitForFrame((text) => text.includes("--note <text>"));
+  await frameWith(setup, (text) => text.includes("--note <text>"));
   await press(setup, ["RETURN"]);
-  await setup.waitForFrame((text) => text.includes("--total <number>"));
+  await frameWith(setup, (text) => text.includes("--total <number>"));
   await press(setup, ["RETURN"]);
   assert.match(setup.captureCharFrame(), /--total <number>/, "a required param asked again");
   await typeText(setup, "many");
   await press(setup, ["RETURN"]);
-  const warned = await setup.waitForFrame((text) => text.includes("needs a number"));
+  const warned = await frameWith(setup, (text) => text.includes("needs a number"));
   await typeText(setup, "4");
   await press(setup, ["RETURN"]);
   await waitFor(() => opened.length > 0);
@@ -257,12 +257,12 @@ test("an answer the schema refuses names the param and the reason", async (t) =>
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("keep a long note"));
+  await frameWith(setup, (text) => text.includes("keep a long note"));
   await press(setup, ["RETURN"]);
-  await setup.waitForFrame((text) => text.includes("--note <text>"));
+  await frameWith(setup, (text) => text.includes("--note <text>"));
   await typeText(setup, "abc");
   await press(setup, ["RETURN"]);
-  const frame = await setup.waitForFrame((text) => text.includes("invalid params:"));
+  const frame = await frameWith(setup, (text) => text.includes("invalid params:"));
 
   assert.match(frame, /note: Too small/, "the line that names the param shows too");
   assert.deepEqual(opened, []);
@@ -278,9 +278,9 @@ test("a params schema that is no object claims no run directory", async (t) => {
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("loose"));
+  await frameWith(setup, (text) => text.includes("loose"));
   await press(setup, ["RETURN"]);
-  const frame = await setup.waitForFrame((text) => text.includes("Object.entries"));
+  const frame = await frameWith(setup, (text) => text.includes("Object.entries"));
 
   assert.match(frame, /esc closes/, "the list takes the keyboard again");
   assert.deepEqual(opened, []);
@@ -296,11 +296,11 @@ test("esc during the questions leaves no run directory", async (t) => {
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  await setup.waitForFrame((text) => text.includes("take a note"));
+  await frameWith(setup, (text) => text.includes("take a note"));
   await press(setup, ["RETURN"]);
-  await setup.waitForFrame((text) => text.includes("--note <text>"));
+  await frameWith(setup, (text) => text.includes("--note <text>"));
   await escape(setup);
-  const frame = await setup.waitForFrame((text) => text.includes("no live run"));
+  const frame = await frameWith(setup, (text) => text.includes("no live run"));
 
   assert.match(frame, /n starts a workflow/);
   assert.deepEqual(opened, []);
@@ -315,7 +315,7 @@ test("an empty workflow list names the directories penguin read", async (t) => {
   const setup = await screen(<Dashboard onOpen={(one) => opened.push(one)} onExit={nothing} />, 240);
   t.after(() => setup.renderer.destroy());
   await press(setup, ["n"]);
-  const frame = await setup.waitForFrame((text) => text.includes("no workflow file in"));
+  const frame = await frameWith(setup, (text) => text.includes("no workflow file in"));
   await press(setup, ["RETURN"]);
 
   assert.ok(frame.includes(short(path.join(process.cwd(), ".penguin"))), "the project directory shows");

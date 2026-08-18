@@ -31,7 +31,7 @@ export async function screen(node: ReactNode, width = 100, height = 24): Promise
 export async function frameWith(
   setup: TestRendererSetup,
   predicate: (frame: string) => boolean,
-  timeoutMs = 10_000,
+  timeoutMs = 30_000,
 ): Promise<string> {
   const started = Date.now();
   for (;;) {

@@ -102,7 +102,7 @@ test("invariant 3: q goes to the dashboard and the run continues", async (t) => 
     <RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   try {
-    const shown = await setup.waitForFrame((text) => text.includes("keep going?"));
+    const shown = await frameWith(setup, (text) => text.includes("keep going?"));
     assert.match(shown, /keep going\?/);
     await press(setup, ["q"]);
   } finally {
@@ -851,7 +851,7 @@ test("invariant 16: the input bar holds the bottom of the screen", async (t) => 
   homed(t, box);
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
-    const frame = await setup.waitForFrame((text) => text.includes("answer: Blockers"));
+    const frame = await frameWith(setup, (text) => text.includes("answer: Blockers"));
     const rows = frame.trimEnd().split("\n");
     assert.match(rows.at(-1) ?? "", /enter sends|type to send/, "the input hint is the last row");
     assert.match(rows.at(-2) ?? "", /answer: Blockers/, "the input bar sits above it");
@@ -876,7 +876,7 @@ test("invariant 15: a paste sends as one message, newlines kept", async (t) => {
   );
   let ended: Event;
   try {
-    await setup.waitForFrame((text) => text.includes("keep going?"));
+    await frameWith(setup, (text) => text.includes("keep going?"));
     await paste(setup, "line one\nline two");
     await press(setup, ["RETURN"]);
     ended = await box.waitForEnd("w-1");
@@ -903,9 +903,9 @@ test("invariant 15: a collapsed paste sends its full text, never the token", asy
   const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   let ended: Event;
   try {
-    await setup.waitForFrame((text) => text.includes("keep going?"));
+    await frameWith(setup, (text) => text.includes("keep going?"));
     await paste(setup, big);
-    await setup.waitForFrame((text) => text.includes("[pasted #1, 10 lines]"));
+    await frameWith(setup, (text) => text.includes("[pasted #1, 10 lines]"));
     await press(setup, ["RETURN"]);
     ended = await box.waitForEnd("w-1");
   } finally {

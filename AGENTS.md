@@ -13,5 +13,5 @@ The specs describe the present system, and only the present system. They contain
 
 - Every engine invariant in `20-architecture.md` is pinned by a test. A change that touches one updates its test.
 - Spec and code move together: a behavior change lands with its spec edit in the same commit.
-- Quality gates for every change: `tsc --noEmit` and the test suite (`bun test`) pass.
+- Quality gates for every change, both commands exactly as written: `bun run check` and `bun run test`. `bun run test` carries the flags the suite needs, so a bare `bun test` is the wrong command. Run each one once, send its output to a file, and read the file. Never run a gate twice to see the same output a second way.
 - Personal workflow ideas go in `WORKFLOWS.md`, not in the specs.

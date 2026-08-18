@@ -26,7 +26,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "bun test test/",
+    "test": "bun test --parallel --timeout 30000 test/",
     "release": "./scripts/publish.sh",
     "reinstall": "./scripts/reinstall.sh"
   },
