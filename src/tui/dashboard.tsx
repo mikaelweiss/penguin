@@ -1,6 +1,7 @@
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
+import { CopyList, useCopy } from "./input.tsx";
 import { Launcher } from "./launcher.tsx";
 import { machine, machineLine, type Machine, strained } from "./memory.ts";
 import type { Attention } from "./projection.ts";
@@ -10,6 +11,8 @@ import { age, Feed, type RunRow, runRows, stateOf } from "./watch.ts";
 
 const RESCAN = 2000;
 const SPIN = 200;
+const keysLine = (showDone: boolean): string =>
+  `  arrows or hjkl move, enter opens, y copies the directory, n starts a workflow, d ${showDone ? "hides" : "shows"} done, q quits`;
 
 export type Open = { name: string; node?: string; agent?: string };
 
@@ -34,6 +37,8 @@ export function Dashboard({
   const [showDone, setShowDone] = useState(false);
   const [host, setHost] = useState<Machine | undefined>(undefined);
   const [launching, setLaunching] = useState(false);
+  const [note, setNote] = useState("");
+  const copying = useCopy(setNote);
 
   const live = rows.filter((row) => row.live);
   const done = rows.filter((row) => !row.live);
@@ -95,29 +100,47 @@ export function Dashboard({
   ];
   const at = Math.max(0, Math.min(lines.length - 1, cursor));
 
+  /** A run line answers for its whole tree, a needs-you line for the node that waits. */
+  const dirsOf = (line: Line): string[] => {
+    if (line.kind === "run") {
+      const feed = feeds.current.get(line.row.name);
+      return feed === undefined ? [line.row.cwd] : feed.projection.directories("root");
+    }
+    const feed = feeds.current.get(line.need.run);
+    return feed === undefined ? [] : feed.projection.directories(line.need.item.node);
+  };
+
+  const move = (to: number): void => {
+    setCursor(to);
+    setNote("");
+  };
+
   useKeyboard((key: KeyEvent) => {
     if (key.eventType === "release") return;
     if (launching) return;
-    if (key.name === "q" || (key.ctrl && key.name === "c")) return onExit();
+    if (key.ctrl && key.name === "c") return onExit();
+    if (copying.isOpen()) return copying.key(key);
+    if (key.name === "q") return onExit();
     if (key.name === "n") return setLaunching(true);
-    if (key.name === "up" || key.name === "k") return setCursor(Math.max(0, at - 1));
-    if (key.name === "down" || key.name === "j") return setCursor(Math.min(lines.length - 1, at + 1));
-    if (key.name === "left" || key.name === "h") return setCursor(0);
-    if (key.name === "right" || key.name === "l") return setCursor(shown.length);
+    if (key.name === "up" || key.name === "k") return move(Math.max(0, at - 1));
+    if (key.name === "down" || key.name === "j") return move(Math.min(lines.length - 1, at + 1));
+    if (key.name === "left" || key.name === "h") return move(0);
+    if (key.name === "right" || key.name === "l") return move(shown.length);
     if (key.name === "d") {
-      setCursor(
+      move(
         showDone
           ? afterHide(at, live.length, done.length, needs.length)
           : afterReveal(at, live.length, done.length, needs.length),
       );
       return setShowDone(!showDone);
     }
+    const line = lines[at];
+    if (line === undefined) return;
     if (key.name === "return" || key.name === "enter") {
-      const line = lines[at];
-      if (line === undefined) return;
       if (line.kind === "run") return onOpen({ name: line.row.name });
       return onOpen({ name: line.need.run, node: line.need.item.node });
     }
+    if (key.name === "y") return copying.start(dirsOf(line));
   });
 
   if (launching) {
@@ -176,9 +199,11 @@ export function Dashboard({
             width={size.width}
           />
         ))}
-        <text fg={ink.faint}>
-          {`  arrows or hjkl move, enter opens, n starts a workflow, d ${showDone ? "hides" : "shows"} done, q quits`}
-        </text>
+        {copying.isOpen() ? (
+          <CopyList dirs={copying.dirs} cursor={copying.cursor} width={size.width} />
+        ) : (
+          <text fg={ink.faint}>{cut(note === "" ? keysLine(showDone) : note, size.width)}</text>
+        )}
       </box>
     </box>
   );

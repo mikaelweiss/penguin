@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import type { KeyEvent } from "@opentui/core";
+import { type ReactNode, useReducer, useRef } from "react";
+import { copyText } from "../clipboard.ts";
 import type { Editor } from "./editor.ts";
 import { cut } from "./text.ts";
 import { ink } from "./theme.ts";
@@ -126,4 +128,83 @@ export function Fields({
 
 function mask(field: FormField, text: string): string {
   return field.secret ? "*".repeat(text.length) : text;
+}
+
+export type Copying = {
+  dirs: string[];
+  cursor: number;
+  isOpen(): boolean;
+  start(dirs: string[]): void;
+  key(event: KeyEvent): void;
+};
+
+type Copy = { dirs: string[]; cursor: number };
+
+const CLOSED: Copy = { dirs: [], cursor: 0 };
+
+/**
+ * The `y` key on any screen. One directory copies at once, several open the picker.
+ * A ref holds the picker: a terminal delivers several keys with no render between them.
+ */
+export function useCopy(report: (note: string) => void): Copying {
+  const held = useRef<Copy>(CLOSED);
+  const [, bump] = useReducer((count: number) => count + 1, 0);
+  const set = (next: Copy): void => {
+    held.current = next;
+    bump();
+  };
+  const copy = async (target: string): Promise<void> => {
+    const done = await copyText(target);
+    report("ok" in done ? `copied ${target}` : done.warn);
+  };
+  return {
+    dirs: held.current.dirs,
+    cursor: held.current.cursor,
+    isOpen: () => held.current.dirs.length > 0,
+    start(dirs: string[]): void {
+      const only = dirs[0];
+      if (only === undefined) return;
+      if (dirs.length === 1) return void copy(only);
+      set({ dirs, cursor: 0 });
+    },
+    /** A terminal folds an escape that precedes another key into a modifier, and neither key acts. */
+    key(event: KeyEvent): void {
+      if (event.meta || event.ctrl) return;
+      const open = held.current;
+      const step = (delta: number): void => {
+        set({ ...open, cursor: (open.cursor + open.dirs.length + delta) % open.dirs.length });
+      };
+      if (event.name === "up" || event.name === "k") return step(-1);
+      if (event.name === "down" || event.name === "j") return step(1);
+      if (event.name === "escape") return set(CLOSED);
+      if (event.name === "return" || event.name === "enter") {
+        const target = open.dirs[open.cursor];
+        set(CLOSED);
+        if (target !== undefined) void copy(target);
+      }
+    },
+  };
+}
+
+/** The directory picker, the same on every screen. */
+export function CopyList({
+  dirs,
+  cursor,
+  width,
+}: {
+  dirs: string[];
+  cursor: number;
+  width: number;
+}): ReactNode {
+  return (
+    <Choices
+      title="copy which directory?"
+      choices={dirs.map((one) => ({ label: one }))}
+      cursor={cursor}
+      chosen={[]}
+      many={false}
+      keys="arrows move, enter copies, esc cancels"
+      width={width}
+    />
+  );
 }

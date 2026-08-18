@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { readRun } from "../create.ts";
+import { type RunRecord, readRun } from "../create.ts";
 import { Tail } from "../follow.ts";
 import { holder } from "../lock.ts";
 import { eventsPath, runDir, runJsonPath, runsRoot, short } from "../paths.ts";
@@ -11,6 +11,7 @@ export type RunRow = {
   name: string;
   dir: string;
   workflow: string;
+  cwd: string;
   live: boolean;
   createdAt: number;
 };
@@ -24,7 +25,7 @@ export function runRows(): RunRow[] {
     if (!entry.isDirectory()) continue;
     const dir = runDir(entry.name);
     if (!fs.existsSync(runJsonPath(dir))) continue;
-    let record: { workflow: string; createdAt: string };
+    let record: RunRecord;
     try {
       record = readRun(dir);
     } catch {
@@ -34,6 +35,7 @@ export function runRows(): RunRow[] {
       name: entry.name,
       dir,
       workflow: short(record.workflow),
+      cwd: startedIn(record),
       live: holder(dir) !== undefined,
       createdAt: Date.parse(record.createdAt),
     });
@@ -56,10 +58,13 @@ export function age(millis: number): string {
 }
 
 /** The folder the run was started from, or this process's folder when the record says nothing. */
+function startedIn(record: RunRecord): string {
+  return typeof record.cwd === "string" && record.cwd !== "" ? record.cwd : process.cwd();
+}
+
 function cwdOf(dir: string): string {
   try {
-    const record = readRun(dir);
-    return typeof record.cwd === "string" && record.cwd !== "" ? record.cwd : process.cwd();
+    return startedIn(readRun(dir));
   } catch {
     return process.cwd();
   }

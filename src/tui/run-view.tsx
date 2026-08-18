@@ -1,7 +1,7 @@
 import { decodePasteBytes, type KeyEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { copyText, pasteImage } from "../clipboard.ts";
+import { pasteImage } from "../clipboard.ts";
 import * as credentials from "../credentials.ts";
 import { holder } from "../lock.ts";
 import { attachmentsDir, credentialFile, runDir } from "../paths.ts";
@@ -10,7 +10,7 @@ import { type Ask, type Fix, fixes, notes, why } from "./credential.ts";
 import { Editor } from "./editor.ts";
 import { controlFor } from "./gate.ts";
 import { deliver, provide } from "./inbox.ts";
-import { Choices, Fields, InputBar } from "./input.tsx";
+import { Choices, type Copying, CopyList, Fields, InputBar, useCopy } from "./input.tsx";
 import type { Attention } from "./projection.ts";
 import { brief, statusLine } from "./status.ts";
 import { cut } from "./text.ts";
@@ -30,13 +30,9 @@ type Pick = { key: string; cursor: number; chosen: number[] };
 
 type Form = { key: string; at: number; values: Record<string, string>; buffer: string; retype: boolean };
 
-type Copy = { dirs: string[]; cursor: number };
-
 const NO_PICK: Pick = { key: "", cursor: 0, chosen: [] };
 
 const NO_FORM: Form = { key: "", at: 0, values: {}, buffer: "", retype: false };
-
-const NO_COPY: Copy = { dirs: [], cursor: 0 };
 
 /** One run on the whole screen: its tree, the selected transcript, and the input. */
 export function RunView({
@@ -65,10 +61,9 @@ export function RunView({
   const [selected, setSelected] = useState<Selection>({ kind: "node", id: node ?? "root" });
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
-  const held = useRef<{ pick: Pick; form: Form; copy: Copy }>({ pick: NO_PICK, form: NO_FORM, copy: NO_COPY });
+  const held = useRef<{ pick: Pick; form: Form }>({ pick: NO_PICK, form: NO_FORM });
   const pick = held.current.pick;
   const form = held.current.form;
-  const copying = held.current.copy;
   const setPick = (next: Pick): void => {
     held.current.pick = next;
     bump();
@@ -77,15 +72,12 @@ export function RunView({
     held.current.form = next;
     bump();
   };
-  const setCopy = (next: Copy): void => {
-    held.current.copy = next;
-    bump();
-  };
   const [alive, setAlive] = useState(() => holder(dir) !== undefined);
   const [frame, setFrame] = useState(0);
   const [since, setSince] = useState(() => Date.now());
   const [diff, setDiff] = useState("");
   const [note, setNote] = useState("");
+  const copying = useCopy(setNote);
 
   useEffect(() => {
     const off = feed.follow(bump);
@@ -219,34 +211,10 @@ export function RunView({
     bump();
   };
 
-  const copyDir = async (target: string): Promise<void> => {
-    const done = await copyText(target);
-    setNote("ok" in done ? `copied ${target}` : done.warn);
-  };
-
   const startCopy = (): void => {
-    const dirs =
-      selected.kind === "session" ? [projection.sessionDir(selected.id)] : projection.directories(selected.id);
-    const only = dirs[0];
-    if (dirs.length === 1 && only !== undefined) return void copyDir(only);
-    setCopy({ dirs, cursor: 0 });
-  };
-
-  /** A terminal folds an escape that precedes another key into a modifier, and neither key acts. */
-  const copyKey = (key: KeyEvent): void => {
-    if (key.meta || key.ctrl) return;
-    const open = held.current.copy;
-    const step = (delta: number): void => {
-      setCopy({ ...open, cursor: (open.cursor + open.dirs.length + delta) % open.dirs.length });
-    };
-    if (key.name === "up" || key.name === "k") return step(-1);
-    if (key.name === "down" || key.name === "j") return step(1);
-    if (key.name === "escape") return setCopy(NO_COPY);
-    if (key.name === "return" || key.name === "enter") {
-      const target = open.dirs[open.cursor];
-      setCopy(NO_COPY);
-      if (target !== undefined) void copyDir(target);
-    }
+    copying.start(
+      selected.kind === "session" ? [projection.sessionDir(selected.id)] : projection.directories(selected.id),
+    );
   };
 
   const applyFix = async (fix: Fix, refused: Ask): Promise<void> => {
@@ -404,7 +372,7 @@ export function RunView({
   useKeyboard((key: KeyEvent) => {
     if (key.eventType === "release") return;
     if (key.ctrl && key.name === "c") return stopRun();
-    if (held.current.copy.dirs.length > 0) return copyKey(key);
+    if (copying.isOpen()) return copying.key(key);
     if (ended) {
       if (key.name === "q") leave({ back: true, code: 0 });
       else if (key.name === "y") startCopy();
@@ -437,7 +405,7 @@ export function RunView({
   });
 
   usePaste((event) => {
-    if (ended || held.current.copy.dirs.length > 0 || asked !== undefined || list !== undefined) return;
+    if (ended || copying.isOpen() || asked !== undefined || list !== undefined) return;
     editor.paste(decodePasteBytes(event.bytes));
     bump();
   });
@@ -511,7 +479,7 @@ function Bottom({
   gate: Extract<Attention, { kind: "gate" }> | undefined;
   list: { list: string[]; many: boolean } | undefined;
   pick: Pick;
-  copy: Copy;
+  copy: Copying;
   editor: Editor;
   selected: Selection;
   sessionName: string | undefined;
@@ -520,17 +488,7 @@ function Bottom({
   width: number;
 }): ReactNode {
   if (copy.dirs.length > 0) {
-    return (
-      <Choices
-        title="copy which directory?"
-        choices={copy.dirs.map((one) => ({ label: one }))}
-        cursor={copy.cursor}
-        chosen={[]}
-        many={false}
-        keys="arrows move, enter copies, esc cancels"
-        width={width}
-      />
-    );
+    return <CopyList dirs={copy.dirs} cursor={copy.cursor} width={width} />;
   }
   if (ended) {
     return (

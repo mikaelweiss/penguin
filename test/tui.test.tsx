@@ -909,6 +909,266 @@ test("a missing clipboard tool says so, and the view keeps drawing", async (t) =
   }
 });
 
+test("y on a dashboard run line copies the run's one directory", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied /work/wt-a");
+    assert.equal(clip.file().trim(), "/work/wt-a");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("y on a dashboard run line with three directories draws the list, and a burst picks the third", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b" },
+      { type: "session", id: "s3", name: "critic", use: "claude", dir: "/work/wt-c" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await burst(setup, ["y", "ARROW_DOWN", "ARROW_DOWN", "RETURN"]);
+    await shown(setup, "copied /work/wt-c");
+    assert.equal(clip.file().trim(), "/work/wt-c");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("y on a needs-you line copies that node's directory, not the whole run's", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "review-1",
+    [
+      { type: "run", phase: "started", run: "review-1" },
+      { type: "activity", phase: "start", id: "a1", label: "review round 1" },
+      { type: "session", id: "s1", name: "critic", use: "claude", dir: "/work/wt-a", activity: "a1" },
+      { type: "activity", phase: "start", id: "a2", label: "write the code" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b", activity: "a2" },
+      { type: "gate", phase: "asked", id: "g-1", question: "Ship these findings?", activity: "a1" },
+      { type: "state", state: "blocked", detail: "Ship these findings?" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("Ship these findings?"));
+    await press(setup, ["ARROW_DOWN", "y"]);
+    await shown(setup, "copied /work/wt-a");
+    assert.equal(clip.file().trim(), "/work/wt-a");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("y on a needs-you line whose node holds two sessions draws the list", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "review-1",
+    [
+      { type: "run", phase: "started", run: "review-1" },
+      { type: "activity", phase: "start", id: "a1", label: "review round 1" },
+      { type: "session", id: "s1", name: "critic", use: "claude", dir: "/work/wt-a", activity: "a1" },
+      { type: "session", id: "s2", name: "second", use: "claude", dir: "/work/wt-b", activity: "a1" },
+      { type: "gate", phase: "asked", id: "g-1", question: "Ship these findings?", activity: "a1" },
+      { type: "state", state: "blocked", detail: "Ship these findings?" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("Ship these findings?"));
+    await press(setup, ["ARROW_DOWN", "y"]);
+    const frame = await setup.waitForFrame((text) => text.includes("copy which directory?"));
+    assert.match(frame, /\/work\/wt-a/);
+    assert.match(frame, /\/work\/wt-b/);
+    await press(setup, ["RETURN"]);
+    await shown(setup, "copied /work/wt-a");
+    assert.equal(clip.file().trim(), "/work/wt-a");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("esc closes the dashboard picker, copies nothing, and the cursor stays put", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b" },
+    ],
+    { live: true },
+  );
+  box.run("ticket-2", [{ type: "run", phase: "started", run: "ticket-2" }], { live: true });
+  let exits = 0;
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={() => (exits += 1)} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("ticket-2"));
+    await press(setup, ["y"]);
+    await setup.waitForFrame((text) => text.includes("copy which directory?"));
+    await press(setup, ["ARROW_DOWN", "q", "ESCAPE"]);
+    await idle(setup);
+    const frame = setup.captureCharFrame();
+    assert.ok(!frame.includes("copy which directory?"), "the copy list stayed open");
+    assert.match(frame, /> . plan-1/);
+    assert.equal(exits, 0);
+    assert.equal(clip.file(), "");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("ctrl-c exits the dashboard while the picker is open", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b" },
+    ],
+    { live: true },
+  );
+  let exits = 0;
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={() => (exits += 1)} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await press(setup, ["y"]);
+    await setup.waitForFrame((text) => text.includes("copy which directory?"));
+    await act(async () => {
+      setup.mockInput.pressCtrlC();
+    });
+    await idle(setup);
+    assert.equal(exits, 1);
+    assert.equal(clip.file(), "");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a done run on the dashboard still copies its recorded directory", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run("plan-1", [
+    { type: "run", phase: "started", run: "plan-1" },
+    { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+    { type: "run", phase: "done", run: "plan-1", result: "done" },
+  ]);
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("no live run"));
+    await press(setup, ["d"]);
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied /work/wt-a");
+    assert.equal(clip.file().trim(), "/work/wt-a");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("invariant 19: a session directory that no longer exists still copies as text", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  const gone = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-gone-")));
+  fs.rmSync(gone, { recursive: true, force: true });
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: gone },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied ");
+    assert.equal(clip.file().trim(), gone);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("y on a run with no session copies the cwd from run.json", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied /work");
+    assert.equal(clip.file().trim(), "/work");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a dashboard with no line answers y with no copy", async (t) => {
+  sandbox(t);
+  const clip = clipboard(t);
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("no live run"));
+    await press(setup, ["y"]);
+    await idle(setup);
+    assert.equal(clip.file(), "");
+    assert.match(setup.captureCharFrame(), /y copies the directory/);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a missing clipboard tool says so on the dashboard hint line", async (t) => {
+  const box = sandbox(t);
+  noTools(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("plan-1"));
+    await press(setup, ["y"]);
+    const frame = await shown(setup, "could not copy");
+    assert.ok(!frame.includes("y copies the directory"), "the key hints kept the line");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("a gate shape picks the control the viewer draws", () => {
   assert.deepEqual(controlFor({ type: "string", enum: ["one", "two"] }), { list: ["one", "two"], many: false });
   assert.deepEqual(controlFor({ type: "array", items: { enum: ["a", "b"] } }), { list: ["a", "b"], many: true });
