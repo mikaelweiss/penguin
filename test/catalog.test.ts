@@ -3,11 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { installed, renderEnv } from "../src/adapters.ts";
+import { z } from "zod";
+import { installed, loadAdapter, renderEnv } from "../src/adapters.ts";
 import { load } from "../src/loader.ts";
+import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "../src/types.ts";
 import { type Sandbox, sandbox, waitFor } from "./helpers.ts";
 
 const examples = fileURLToPath(new URL("../examples", import.meta.url));
+
+const codexFile = path.join(examples, "adapters", "codex.ts");
 
 const workflowFiles = [
   "commit.ts",
@@ -938,8 +942,275 @@ test("every catalog skill follows the SKILL.md format", () => {
   }
 });
 
+type Recorded = { argv: string[]; stdin: string | undefined };
+
+type Scripted = { lines?: string[]; tail?: string; code?: number; stderr?: string };
+
+function codexHost(script: (argv: string[]) => Scripted): {
+  host: Host;
+  runs: Recorded[];
+  events: ViewEvent[];
+} {
+  const runs: Recorded[] = [];
+  const events: ViewEvent[] = [];
+  const host: Host = {
+    cwd: process.cwd(),
+    shell: async () => ({ code: 0, stdout: "", stderr: "" }),
+    exec: async (argv, options) => {
+      runs.push({ argv, stdin: options?.stdin });
+      const scripted = script(argv);
+      for (const line of scripted.lines ?? []) options?.onOutput?.(`${line}\n`, "stdout");
+      if (scripted.tail !== undefined) options?.onOutput?.(scripted.tail, "stdout");
+      if (scripted.stderr !== undefined) options?.onOutput?.(scripted.stderr, "stderr");
+      return scripted.code ?? 0;
+    },
+    wait: <T>(_label: string, body: () => Promise<T>) => body(),
+    emit: (event) => {
+      events.push(event);
+    },
+    credential: (async () => ({})) as Host["credential"],
+  };
+  return { host, runs, events };
+}
+
+function codexTurn(over: Partial<AgentTurn> = {}): AgentTurn {
+  return { session: "s-1", first: true, cwd: process.cwd(), prompt: "do it", options: {}, ...over };
+}
+
+function jsonl(...lines: unknown[]): string[] {
+  return lines.map((line) => JSON.stringify(line));
+}
+
+const envelopeSchema = {
+  type: "object",
+  properties: {
+    result: {
+      type: "object",
+      properties: { plan: { type: "string" } },
+      required: ["plan"],
+      additionalProperties: false,
+    },
+    blocked: {
+      type: "object",
+      properties: { question: { type: "string" } },
+      required: ["question"],
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+test("the codex adapter opens a thread, resumes it, and keeps one thread per session", async () => {
+  const definition = await loadAdapter(codexFile);
+  const { host, runs } = codexHost(() => ({
+    lines: jsonl({ type: "thread.started", thread_id: "t-9" }, { type: "turn.completed" }),
+  }));
+  const api = definition.build(host) as AgentAdapter;
+
+  await api.turn(codexTurn({ prompt: "first" }));
+  await api.turn(codexTurn({ first: false, prompt: "second" }));
+  await api.turn(codexTurn({ session: "s-2", prompt: "other" }));
+
+  assert.deepEqual(runs[0]?.argv.slice(0, 2), ["codex", "exec"]);
+  assert.equal(runs[0]?.argv.includes("resume"), false, "the first turn opens a conversation");
+  assert.equal(runs[0]?.argv.at(-1), "-", "codex reads the prompt from stdin");
+  assert.equal(runs[0]?.stdin, "first");
+  assert.ok(runs[0]?.argv.includes("--json"));
+  assert.ok(runs[0]?.argv.includes("--skip-git-repo-check"));
+  assert.deepEqual(runs[1]?.argv.slice(0, 4), ["codex", "exec", "resume", "t-9"]);
+  assert.equal(runs[1]?.stdin, "second");
+  assert.equal(runs[2]?.argv.includes("resume"), false, "another session opens its own thread");
+});
+
+test("the codex session options become -c overrides", async () => {
+  const definition = await loadAdapter(codexFile);
+  const { host, runs } = codexHost(() => ({ lines: jsonl({ type: "turn.completed" }) }));
+  const api = definition.build(host) as AgentAdapter;
+
+  await api.turn(codexTurn());
+  await api.turn(codexTurn({ session: "s-2", options: { model: "o3", sandbox: "read-only" } }));
+
+  assert.ok(runs[0]?.argv.join(" ").includes('sandbox_mode="workspace-write"'), "a turn edits its worktree");
+  assert.equal(runs[0]?.argv.join(" ").includes("model="), false);
+  assert.ok(runs[1]?.argv.join(" ").includes('model="o3"'));
+  assert.ok(runs[1]?.argv.join(" ").includes('sandbox_mode="read-only"'));
+});
+
+test("the codex stream becomes text, thinking, and one event per tool call", async () => {
+  const definition = await loadAdapter(codexFile);
+  const { host, events } = codexHost(() => ({
+    lines: [
+      ...jsonl(
+        { type: "thread.started", thread_id: "t-1" },
+        { type: "item.completed", item: { id: "i1", type: "reasoning", text: "read the spec" } },
+        { type: "item.started", item: { id: "i2", type: "command_execution", command: "bun  test\n test/" } },
+        { type: "item.completed", item: { id: "i2", type: "command_execution", command: "bun test test/" } },
+        {
+          type: "item.completed",
+          item: { id: "i3", type: "file_change", changes: [{ path: "src/a.ts" }, { path: "src/b.ts" }] },
+        },
+        {
+          type: "item.completed",
+          item: { id: "i4", type: "mcp_tool_call", server: "jira", tool: "search", arguments: { jql: "project = ABC" } },
+        },
+        { type: "item.completed", item: { id: "i5", type: "web_search", query: "codex exec json" } },
+        { type: "item.completed", item: { id: "i6", type: "todo_list", items: [] } },
+        {
+          type: "item.started",
+          item: {
+            id: "i7",
+            type: "collab_tool_call",
+            tool: "spawn_agent",
+            prompt: "review the diff",
+            receiver_thread_ids: ["t-2"],
+          },
+        },
+        { type: "item.completed", item: { id: "i8", type: "error", message: "the patch did not apply" } },
+      ),
+      "{ not json at all",
+    ],
+    tail: JSON.stringify({ type: "item.completed", item: { id: "i9", type: "agent_message", text: "all done" } }),
+  }));
+  const api = definition.build(host) as AgentAdapter;
+
+  const outcome = await api.turn(codexTurn());
+
+  assert.deepEqual(outcome, { ok: true, value: null });
+  assert.deepEqual(
+    events.flatMap((event) => (event.type === "agent" ? [[event.kind, event.text, event.detail]] : [])),
+    [
+      ["thinking", "read the spec", undefined],
+      ["tool", "shell", "bun test test/"],
+      ["tool", "edit", "src/a.ts, src/b.ts"],
+      ["tool", "jira.search", '{"jql":"project = ABC"}'],
+      ["tool", "search", "codex exec json"],
+      ["tool", "collab.spawn_agent", "review the diff"],
+      ["text", "the patch did not apply", undefined],
+      ["text", "all done", undefined],
+    ],
+  );
+});
+
+test("the codex adapter writes a strict schema and strips the nulls the schema added", async () => {
+  const definition = await loadAdapter(codexFile);
+  let written: Record<string, unknown> | undefined;
+  let schemaFile = "";
+  let calls = 0;
+  const { host } = codexHost((argv) => {
+    schemaFile = argv[argv.indexOf("--output-schema") + 1] ?? "";
+    written = JSON.parse(fs.readFileSync(schemaFile, "utf8")) as Record<string, unknown>;
+    calls += 1;
+    const value = JSON.stringify({ result: { plan: "ship it" }, blocked: null });
+    return {
+      lines: jsonl(
+        { type: "thread.started", thread_id: "t-2" },
+        {
+          type: "item.completed",
+          item: { id: `i${calls}`, type: "agent_message", text: calls === 1 ? value : `\`\`\`json\n${value}\n\`\`\`` },
+        },
+      ),
+    };
+  });
+  const api = definition.build(host) as AgentAdapter;
+
+  const first = await api.turn(codexTurn({ schema: envelopeSchema }));
+  const fenced = await api.turn(codexTurn({ first: false, schema: envelopeSchema }));
+
+  const properties = written?.["properties"] as Record<string, Record<string, unknown>>;
+  assert.deepEqual(written?.["required"], ["result", "blocked"], "every property is required");
+  assert.deepEqual(properties["result"]?.["type"], ["object", "null"], "an optional property is nullable");
+  assert.deepEqual(properties["result"]?.["required"], ["plan"]);
+  assert.equal(properties["result"]?.["additionalProperties"], false);
+  assert.deepEqual(first, { ok: true, value: { result: { plan: "ship it" } } }, "the added null is gone");
+  assert.deepEqual(fenced, { ok: true, value: { result: { plan: "ship it" } } }, "a fenced block still parses");
+  assert.equal(fs.existsSync(path.dirname(schemaFile)), false, "the turn removes its temp directory");
+});
+
+test("the codex strict rewrite reaches enums, literals, and tuple members", async () => {
+  const definition = await loadAdapter(codexFile);
+  const schema = z.toJSONSchema(
+    z.object({
+      tag: z.enum(["a", "b"]).optional(),
+      mode: z.literal("fast").optional(),
+      pair: z.tuple([z.object({ a: z.string(), b: z.string().optional() }), z.number()]),
+    }),
+  ) as unknown as Record<string, unknown>;
+  let written: Record<string, unknown> = {};
+  const { host } = codexHost((argv) => {
+    written = JSON.parse(fs.readFileSync(argv[argv.indexOf("--output-schema") + 1] ?? "", "utf8")) as Record<
+      string,
+      unknown
+    >;
+    return {
+      lines: jsonl({
+        type: "item.completed",
+        item: {
+          id: "i1",
+          type: "agent_message",
+          text: JSON.stringify({ tag: null, mode: null, pair: [{ a: "one", b: null }, 2] }),
+        },
+      }),
+    };
+  });
+  const api = definition.build(host) as AgentAdapter;
+
+  const outcome = await api.turn(codexTurn({ schema }));
+
+  const properties = written["properties"] as Record<string, Record<string, unknown>>;
+  assert.deepEqual(properties["tag"]?.["enum"], ["a", "b", null], "an optional enum takes null");
+  assert.deepEqual(properties["mode"]?.["enum"], ["fast", null], "an optional literal takes null");
+  assert.equal(properties["mode"]?.["const"], undefined, "the const gives way to the enum");
+  const member = (properties["pair"]?.["prefixItems"] as Record<string, unknown>[])[0];
+  assert.deepEqual(member?.["required"], ["a", "b"], "a tuple member is strict too");
+  const inner = member?.["properties"] as Record<string, Record<string, unknown>>;
+  assert.deepEqual(inner["b"]?.["type"], ["string", "null"]);
+  assert.deepEqual(outcome, { ok: true, value: { pair: [{ a: "one" }, 2] } }, "every added null is gone");
+});
+
+test("a codex failure comes back as an error the engine can retry", async () => {
+  const definition = await loadAdapter(codexFile);
+  const crashed = codexHost(() => ({ code: 2, stderr: "warming up\nstream error: retry limit\n" }));
+  const refused = codexHost(() => ({ lines: jsonl({ type: "turn.failed", error: { message: "the model refused" } }) }));
+  const broke = codexHost(() => ({ lines: jsonl({ type: "error", message: "no credentials" }) }));
+  const silent = codexHost(() => ({ lines: jsonl({ type: "thread.started", thread_id: "t-3" }) }));
+
+  const exited = await (definition.build(crashed.host) as AgentAdapter).turn(codexTurn());
+  const failed = await (definition.build(refused.host) as AgentAdapter).turn(codexTurn());
+  const errored = await (definition.build(broke.host) as AgentAdapter).turn(codexTurn());
+  const empty = await (definition.build(silent.host) as AgentAdapter).turn(codexTurn({ schema: envelopeSchema }));
+
+  assert.deepEqual(exited, { ok: false, error: "codex exited with code 2: stream error: retry limit" });
+  assert.deepEqual(failed, { ok: false, error: "the model refused" });
+  assert.deepEqual(errored, { ok: false, error: "no credentials" });
+  assert.deepEqual(empty, { ok: false, error: "codex returned no structured output" });
+});
+
+test("a failed codex turn keeps the thread id, so the next turn resumes", async () => {
+  const definition = await loadAdapter(codexFile);
+  let calls = 0;
+  const { host, runs } = codexHost(() => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        lines: jsonl(
+          { type: "thread.started", thread_id: "t-7" },
+          { type: "turn.failed", error: { message: "the sandbox denied the write" } },
+        ),
+      };
+    }
+    return { lines: jsonl({ type: "thread.started", thread_id: "t-7" }) };
+  });
+  const api = definition.build(host) as AgentAdapter;
+
+  const failed = await api.turn(codexTurn());
+  await api.turn(codexTurn({ first: false }));
+
+  assert.deepEqual(failed, { ok: false, error: "the sandbox denied the write" });
+  assert.deepEqual(runs[1]?.argv.slice(0, 4), ["codex", "exec", "resume", "t-7"]);
+});
+
 test("the catalog adapters and tsconfig are ready to copy", () => {
-  for (const name of ["claude", "git", "gh", "jira"]) {
+  for (const name of ["claude", "codex", "git", "gh", "jira"]) {
     assert.ok(
       fs.existsSync(path.join(examples, "adapters", `${name}.ts`)),
       name,
