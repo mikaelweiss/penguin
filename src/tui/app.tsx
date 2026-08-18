@@ -8,14 +8,14 @@ export type Start = { kind: "dashboard" } | { kind: "run"; name: string; agent: 
 
 type Screen =
   | { kind: "dashboard" }
-  | { kind: "run"; name: string; agent: string; node?: string; canReturn: boolean };
+  | { kind: "run"; name: string; agent: string; node?: string; ownsExit: boolean };
 
 /** The whole screen: the dashboard, or one run, with q moving between them. */
 export function App({ start, onDone }: { start: Start; onDone(left: Left): void }): ReactNode {
   const [screen, setScreen] = useState<Screen>(() =>
     start.kind === "dashboard"
       ? { kind: "dashboard" }
-      : { kind: "run", name: start.name, agent: start.agent, canReturn: false },
+      : { kind: "run", name: start.name, agent: start.agent, ownsExit: true },
   );
   if (screen.kind === "dashboard") {
     const open = (target: Open): void =>
@@ -24,7 +24,7 @@ export function App({ start, onDone }: { start: Start; onDone(left: Left): void 
         name: target.name,
         agent: "",
         ...(target.node === undefined ? {} : { node: target.node }),
-        canReturn: true,
+        ownsExit: false,
       });
     return <Dashboard onOpen={open} onExit={() => onDone({ back: false, code: 0 })} />;
   }
@@ -38,7 +38,7 @@ export function App({ start, onDone }: { start: Start; onDone(left: Left): void 
       name={screen.name}
       agent={screen.agent}
       {...(screen.node === undefined ? {} : { node: screen.node })}
-      canReturn={screen.canReturn}
+      ownsExit={screen.ownsExit}
       onLeave={leave}
     />
   );

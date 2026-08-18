@@ -210,7 +210,7 @@ test("pn help prints the usage", (t) => {
   assert.match(help.stdout, /pn attach <run>/);
   assert.match(help.stdout, /pn sync-skills/);
   assert.match(help.stdout, /the dashboard: every run, and what needs you/);
-  assert.match(help.stdout, /q leaves, Ctrl-C stops the run/);
+  assert.match(help.stdout, /q goes to the dashboard, Ctrl-C stops the run/);
   assert.doesNotMatch(help.stdout, /resume/);
 });
 

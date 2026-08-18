@@ -157,7 +157,7 @@ In a run view, the run's tree fills the left pane: each activity, session, and s
 - Select an open gate and the bar takes your answer, addressed to that gate, so ten parallel questions never collide. An enum gate draws a list instead.
 - Select a session and the bar sends to it.
 - Select anything else and the bar sends to the run. When the run is not blocked, the bar says the message queues.
-- With the input empty, arrows move through the tree. `q` leaves, back to the dashboard when you came from it.
+- With the input empty, arrows move through the tree. `q` goes to the dashboard.
 - `Ctrl-C` stops the run. penguin kills the steps in flight and records the stop.
 
 Closing the terminal never touches the run.

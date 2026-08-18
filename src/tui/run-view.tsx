@@ -39,13 +39,13 @@ export function RunView({
   name,
   agent,
   node,
-  canReturn,
+  ownsExit,
   onLeave,
 }: {
   name: string;
   agent: string;
   node?: string;
-  canReturn: boolean;
+  ownsExit: boolean;
   onLeave(left: Left): void;
 }): ReactNode {
   const dir = useMemo(() => runDir(name), [name]);
@@ -149,18 +149,18 @@ export function RunView({
 
   const stopRun = (): void => {
     const pid = holder(dir);
-    if (pid === undefined) return leave({ back: canReturn, code: 130 });
+    if (pid === undefined) return leave({ back: true, code: 130 });
     try {
       process.kill(pid, "SIGTERM");
     } catch {
-      leave({ back: canReturn, code: 130 });
+      leave({ back: true, code: 130 });
     }
   };
 
   useEffect(() => {
-    if (!ended || canReturn) return;
+    if (!ended || !ownsExit) return;
     leave(farewell(name, projection.phase(), projection.result(), projection.runState().detail, alive));
-  }, [ended, canReturn, name, alive]);
+  }, [ended, ownsExit, name, alive]);
 
   const move = (step: number): void => {
     const at = rows.findIndex((row) => row.kind === selected.kind && row.id === selected.id);
@@ -352,7 +352,7 @@ export function RunView({
       if (key.name === "left") return fold(false);
       if (key.name === "right") return fold(true);
       if (key.name === "return") return fold(closed.has(selected.id));
-      if (key.name === "q") return leave({ back: canReturn, code: 0 });
+      if (key.name === "q") return leave({ back: true, code: 0 });
     }
     const typed = printable(key);
     if (typed === undefined) return;
@@ -364,7 +364,7 @@ export function RunView({
     if (key.eventType === "release") return;
     if (key.ctrl && key.name === "c") return stopRun();
     if (ended) {
-      if (key.name === "q") leave({ back: canReturn, code: 0 });
+      if (key.name === "q") leave({ back: true, code: 0 });
       else if (key.name === "up" || key.name === "k") move(-1);
       else if (key.name === "down" || key.name === "j") move(1);
       else if (key.name === "left" || key.name === "h") fold(false);
@@ -473,7 +473,7 @@ function Bottom({
   warn: string;
   width: number;
 }): ReactNode {
-  if (ended) return <text fg={ink.faint}>{cut("this run is done. q leaves", width)}</text>;
+  if (ended) return <text fg={ink.faint}>{cut("this run is done. q goes to the dashboard", width)}</text>;
   if (asked !== undefined) {
     const key = keyOf(asked);
     if (asked.phase === "rejected" && !(form.key === key && form.retype)) {
@@ -530,7 +530,7 @@ function Bottom({
         : "to run";
   const hints: string[] = [];
   if (warn !== "") hints.push(warn);
-  if (editor.empty) hints.push("arrows move, enter opens, q leaves, type to send");
+  if (editor.empty) hints.push("arrows move, enter opens, q goes to the dashboard, type to send");
   else hints.push("enter sends, esc clears, ctrl-v pastes an image");
   if (!blocked) hints.push("the run is busy: this message queues");
   return <InputBar editor={editor} prompt={`${prompt} >`} hint={hints.join("  ")} width={width} />;

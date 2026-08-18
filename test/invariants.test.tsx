@@ -89,7 +89,7 @@ export default workflow({
   ]);
 });
 
-test("invariant 3: q detaches and the run continues", async (t) => {
+test("invariant 3: q goes to the dashboard and the run continues", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", gateWorkflow);
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
@@ -99,7 +99,7 @@ test("invariant 3: q detaches and the run continues", async (t) => {
   homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
-    <RunView name="w-1" agent="agent fake" canReturn={false} onLeave={(one) => left.push(one)} />,
+    <RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   try {
     const shown = await setup.waitForFrame((text) => text.includes("keep going?"));
@@ -109,10 +109,7 @@ test("invariant 3: q detaches and the run continues", async (t) => {
     setup.renderer.destroy();
   }
 
-  assert.deepEqual(
-    left.map((one) => one.code),
-    [0],
-  );
+  assert.deepEqual(left, [{ back: true, code: 0 }]);
   assert.equal(box.holder("w-1"), holder, "the run kept the lock");
   assert.equal(box.lastState("w-1")?.["state"], "blocked");
   box.send("w-1", "yes");
@@ -831,7 +828,7 @@ test("invariant 16: the status line holds one line, however long the question", 
   await box.waitForState("w-1", "blocked");
 
   homed(t, box);
-  const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
     const frame = await setup.waitForFrame(
       (text) => text.includes("blocked: Blockers") && text.includes(SENTINEL),
@@ -854,7 +851,7 @@ test("invariant 16: the input bar holds the bottom of the screen", async (t) => 
   await box.waitForState("w-1", "blocked");
 
   homed(t, box);
-  const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   try {
     const frame = await setup.waitForFrame((text) => text.includes("answer: Blockers"));
     const rows = frame.trimEnd().split("\n");
@@ -877,7 +874,7 @@ test("invariant 15: a paste sends as one message, newlines kept", async (t) => {
   homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
-    <RunView name="w-1" agent="agent fake" canReturn={false} onLeave={(one) => left.push(one)} />,
+    <RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   let ended: Event;
   try {
@@ -905,7 +902,7 @@ test("invariant 15: a collapsed paste sends its full text, never the token", asy
 
   const big = Array.from({ length: 10 }, (_, n) => `line ${n}`).join("\n");
   homed(t, box);
-  const setup = await screen(<RunView name="w-1" agent="agent fake" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="w-1" agent="agent fake" ownsExit={true} onLeave={nothing} />);
   let ended: Event;
   try {
     await setup.waitForFrame((text) => text.includes("keep going?"));

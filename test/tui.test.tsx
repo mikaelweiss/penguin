@@ -10,7 +10,7 @@ import { Dashboard } from "../src/tui/dashboard.tsx";
 import { Editor } from "../src/tui/editor.ts";
 import { controlFor } from "../src/tui/gate.ts";
 import { plainAttach } from "../src/tui/plain.ts";
-import { RunView } from "../src/tui/run-view.tsx";
+import { type Left, RunView } from "../src/tui/run-view.tsx";
 import type { ViewEvent } from "../src/types.ts";
 
 type Box = {
@@ -154,7 +154,7 @@ test("the run tree draws nested activities with their state glyphs", async (t) =
     ],
     { live: true },
   );
-  const setup = await screen(<RunView name="plan-1" agent="agent claude" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     const frame = await setup.waitForFrame((text) => text.includes("write the plan"));
     assert.match(frame, /plan the work ticket: 42/);
@@ -182,7 +182,7 @@ test("an enum gate draws a list, and the choice sends one gate-addressed message
     ],
     { live: true },
   );
-  const setup = await screen(<RunView name="review-1" agent="agent claude" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     await setup.waitForFrame((text) => text.includes("approve") && text.includes("reject"));
     await press(setup, ["ARROW_DOWN", "RETURN"]);
@@ -204,7 +204,7 @@ test("typing a message sends it to the run", async (t) => {
     ],
     { live: true },
   );
-  const setup = await screen(<RunView name="plan-1" agent="agent claude" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     await setup.waitForFrame((text) => text.includes("to run"));
     await type(setup, "wrap it up");
@@ -240,7 +240,7 @@ test("a credential goes to the store, and never to the screen or the inbox", asy
     ],
     { live: true },
   );
-  const setup = await screen(<RunView name="ticket-1" agent="agent claude" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="ticket-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     await setup.waitForFrame((text) => text.includes("Jira needs a credential"));
     await type(setup, "acme.atlassian.net");
@@ -273,7 +273,7 @@ test("a done run opens read-only, with no input bar", async (t) => {
     { type: "agent", session: "s1", kind: "text", text: "the plan is ready" },
     { type: "run", phase: "done", run: "plan-1", result: "done" },
   ]);
-  const setup = await screen(<RunView name="plan-1" agent="agent claude" canReturn={true} onLeave={nothing} />);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
   try {
     const frame = await setup.waitForFrame((text) => text.includes("this run is done"));
     assert.ok(!frame.includes("to run >"), "a done run offered an input bar");
@@ -326,7 +326,7 @@ test("a message to the selected session names it", async (t) => {
     ],
     { live: true },
   );
-  const setup = await screen(<RunView name="plan-1" agent="agent claude" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   try {
     await setup.waitForFrame((text) => text.includes("planner"));
     await press(setup, ["ARROW_DOWN"]);
@@ -352,7 +352,7 @@ test("a paste of many lines sends as one message with its newlines", async (t) =
     ],
     { live: true },
   );
-  const setup = await screen(<RunView name="plan-1" agent="agent claude" canReturn={false} onLeave={nothing} />);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
   const pasted = ["one", "two", "three", "four", "five", "six", "seven"].join("\n");
   try {
     await setup.waitForFrame((text) => text.includes("to run"));
@@ -378,7 +378,7 @@ test("q leaves a run opened from the dashboard back to it", async (t) => {
     <RunView
       name="plan-1"
       agent="agent claude"
-      canReturn={true}
+      ownsExit={false}
       onLeave={(one) => left.push({ back: one.back, code: one.code })}
     />,
   );
@@ -386,6 +386,59 @@ test("q leaves a run opened from the dashboard back to it", async (t) => {
     await setup.waitForFrame((text) => text.includes("to run"));
     await press(setup, ["q"]);
     assert.deepEqual(left, [{ back: true, code: 0 }]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("q goes to the dashboard from a directly started run", async (t) => {
+  const box = sandbox(t);
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={(one) => left.push(one)} />,
+  );
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await press(setup, ["q"]);
+    assert.deepEqual(left, [{ back: true, code: 0 }]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a directly started run leaves penguin when it ends on screen", async (t) => {
+  const box = sandbox(t);
+  box.run("plan-1", [
+    { type: "run", phase: "started", run: "plan-1" },
+    { type: "run", phase: "error", run: "plan-1", reason: "the step blew up" },
+  ]);
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={(one) => left.push(one)} />,
+  );
+  try {
+    await setup.waitForFrame((text) => text.includes("this run is done"));
+    assert.deepEqual(left, [{ back: false, code: 1, note: "run plan-1 failed: the step blew up" }]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("Ctrl-C on a run whose process is gone goes to the dashboard", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={(one) => left.push(one)} />,
+  );
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await act(async () => {
+      fs.rmSync(path.join(dir, "lock"));
+      setup.mockInput.pressCtrlC();
+    });
+    assert.deepEqual(left, [{ back: true, code: 130 }]);
   } finally {
     setup.renderer.destroy();
   }

@@ -100,7 +100,7 @@ async function refusedRun(
   homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
-    <RunView name="w-1" agent="agent none" canReturn={false} onLeave={(one) => left.push(one)} />,
+    <RunView name="w-1" agent="agent none" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   t.after(() => setup.renderer.destroy());
   await setup.waitForFrame((text) => text.includes("What now?"));
@@ -175,7 +175,7 @@ test("invariant 12: a credential reaches the store, never the run's files", asyn
   homed(t, box);
   const left: Left[] = [];
   const setup = await screen(
-    <RunView name="w-1" agent="agent none" canReturn={false} onLeave={(one) => left.push(one)} />,
+    <RunView name="w-1" agent="agent none" ownsExit={true} onLeave={(one) => left.push(one)} />,
   );
   let ended: Event;
   let shown = "";

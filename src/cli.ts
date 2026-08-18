@@ -34,7 +34,7 @@ usage:
   pn sync-skills [--global|--local]               choose your skill directories again
 
 <workflow> is a name from the list, or a path to a workflow file.
-In a run: type to send a message, q leaves, Ctrl-C stops the run.
+In a run: type to send a message, q goes to the dashboard, Ctrl-C stops the run.
 `;
 
 async function main(argv: string[]): Promise<number> {
