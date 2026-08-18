@@ -133,13 +133,28 @@ async function burst(setup: TestRendererSetup, keys: string[]): Promise<void> {
   await setup.flush();
 }
 
-/** A bare esc byte reaches the parser only after its sequence window closes, so real time passes here. */
-async function escape(setup: TestRendererSetup): Promise<void> {
-  await press(setup, ["ESCAPE"]);
+/** An esc byte reaches the parser only after its sequence window closes, so real time passes here. */
+async function settle(setup: TestRendererSetup): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
   await setup.flush();
+}
+
+async function escape(setup: TestRendererSetup): Promise<void> {
+  await press(setup, ["ESCAPE"]);
+  await settle(setup);
+}
+
+async function chord(
+  setup: TestRendererSetup,
+  key: string,
+  modifiers: { ctrl?: boolean; meta?: boolean },
+): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressKey(key, modifiers);
+  });
+  await settle(setup);
 }
 
 /** The tree pane after esc moved focus onto it. */
@@ -1334,6 +1349,28 @@ test("esc closes the copy list and copies nothing", async (t) => {
   }
 });
 
+test("the bar keeps the queue note beside its key hints", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "state", state: "running", detail: "drafting" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    const typing = await frameWith(setup, (text) => text.includes("to run >"));
+    assert.match(typing, /the run is busy: this message queues/, "the key hints pushed the queue note off the row");
+    await escape(setup);
+    const parked = await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
+    assert.match(parked, /the run is busy: this message queues/, "the tree hint pushed the queue note off the row");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("an escape the terminal folds into the next key copies nothing", async (t) => {
   const box = sandbox(t);
   const clip = clipboard(t);
@@ -1480,6 +1517,38 @@ test("a param question with choices takes the one the cursor sits on", async () 
     assert.match(frame, /\( \) ticket \(global\)/);
     await press(setup, ["ARROW_DOWN", "RETURN"]);
     assert.deepEqual(taken, [[1]]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a chord never reaches the tree keys", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "state", state: "running", detail: "drafting" },
+    ],
+    { live: true },
+  );
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={(one) => left.push(one)} />,
+  );
+  try {
+    await frameWith(setup, (text) => text.includes("planner"));
+    await toTree(setup);
+    await chord(setup, "q", { ctrl: true });
+    await chord(setup, "q", { meta: true });
+    assert.deepEqual(left, [], "a chord left the run view");
+    await press(setup, ["h"]);
+    await frameWith(setup, (text) => !text.includes("planner"));
+    await chord(setup, "l", { ctrl: true });
+    assert.ok(!setup.captureCharFrame().includes("planner"), "ctrl-l unfolded the node");
+    await press(setup, ["l"]);
+    await frameWith(setup, (text) => text.includes("planner"));
   } finally {
     setup.renderer.destroy();
   }
@@ -1692,6 +1761,23 @@ test("a done run on the dashboard still copies its recorded directory", async (t
   }
 });
 
+test("a done run names only the keys it answers to", async (t) => {
+  const box = sandbox(t);
+  box.run("plan-1", [
+    { type: "run", phase: "started", run: "plan-1" },
+    { type: "agent", session: "s1", kind: "text", text: "the plan is ready" },
+    { type: "run", phase: "done", run: "plan-1", result: "done" },
+  ]);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />, 120);
+  try {
+    const frame = await frameWith(setup, (text) => text.includes("this run is done"));
+    assert.match(frame, /y copies the directory, q goes to the dashboard/);
+    assert.ok(!frame.includes("esc types"), "a done run named esc with no input bar to return to");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("invariant 19: a session directory that no longer exists still copies as text", async (t) => {
   const box = sandbox(t);
   const clip = clipboard(t);
@@ -1763,6 +1849,70 @@ test("a missing clipboard tool says so on the dashboard hint line", async (t) =>
     await press(setup, ["y"]);
     const frame = await shown(setup, "could not copy");
     assert.ok(!frame.includes("y copies the directory"), "the key hints kept the line");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("esc on a gate list drops the gate and returns to typing", async (t) => {
+  const box = sandbox(t);
+  const dir = box.run(
+    "review-1",
+    [
+      { type: "run", phase: "started", run: "review-1" },
+      { type: "activity", phase: "start", id: "a1", label: "review round 1" },
+      {
+        type: "gate",
+        phase: "asked",
+        id: "g-1",
+        question: "Ship it?",
+        activity: "a1",
+        schema: { type: "string", enum: ["approve", "reject"] },
+      },
+      { type: "state", state: "blocked", detail: "Ship it?" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="review-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("review round 1"));
+    await toTree(setup);
+    await press(setup, ["ARROW_DOWN"]);
+    await frameWith(setup, (text) => text.includes("(o) approve"));
+    await escape(setup);
+    await frameWith(setup, (text) => text.includes("to run >"));
+    await type(setup, "later");
+    await press(setup, ["RETURN"]);
+    const sent = inbox(dir);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.["text"], "later");
+    assert.equal(sent[0]?.["gate"], undefined);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("ctrl-u empties the draft from anywhere in the line", async (t) => {
+  const box = sandbox(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "state", state: "blocked", detail: "what next?" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run >"));
+    await type(setup, "hold the line");
+    await press(setup, ["ARROW_LEFT", "ARROW_LEFT", "ARROW_LEFT"]);
+    await chord(setup, "u", { ctrl: true });
+    const row = setup
+      .captureCharFrame()
+      .split("\n")
+      .find((one) => one.includes("to run >"));
+    assert.ok(row?.trimEnd().endsWith("to run >"), `ctrl-u left the draft behind: ${row}`);
   } finally {
     setup.renderer.destroy();
   }

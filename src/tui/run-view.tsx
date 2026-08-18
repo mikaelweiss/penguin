@@ -290,6 +290,7 @@ export function RunView({
     }
     if (key.name === "escape") {
       setPick(NO_PICK);
+      setFocus("input");
       return drop();
     }
     if (key.name === "return" || key.name === "enter") {
@@ -299,6 +300,7 @@ export function RunView({
   };
 
   const treeKey = (key: KeyEvent): void => {
+    if (key.ctrl || key.meta) return;
     if (key.name === "q") return leave({ back: true, code: 0 });
     if (key.name === "escape") return setFocus("input");
     if (key.name === "up" || key.name === "k") return move(-1);
@@ -317,7 +319,7 @@ export function RunView({
       }
       if (key.name === "a") editor.head();
       else if (key.name === "e") editor.tail();
-      else if (key.name === "u") editor.killLeft();
+      else if (key.name === "u") editor.clear();
       else if (key.name === "k") editor.killRight();
       else if (key.name === "w") editor.killWord();
       else if (key.name === "left" || key.name === "b") editor.wordLeft();
@@ -394,6 +396,7 @@ export function RunView({
         return bump();
       }
       setPick(NO_PICK);
+      setFocus("input");
       return drop();
     }
     if (key.name === "return" || key.name === "enter") {
@@ -639,8 +642,8 @@ function Bottom({
         : "to run";
   const hints: string[] = [];
   if (note !== "") hints.push(note);
-  hints.push(focused ? "enter sends, esc moves to the tree, ctrl-u clears, ctrl-v pastes an image" : "esc types");
   if (!blocked) hints.push("the run is busy: this message queues");
+  hints.push(focused ? "enter sends, esc moves to the tree, ctrl-u clears, ctrl-v pastes an image" : "esc types");
   return <InputBar editor={editor} prompt={`${prompt} >`} hint={hints.join("  ")} focused={focused} width={width} />;
 }
 
