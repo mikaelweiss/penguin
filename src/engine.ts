@@ -294,7 +294,8 @@ class Execution {
     if ("conflict" in picked) throw new PenguinError(picked.conflict);
     const id = crypto.randomUUID();
     const label = name === undefined || name === "" ? this.sessionName(picked.found.name) : name;
-    this.emit({ type: "session", id, name: label, use: picked.found.name });
+    const dir = this.resolveCwd(cwd);
+    this.emit({ type: "session", id, name: label, use: picked.found.name, dir });
     const api = this.build(picked.found, this.agentHost()) as AgentAdapter;
     let attempts = 0;
     const run = (
@@ -307,7 +308,7 @@ class Execution {
       return this.turn({
         session: id,
         api,
-        cwd: this.resolveCwd(cwd),
+        cwd: dir,
         options: rest,
         skill,
         input: runOptions?.input,

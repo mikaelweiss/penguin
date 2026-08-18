@@ -158,6 +158,7 @@ In a run view, the run's tree fills the left pane: each activity, session, and s
 - Select a session and the bar sends to it.
 - Select anything else and the bar sends to the run. When the run is not blocked, the bar says the message queues.
 - With the input empty, arrows move through the tree. `q` goes to the dashboard.
+- `y` copies the directory the selected node runs in. A node with several directories draws a list to pick one.
 - `Ctrl-C` stops the run. penguin kills the steps in flight and records the stop.
 
 Closing the terminal never touches the run.

@@ -43,8 +43,12 @@ function answer(id: string, question: string, text: string, activity?: string): 
   return clean({ type: "gate", phase: "answered", id, question, answer: text, activity });
 }
 
-function session(id: string, name: string, activity?: string): ViewEvent {
-  return clean({ type: "session", id, name, use: "claude", activity });
+function session(id: string, name: string, activity?: string, dir = "/work"): ViewEvent {
+  return clean({ type: "session", id, name, use: "claude", dir, activity });
+}
+
+function made(name: string, cwd = "/work"): Projection {
+  return new Projection(name, cwd);
 }
 
 function agent(sessionId: string, text: string, activity?: string): ViewEvent {
@@ -73,7 +77,7 @@ const nested: ViewEvent[] = [
 ];
 
 test("subtree precedence picks running over blocked over idle", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, nested);
   assert.equal(stateOf(projection, "root"), "quiet");
 
@@ -104,7 +108,7 @@ test("subtree precedence picks running over blocked over idle", () => {
 });
 
 test("an end outcome names the node state, and an ended child never ends its parent", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, nested);
   feed(projection, [finish("a1", "ok"), finish("a2", "failed")]);
   assert.equal(stateOf(projection, "a1"), "done");
@@ -118,7 +122,7 @@ test("an end outcome names the node state, and an ended child never ends its par
 });
 
 test("an open step outranks an ended activity", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [start("a", "build"), start("a1", "compile", "a"), stepStart("s1", "tsc", "a1"), finish("a", "ok")]);
   assert.equal(stateOf(projection, "a"), "running");
   feed(projection, [stepEnd("s1", "tsc", true, "a1")]);
@@ -126,7 +130,7 @@ test("an open step outranks an ended activity", () => {
 });
 
 test("the tree keeps first-seen child order in preorder", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, nested);
   assert.deepEqual(
     projection.tree().map((node) => node.id),
@@ -137,7 +141,7 @@ test("the tree keeps first-seen child order in preorder", () => {
 });
 
 test("a gate opens on ask and closes on the answer with the same id", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [start("a", "review"), ask("g1", "merge?", "a", { type: "boolean" })]);
   const open = projection.attention();
   assert.equal(open.length, 1);
@@ -156,7 +160,7 @@ test("a gate opens on ask and closes on the answer with the same id", () => {
 });
 
 test("a re-ask with the same id updates one attention entry", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [
     ask("g1", "how many?", undefined, { type: "number" }),
     ask("g2", "which branch?"),
@@ -183,7 +187,7 @@ test("a re-ask with the same id updates one attention entry", () => {
 });
 
 test("a credential goes asked to rejected to ready", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   const fields = [{ name: "token", label: "API token", secret: true, env: "JIRA_TOKEN" }];
   projection.apply({
     type: "credential",
@@ -229,7 +233,7 @@ test("a credential goes asked to rejected to ready", () => {
 });
 
 test("attention lists gates and credentials in ask order", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [ask("g1", "first?")]);
   projection.apply({ type: "credential", phase: "asked", name: "jira", label: "Jira", fields: [] });
   feed(projection, [ask("g2", "second?")]);
@@ -240,7 +244,7 @@ test("attention lists gates and credentials in ask order", () => {
 });
 
 test("waits pair by id and list in start order", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [
     start("a", "deploy"),
     waitStart("w1", "poll ci", "a"),
@@ -269,7 +273,7 @@ test("waits pair by id and list in start order", () => {
 });
 
 test("a composed call detail shows in the node and in the path", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [
     start("c1", "fix-issue", undefined, "issue: 12"),
     start("c2", "review", "c1", "strict: true"),
@@ -282,16 +286,19 @@ test("a composed call detail shows in the node and in the path", () => {
 });
 
 test("an old log without ids or activities projects onto root", () => {
-  const projection = new Projection("legacy");
+  const projection = made("legacy", "/repo");
   for (const line of [
     JSON.stringify({ type: "run", phase: "started", run: "legacy" }),
     JSON.stringify({ type: "step", phase: "start", id: "s1", label: "plan" }),
     JSON.stringify({ type: "step", phase: "end", id: "s1", label: "plan", ok: true }),
+    JSON.stringify({ type: "session", id: "old", name: "planner", use: "claude" }),
     JSON.stringify({ type: "gate", phase: "asked", question: "keep going?" }),
   ]) {
     projection.line(line);
   }
   assert.deepEqual(projection.tree().map((node) => node.id), ["root"]);
+  assert.equal(projection.sessionDir("old"), "/repo");
+  assert.deepEqual(projection.directories("root"), ["/repo"]);
   const open = projection.attention();
   assert.equal(open.length, 1);
   const item = open[0];
@@ -310,7 +317,7 @@ test("an old log without ids or activities projects onto root", () => {
 });
 
 test("an unseen activity attaches to root", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [stepStart("s1", "tsc", "ghost"), ask("g1", "now?", "ghost")]);
   assert.deepEqual(projection.tree().map((node) => node.id), ["root"]);
   assert.equal(projection.attention()[0]?.node, "root");
@@ -320,7 +327,7 @@ test("an unseen activity attaches to root", () => {
 });
 
 test("an unknown type and a garbage line are skipped", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   projection.line("not json at all");
   projection.line("[1,2,3]");
   projection.line(JSON.stringify({ type: "sparkle", message: "hi" }));
@@ -331,7 +338,7 @@ test("an unknown type and a garbage line are skipped", () => {
 });
 
 test("a transcript holds a node's subtree and the root holds the whole story", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [
     { type: "run", phase: "started", run: "demo" },
     start("a", "build"),
@@ -352,7 +359,7 @@ test("a transcript holds a node's subtree and the root holds the whole story", (
 });
 
 test("session and agent events follow the session's node", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [
     start("a", "build"),
     session("s-1", "coder", "a"),
@@ -377,8 +384,50 @@ test("session and agent events follow the session's node", () => {
   assert.deepEqual(projection.sessionTranscript("s-9"), []);
 });
 
+test("a subtree resolves its session directories in first-seen order", () => {
+  const projection = made("demo");
+  feed(projection, [
+    start("a", "build"),
+    start("a1", "compile", "a"),
+    start("a2", "review", "a"),
+    session("s-1", "coder", "a1", "/work/wt-a"),
+    session("s-2", "critic", "a2", "/work/wt-b"),
+    session("s-3", "second coder", "a1", "/work/wt-c"),
+  ]);
+  assert.deepEqual(projection.directories("a"), ["/work/wt-a", "/work/wt-b", "/work/wt-c"]);
+  assert.deepEqual(projection.directories("a1"), ["/work/wt-a", "/work/wt-c"]);
+  assert.deepEqual(projection.directories("root"), ["/work/wt-a", "/work/wt-b", "/work/wt-c"]);
+});
+
+test("two sessions on one directory collapse to one entry", () => {
+  const projection = made("demo");
+  feed(projection, [
+    start("a", "build"),
+    session("s-1", "coder", "a", "/work/wt-a"),
+    session("s-2", "critic", "a", "/work/wt-a"),
+  ]);
+  assert.deepEqual(projection.directories("a"), ["/work/wt-a"]);
+});
+
+test("invariant 19: a subtree with no session, and an unknown node, resolve to the run cwd", () => {
+  const projection = made("demo", "/repo");
+  feed(projection, [start("a", "build"), start("b", "deploy"), session("s-1", "coder", "a", "/work/wt-a")]);
+  assert.deepEqual(projection.directories("b"), ["/repo"]);
+  assert.deepEqual(projection.directories("ghost"), ["/work/wt-a"]);
+
+  const empty = made("demo", "/repo");
+  assert.deepEqual(empty.directories("root"), ["/repo"]);
+});
+
+test("a session resolves its own directory, and an unknown session the run cwd", () => {
+  const projection = made("demo", "/repo");
+  feed(projection, [session("s-1", "coder", undefined, "/work/wt-a")]);
+  assert.equal(projection.sessionDir("s-1"), "/work/wt-a");
+  assert.equal(projection.sessionDir("s-9"), "/repo");
+});
+
 test("state and watch stay out of every transcript", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [
     { type: "state", state: "running", detail: "tsc" },
     { type: "watch", elapsed: true, diff: "+3 -1" },
@@ -394,7 +443,7 @@ test("state and watch stay out of every transcript", () => {
 });
 
 test("facts keep the last write per key", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   feed(projection, [
     { type: "fact", values: { files: 1, branch: "main" } },
     { type: "fact", values: { files: 4, green: true } },
@@ -403,7 +452,7 @@ test("facts keep the last write per key", () => {
 });
 
 test("the run phase drives phase, result, and the root state", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   assert.equal(projection.phase(), "live");
   assert.deepEqual(projection.runState(), { state: "running" });
   assert.equal(projection.result(), undefined);
@@ -421,7 +470,7 @@ test("the run phase drives phase, result, and the root state", () => {
 });
 
 test("a stopped run reads done and an error run reads failed", () => {
-  const stopped = new Projection("demo");
+  const stopped = made("demo");
   feed(stopped, [
     stepStart("s1", "tsc"),
     { type: "run", phase: "stopped", run: "demo", reason: "user stopped it" },
@@ -430,7 +479,7 @@ test("a stopped run reads done and an error run reads failed", () => {
   assert.deepEqual(stopped.runState(), { state: "stopped", detail: "user stopped it" });
   assert.equal(stateOf(stopped, "root"), "done");
 
-  const failed = new Projection("demo");
+  const failed = made("demo");
   feed(failed, [{ type: "run", phase: "error", run: "demo", reason: "boom" }]);
   assert.equal(failed.phase(), "error");
   assert.deepEqual(failed.runState(), { state: "error", detail: "boom" });
@@ -481,23 +530,23 @@ function snapshot(projection: Projection): unknown {
 }
 
 test("incremental reads give the same result as one batch", () => {
-  const batch = new Projection("demo");
+  const batch = made("demo");
   for (const event of story) batch.apply(event);
 
-  const incremental = new Projection("demo");
+  const incremental = made("demo");
   for (const event of story) {
     incremental.apply(event);
     snapshot(incremental);
   }
   assert.deepEqual(snapshot(incremental), snapshot(batch));
 
-  const fromLines = new Projection("demo");
+  const fromLines = made("demo");
   for (const event of story) fromLines.line(JSON.stringify(event));
   assert.deepEqual(snapshot(fromLines), snapshot(batch));
 });
 
 test("the finished story reads as one done tree", () => {
-  const projection = new Projection("demo");
+  const projection = made("demo");
   for (const event of story) projection.apply(event);
   assert.deepEqual(
     projection.tree().map((node) => [node.id, node.state]),

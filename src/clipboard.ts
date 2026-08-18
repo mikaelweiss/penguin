@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 const ROOM = 64 * 1024 * 1024;
@@ -16,6 +16,39 @@ export async function pasteImage(dir: string): Promise<Attached> {
     return { warn };
   }
   return { path: file };
+}
+
+/** Whether the text reached the clipboard, or why it did not. */
+export type Copied = { ok: true } | { warn: string };
+
+/** The text becomes the clipboard content, or the reason it did not. */
+export async function copyText(text: string): Promise<Copied> {
+  if (process.platform === "darwin") {
+    const done = await feed("pbcopy", [], text);
+    return done ? { ok: true } : { warn: "could not copy: pbcopy failed" };
+  }
+  if (process.platform === "linux") {
+    const writers: [string, string[]][] = [
+      ["wl-copy", []],
+      ["xclip", ["-selection", "clipboard"]],
+    ];
+    for (const [cmd, args] of writers) {
+      if (await feed(cmd, args, text)) return { ok: true };
+    }
+    return { warn: "could not copy: install wl-copy or xclip" };
+  }
+  return { warn: `no clipboard copy support on ${process.platform}` };
+}
+
+/** xclip forks and its background child keeps the inherited streams open, so the exit decides. */
+function feed(cmd: string, args: string[], text: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { stdio: ["pipe", "ignore", "ignore"] });
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(text);
+  });
 }
 
 /** Claims the next paste-<n>.png exclusively, so two viewers never share a file. */

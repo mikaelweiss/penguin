@@ -65,6 +65,40 @@ function sandbox(t: TestContext): Box {
   };
 }
 
+/** Each shim leaves a background child behind, the way xclip does, and holds no stream open. */
+const SHIM = '#!/bin/sh\ncat >> "$PENGUIN_TEST_CLIP"\nsleep 3 &\n';
+
+/** Shims for every clipboard tool, so a copy test never touches the real clipboard. */
+function clipboard(t: TestContext): { file(): string } {
+  const bin = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-clip-")));
+  const clip = path.join(bin, "clip.txt");
+  for (const tool of ["pbcopy", "wl-copy", "xclip"]) {
+    fs.writeFileSync(path.join(bin, tool), SHIM, { mode: 0o755 });
+  }
+  const prior = { path: process.env["PATH"], clip: process.env["PENGUIN_TEST_CLIP"] };
+  process.env["PATH"] = `${bin}:${prior.path ?? ""}`;
+  process.env["PENGUIN_TEST_CLIP"] = clip;
+  t.after(() => {
+    restore("PATH", prior.path);
+    restore("PENGUIN_TEST_CLIP", prior.clip);
+    fs.rmSync(bin, { recursive: true, force: true });
+  });
+  return {
+    file: () => (fs.existsSync(clip) ? fs.readFileSync(clip, "utf8") : ""),
+  };
+}
+
+/** A PATH with no clipboard tool on it. */
+function noTools(t: TestContext): void {
+  const bin = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-bare-")));
+  const prior = process.env["PATH"];
+  process.env["PATH"] = bin;
+  t.after(() => {
+    restore("PATH", prior);
+    fs.rmSync(bin, { recursive: true, force: true });
+  });
+}
+
 function inbox(dir: string): Record<string, unknown>[] {
   return fs
     .readFileSync(path.join(dir, "inbox.jsonl"), "utf8")
@@ -88,11 +122,40 @@ async function press(setup: TestRendererSetup, keys: string[]): Promise<void> {
   await setup.flush();
 }
 
+/** Every key in one stdin chunk, so no render lands between them. */
+async function burst(setup: TestRendererSetup, keys: string[]): Promise<void> {
+  await act(async () => {
+    for (const key of keys) setup.mockInput.pressKey(key);
+  });
+  await setup.flush();
+}
+
 async function type(setup: TestRendererSetup, text: string): Promise<void> {
   await act(async () => {
     await setup.mockInput.typeText(text);
   });
   await setup.flush();
+}
+
+/** Room for a copy that never comes, so a negative assertion means something. */
+async function idle(setup: TestRendererSetup): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  });
+  await setup.flush();
+}
+
+/** The frame a child process writes, which takes longer than a render pass. */
+async function shown(setup: TestRendererSetup, want: string): Promise<string> {
+  for (let pass = 0; pass < 60; pass += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    await setup.flush();
+    const frame = setup.captureCharFrame();
+    if (frame.includes(want)) return frame;
+  }
+  throw new Error(`the frame never held ${want}`);
 }
 
 const nothing = (): void => {};
@@ -303,7 +366,7 @@ test("the run tree draws nested activities with their state glyphs", async (t) =
       { type: "activity", phase: "start", id: "a1", label: "plan the work", detail: "ticket: 42" },
       { type: "activity", phase: "start", id: "a2", parent: "a1", label: "write the plan" },
       { type: "activity", phase: "end", id: "a2", outcome: "ok" },
-      { type: "session", id: "s1", name: "planner", use: "claude", activity: "a1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work", activity: "a1" },
       { type: "step", phase: "start", id: "st1", label: "agent turn", activity: "a1" },
     ],
     { live: true },
@@ -475,7 +538,7 @@ test("a message to the selected session names it", async (t) => {
     "plan-1",
     [
       { type: "run", phase: "started", run: "plan-1" },
-      { type: "session", id: "s1", name: "planner", use: "claude" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work" },
       { type: "state", state: "running", detail: "drafting" },
     ],
     { live: true },
@@ -561,6 +624,28 @@ test("q goes to the dashboard from a directly started run", async (t) => {
   }
 });
 
+test("y copies the one directory of the selected node", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied /work/wt-a");
+    assert.equal(clip.file().trim(), "/work/wt-a");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("a param question draws its notes under it, and nothing else", async () => {
   const taken: (string | undefined)[] = [];
   const setup = await screen(
@@ -600,6 +685,143 @@ test("a directly started run leaves penguin when it ends on screen", async (t) =
   }
 });
 
+test("y on a node with two directories draws the list, and enter copies the one at the cursor", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await press(setup, ["y"]);
+    const frame = await setup.waitForFrame((text) => text.includes("copy which directory?"));
+    assert.match(frame, /\/work\/wt-a/);
+    assert.match(frame, /\/work\/wt-b/);
+    await press(setup, ["ARROW_DOWN", "RETURN"]);
+    await shown(setup, "copied /work/wt-b");
+    assert.equal(clip.file().trim(), "/work/wt-b");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("esc closes the copy list and copies nothing", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await press(setup, ["y"]);
+    await setup.waitForFrame((text) => text.includes("copy which directory?"));
+    await press(setup, ["ESCAPE"]);
+    await idle(setup);
+    const frame = setup.captureCharFrame();
+    assert.ok(!frame.includes("copy which directory?"), "the copy list stayed open");
+    assert.equal(clip.file(), "");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("an escape the terminal folds into the next key copies nothing", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await press(setup, ["y"]);
+    await setup.waitForFrame((text) => text.includes("copy which directory?"));
+    await burst(setup, ["ESCAPE", "RETURN"]);
+    await idle(setup);
+    assert.equal(clip.file(), "");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a keystroke burst drives the picker with no render between the keys", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+      { type: "session", id: "s2", name: "coder", use: "claude", dir: "/work/wt-b" },
+      { type: "session", id: "s3", name: "critic", use: "claude", dir: "/work/wt-c" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await burst(setup, ["y", "ARROW_DOWN", "ARROW_DOWN", "RETURN"]);
+    await shown(setup, "copied /work/wt-c");
+    assert.equal(clip.file().trim(), "/work/wt-c");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("y on a run with no session copies the run's own folder", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied /work");
+    assert.equal(clip.file().trim(), "/work");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a done run still answers y, because the key only reads", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run("plan-1", [
+    { type: "run", phase: "started", run: "plan-1" },
+    { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+    { type: "run", phase: "done", run: "plan-1", result: "done" },
+  ]);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("this run is done"));
+    await press(setup, ["y"]);
+    await shown(setup, "copied /work/wt-a");
+    assert.equal(clip.file().trim(), "/work/wt-a");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
 test("Ctrl-C on a run whose process is gone goes to the dashboard", async (t) => {
   const box = sandbox(t);
   const dir = box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
@@ -614,6 +836,30 @@ test("Ctrl-C on a run whose process is gone goes to the dashboard", async (t) =>
       setup.mockInput.pressCtrlC();
     });
     assert.deepEqual(left, [{ back: true, code: 130 }]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("y with text in the input bar types the letter and copies nothing", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await type(setup, "ab");
+    await press(setup, ["y"]);
+    await idle(setup);
+    assert.match(setup.captureCharFrame(), /to run > aby/);
+    assert.equal(clip.file(), "");
   } finally {
     setup.renderer.destroy();
   }
@@ -636,6 +882,28 @@ test("a param question with choices takes the one the cursor sits on", async () 
     assert.match(frame, /\( \) ticket \(global\)/);
     await press(setup, ["ARROW_DOWN", "RETURN"]);
     assert.deepEqual(taken, [[1]]);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a missing clipboard tool says so, and the view keeps drawing", async (t) => {
+  const box = sandbox(t);
+  noTools(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-a" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={true} onLeave={nothing} />);
+  try {
+    await setup.waitForFrame((text) => text.includes("to run"));
+    await press(setup, ["y"]);
+    const frame = await shown(setup, "could not copy");
+    assert.match(frame, /planner/);
   } finally {
     setup.renderer.destroy();
   }

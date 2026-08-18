@@ -1,7 +1,7 @@
 import { decodePasteBytes, type KeyEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { pasteImage } from "../clipboard.ts";
+import { copyText, pasteImage } from "../clipboard.ts";
 import * as credentials from "../credentials.ts";
 import { holder } from "../lock.ts";
 import { attachmentsDir, credentialFile, runDir } from "../paths.ts";
@@ -30,9 +30,13 @@ type Pick = { key: string; cursor: number; chosen: number[] };
 
 type Form = { key: string; at: number; values: Record<string, string>; buffer: string; retype: boolean };
 
+type Copy = { dirs: string[]; cursor: number };
+
 const NO_PICK: Pick = { key: "", cursor: 0, chosen: [] };
 
 const NO_FORM: Form = { key: "", at: 0, values: {}, buffer: "", retype: false };
+
+const NO_COPY: Copy = { dirs: [], cursor: 0 };
 
 /** One run on the whole screen: its tree, the selected transcript, and the input. */
 export function RunView({
@@ -61,9 +65,10 @@ export function RunView({
   const [selected, setSelected] = useState<Selection>({ kind: "node", id: node ?? "root" });
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
-  const held = useRef<{ pick: Pick; form: Form }>({ pick: NO_PICK, form: NO_FORM });
+  const held = useRef<{ pick: Pick; form: Form; copy: Copy }>({ pick: NO_PICK, form: NO_FORM, copy: NO_COPY });
   const pick = held.current.pick;
   const form = held.current.form;
+  const copying = held.current.copy;
   const setPick = (next: Pick): void => {
     held.current.pick = next;
     bump();
@@ -72,11 +77,15 @@ export function RunView({
     held.current.form = next;
     bump();
   };
+  const setCopy = (next: Copy): void => {
+    held.current.copy = next;
+    bump();
+  };
   const [alive, setAlive] = useState(() => holder(dir) !== undefined);
   const [frame, setFrame] = useState(0);
   const [since, setSince] = useState(() => Date.now());
   const [diff, setDiff] = useState("");
-  const [warn, setWarn] = useState("");
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     const off = feed.follow(bump);
@@ -166,6 +175,7 @@ export function RunView({
     const at = rows.findIndex((row) => row.kind === selected.kind && row.id === selected.id);
     const next = rows[Math.max(0, Math.min(rows.length - 1, (at === -1 ? 0 : at) + step))];
     if (next !== undefined) setSelected({ kind: next.kind, id: next.id });
+    setNote("");
   };
 
   const fold = (open: boolean): void => {
@@ -202,11 +212,41 @@ export function RunView({
     const got = await pasteImage(attachmentsDir(dir));
     if ("path" in got) {
       editor.insert(got.path);
-      setWarn("");
+      setNote("");
     } else {
-      setWarn(got.warn);
+      setNote(got.warn);
     }
     bump();
+  };
+
+  const copyDir = async (target: string): Promise<void> => {
+    const done = await copyText(target);
+    setNote("ok" in done ? `copied ${target}` : done.warn);
+  };
+
+  const startCopy = (): void => {
+    const dirs =
+      selected.kind === "session" ? [projection.sessionDir(selected.id)] : projection.directories(selected.id);
+    const only = dirs[0];
+    if (dirs.length === 1 && only !== undefined) return void copyDir(only);
+    setCopy({ dirs, cursor: 0 });
+  };
+
+  /** A terminal folds an escape that precedes another key into a modifier, and neither key acts. */
+  const copyKey = (key: KeyEvent): void => {
+    if (key.meta || key.ctrl) return;
+    const open = held.current.copy;
+    const step = (delta: number): void => {
+      setCopy({ ...open, cursor: (open.cursor + open.dirs.length + delta) % open.dirs.length });
+    };
+    if (key.name === "up" || key.name === "k") return step(-1);
+    if (key.name === "down" || key.name === "j") return step(1);
+    if (key.name === "escape") return setCopy(NO_COPY);
+    if (key.name === "return" || key.name === "enter") {
+      const target = open.dirs[open.cursor];
+      setCopy(NO_COPY);
+      if (target !== undefined) void copyDir(target);
+    }
   };
 
   const applyFix = async (fix: Fix, refused: Ask): Promise<void> => {
@@ -352,6 +392,7 @@ export function RunView({
       if (key.name === "left") return fold(false);
       if (key.name === "right") return fold(true);
       if (key.name === "return") return fold(closed.has(selected.id));
+      if (key.name === "y") return startCopy();
       if (key.name === "q") return leave({ back: true, code: 0 });
     }
     const typed = printable(key);
@@ -363,8 +404,10 @@ export function RunView({
   useKeyboard((key: KeyEvent) => {
     if (key.eventType === "release") return;
     if (key.ctrl && key.name === "c") return stopRun();
+    if (held.current.copy.dirs.length > 0) return copyKey(key);
     if (ended) {
       if (key.name === "q") leave({ back: true, code: 0 });
+      else if (key.name === "y") startCopy();
       else if (key.name === "up" || key.name === "k") move(-1);
       else if (key.name === "down" || key.name === "j") move(1);
       else if (key.name === "left" || key.name === "h") fold(false);
@@ -394,7 +437,7 @@ export function RunView({
   });
 
   usePaste((event) => {
-    if (ended || asked !== undefined || list !== undefined) return;
+    if (ended || held.current.copy.dirs.length > 0 || asked !== undefined || list !== undefined) return;
     editor.paste(decodePasteBytes(event.bytes));
     bump();
   });
@@ -435,11 +478,12 @@ export function RunView({
         gate={gate}
         list={list}
         pick={pick}
+        copy={copying}
         editor={editor}
         selected={selected}
         sessionName={selected.kind === "session" ? (projection.sessionName(selected.id) ?? selected.id) : undefined}
         blocked={state.state === "blocked"}
-        warn={warn}
+        note={note}
         width={size.width}
       />
     </box>
@@ -453,11 +497,12 @@ function Bottom({
   gate,
   list,
   pick,
+  copy,
   editor,
   selected,
   sessionName,
   blocked,
-  warn,
+  note,
   width,
 }: {
   ended: boolean;
@@ -466,14 +511,34 @@ function Bottom({
   gate: Extract<Attention, { kind: "gate" }> | undefined;
   list: { list: string[]; many: boolean } | undefined;
   pick: Pick;
+  copy: Copy;
   editor: Editor;
   selected: Selection;
   sessionName: string | undefined;
   blocked: boolean;
-  warn: string;
+  note: string;
   width: number;
 }): ReactNode {
-  if (ended) return <text fg={ink.faint}>{cut("this run is done. q goes to the dashboard", width)}</text>;
+  if (copy.dirs.length > 0) {
+    return (
+      <Choices
+        title="copy which directory?"
+        choices={copy.dirs.map((one) => ({ label: one }))}
+        cursor={copy.cursor}
+        chosen={[]}
+        many={false}
+        keys="arrows move, enter copies, esc cancels"
+        width={width}
+      />
+    );
+  }
+  if (ended) {
+    return (
+      <text fg={ink.faint}>
+        {cut(note === "" ? "this run is done. y copies the directory, q goes to the dashboard" : note, width)}
+      </text>
+    );
+  }
   if (asked !== undefined) {
     const key = keyOf(asked);
     if (asked.phase === "rejected" && !(form.key === key && form.retype)) {
@@ -529,8 +594,9 @@ function Bottom({
         ? `to ${sessionName ?? selected.id}`
         : "to run";
   const hints: string[] = [];
-  if (warn !== "") hints.push(warn);
-  if (editor.empty) hints.push("arrows move, enter opens, q goes to the dashboard, type to send");
+  if (note !== "") hints.push(note);
+  if (editor.empty)
+    hints.push("arrows move, enter opens, y copies the directory, q goes to the dashboard, type to send");
   else hints.push("enter sends, esc clears, ctrl-v pastes an image");
   if (!blocked) hints.push("the run is busy: this message queues");
   return <InputBar editor={editor} prompt={`${prompt} >`} hint={hints.join("  ")} width={width} />;

@@ -24,7 +24,7 @@ export type ViewEvent =
       result?: unknown;
     }
   | { type: "state"; state: "running" | "blocked" | "idle"; detail?: string }
-  | { type: "session"; id: string; name: string; use: string; activity?: string }
+  | { type: "session"; id: string; name: string; use: string; dir: string; activity?: string }
   | { type: "message"; text: string; session?: string }
   | {
       type: "activity";

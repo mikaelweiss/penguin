@@ -55,6 +55,16 @@ export function age(millis: number): string {
   return `${Math.round(hours / 24)}d`;
 }
 
+/** The folder the run was started from, or this process's folder when the record says nothing. */
+function cwdOf(dir: string): string {
+  try {
+    const record = readRun(dir);
+    return typeof record.cwd === "string" && record.cwd !== "" ? record.cwd : process.cwd();
+  } catch {
+    return process.cwd();
+  }
+}
+
 /**
  * One run's story, kept current. The projection is the only reader of event
  * semantics: this class hands it lines and tells the screen something changed.
@@ -71,7 +81,7 @@ export class Feed {
   constructor(name: string, dir: string) {
     this.name = name;
     this.dir = dir;
-    this.projection = new Projection(name);
+    this.projection = new Projection(name, cwdOf(dir));
     this.tail = new Tail(eventsPath(dir), (line) => {
       this.projection.line(line);
       this.changed = true;

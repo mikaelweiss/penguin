@@ -112,7 +112,7 @@ function labelOf(label: string, detail?: string): string {
  */
 export class Projection {
   private nodes = new Map<string, Cell>();
-  private sessions = new Map<string, { name: string; node: string }>();
+  private sessions = new Map<string, { name: string; node: string; dir: string }>();
   private sessionEntries = new Map<string, Entry[]>();
   private stepNodes = new Map<string, string>();
   private openGates = new Map<string, OpenGate>();
@@ -126,8 +126,10 @@ export class Projection {
   private runResult: unknown;
   private seq = 0;
   private asks = 0;
+  private runCwd: string;
 
-  constructor(run: string) {
+  constructor(run: string, cwd: string) {
+    this.runCwd = cwd;
     this.nodes.set(ROOT, {
       id: ROOT,
       label: run,
@@ -232,6 +234,30 @@ export class Projection {
     return this.sessions.get(id)?.node ?? ROOT;
   }
 
+  /** The directory a session's turns run in. An unknown session reads as the run's own folder. */
+  sessionDir(id: string): string {
+    return this.sessions.get(id)?.dir ?? this.runCwd;
+  }
+
+  /** The distinct directories of the node's subtree, in first-seen order, never empty. */
+  directories(node: string): string[] {
+    const cells = new Set<string>();
+    const walk = (current: Cell): void => {
+      cells.add(current.id);
+      for (const child of current.children) {
+        const next = this.nodes.get(child);
+        if (next !== undefined) walk(next);
+      }
+    };
+    walk(this.cell(node));
+    const out: string[] = [];
+    for (const session of this.sessions.values()) {
+      if (!cells.has(session.node)) continue;
+      if (!out.includes(session.dir)) out.push(session.dir);
+    }
+    return out.length === 0 ? [this.runCwd] : out;
+  }
+
   transcript(node: string): Entry[] {
     const cell = this.nodes.get(node);
     if (cell === undefined) return [];
@@ -302,7 +328,7 @@ export class Projection {
       }
       case "session": {
         const node = this.resolve(event.activity);
-        this.sessions.set(event.id, { name: event.name, node });
+        this.sessions.set(event.id, { name: event.name, node, dir: event.dir ?? this.runCwd });
         const cell = this.cell(node);
         if (!cell.sessions.includes(event.id)) cell.sessions.push(event.id);
         this.record(node, seq, event);
