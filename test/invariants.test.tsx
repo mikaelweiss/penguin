@@ -818,7 +818,7 @@ export default workflow({
   params: z.object({}),
   async run({ gate, view }) {
     view.watch({ elapsed: true });
-    view.fact({ round: 1 });
+    view.fact({ round: 1, note: "first line\\nsecond line" });
     return await gate("### Blockers\\n\\n- the strip covers the controls, ${SENTINEL}\\n\\n### Non-blockers\\n\\n- the cursor lies");
   },
 });
@@ -839,7 +839,7 @@ export default workflow({
 
 const nothing = (): void => {};
 
-test("invariant 16: the status line holds one line, however long the question", async (t) => {
+test("invariant 16: the status line holds one line, whatever the question and the facts carry", async (t) => {
   const box = sandbox(t);
   box.write("w.ts", watchingWorkflow);
   assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
@@ -855,6 +855,12 @@ test("invariant 16: the status line holds one line, however long the question", 
     assert.ok((status[0] ?? "").length <= 100, "the status stays inside the width");
     assert.match(status[0] ?? "", /round 1/, "the status carries the facts");
     assert.doesNotMatch(status[0] ?? "", new RegExp(SENTINEL), "the status cuts the question, never wraps it");
+    assert.match(status[0] ?? "", /note first line second line/, "a fact keeps its words on the one line");
+    assert.equal(
+      screenRows.filter((row) => row.trim() === "second line").length,
+      0,
+      "a newline inside a fact never opens a second row",
+    );
     assert.match(screenRows.at(-1) ?? "", /blocked: Blockers/, "the status is the last row of the screen");
     assert.equal((screenRows.at(-1) ?? "").indexOf("blocked: Blockers"), 0, "the status starts at column 0");
   } finally {

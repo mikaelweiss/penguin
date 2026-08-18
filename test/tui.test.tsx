@@ -804,8 +804,8 @@ test("a control taller than its column stops at the column, never on the status 
       await press(setup, ["RETURN"]);
     }
     const rows = setup.captureCharFrame().split("\n");
-    assert.match(rows[20] ?? "", /field number 18: value-18/, "the form draws its rows down the column");
-    assert.match(rows[22] ?? "", /│ > /, "the form fills the column to its last row");
+    assert.match(rows[21] ?? "", /field number 18: value-18/, "the form draws its rows down the column");
+    assert.match(rows[22] ?? "", /field number 19/, "the form fills the column to its last row");
     assert.equal(
       (rows[23] ?? "").trimEnd(),
       "blocked: Jira needs a credential",
@@ -813,6 +813,46 @@ test("a control taller than its column stops at the column, never on the status 
     );
   } finally {
     setup.renderer.destroy();
+  }
+});
+
+test("a screen too short for both panes still keeps the status line to itself", async (t) => {
+  const box = sandbox(t);
+  const scrolled: ViewEvent[] = Array.from({ length: 45 }, (_, index) => ({
+    type: "agent",
+    session: "s1",
+    kind: "tool",
+    text: "Read",
+    detail: `src/file-${index}.ts`,
+  }));
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      ...scrolled,
+      { type: "state", state: "running", detail: "drafting" },
+    ],
+    { live: true },
+  );
+  for (const height of [2, 3, 4]) {
+    const setup = await screen(
+      <RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />,
+      100,
+      height,
+    );
+    try {
+      await setup.flush();
+      const rows = setup.captureCharFrame().split("\n");
+      assert.equal((rows[height - 1] ?? "").trimEnd(), "running: drafting", `${height} rows: the status stands alone`);
+      for (const row of rows) {
+        assert.ok(
+          !(/\[Read\] src\/file/.test(row) && /to run >/.test(row)),
+          `${height} rows: the transcript and the input bar took the same row`,
+        );
+      }
+    } finally {
+      setup.renderer.destroy();
+    }
   }
 });
 

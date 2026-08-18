@@ -489,6 +489,7 @@ export function RunView({
             border: ["right"],
             borderColor: ink.border,
             flexShrink: 0,
+            overflow: "hidden",
           }}
         >
           <text fg={ink.dim}>{cut(` ${name}  ${agent}`, PANE)}</text>

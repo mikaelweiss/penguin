@@ -19,7 +19,7 @@ export function statusLine(status: Status): string {
   }
   if (status.running !== undefined) parts.push(elapsed(status.running));
   if (status.diff !== "") parts.push(status.diff);
-  for (const [name, value] of Object.entries(status.facts)) parts.push(`${name} ${value}`);
+  for (const [name, value] of Object.entries(status.facts)) parts.push(plain(`${name} ${value}`));
   return parts.join("  ");
 }
 
