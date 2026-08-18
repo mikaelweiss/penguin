@@ -602,6 +602,7 @@ function Bottom({
     return (
       <Choices
         title={brief(gate.question)}
+        notes={warn === "" ? undefined : [warn]}
         choices={list.list.map((label) => ({ label }))}
         cursor={cursor}
         chosen={mine ? pick.chosen : []}
