@@ -16,7 +16,9 @@
   "scripts": {
     "check": "tsc --noEmit && eslint .",
     "test": "bun test --parallel --timeout 30000 test/",
-    "publish": "./scripts/publish.sh",
+    "generate": "./scripts/generate-starter.ts",
+    "build": "./scripts/build.ts",
+    "publish": "./scripts/publish.ts",
     "reinstall": "./scripts/reinstall.sh",
     "graph": "nx graph"
   },

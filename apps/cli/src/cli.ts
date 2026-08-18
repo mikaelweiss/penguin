@@ -15,6 +15,7 @@ import {
   short,
   unfilled,
   validate,
+  version,
   writeEnv,
   type Asked,
   type ParamsSchema,
@@ -33,7 +34,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { agentLine, watchRun } from "./attach/attach.ts";
-import { firstRun, install, syncSkills } from "./install.ts";
+import { firstRun, install, refreshStarter, syncSkills } from "./install.ts";
 import { intro } from "./intro.ts";
 import { adapterBlocks, liveRunTable, skillBlocks, workflowBlocks } from "./list.ts";
 import { pasteImage } from "./machine/clipboard.ts";
@@ -52,6 +53,7 @@ usage:
   pn attach <run>                                 watch a run, with its history first
   pn install                                      set up ~/.penguin and choose your skill directories
   pn intro                                        play the penguin wordmark again
+  pn --version                                    the version of penguin you have
   pn sync-skills [--global|--local]               choose your skill directories again
 
 <workflow> is a name from the list, or a path to a workflow file.
@@ -67,12 +69,16 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (command === "_run") return runProcess(rest);
+  if (command === "--version" || command === "-v" || command === "version") {
+    process.stdout.write(`${version}\n`);
+    return 0;
+  }
   if (command === "intro") return playIntro();
   const fresh = await firstRun();
   if (fresh) {
     if (command === undefined) return 0;
     say("");
-  }
+  } else await refreshStarter();
   if (command === "run") return runWorkflow(rest);
   if (command === "list") return listWhat(rest);
   if (command === "ps") return listRuns();

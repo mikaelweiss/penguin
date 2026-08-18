@@ -7,12 +7,12 @@ A workflow is one TypeScript file: a params schema and a run function over `ctx`
 ## Install
 
 ```sh
-bun install -g @mikaelweiss/penguin
+npm install -g @mikaelweiss/penguin   # bun, pnpm, and yarn work the same
 ```
 
-penguin needs Bun 1.3 or newer, and it runs on Bun only. Your repository needs no install of its own.
+penguin is one binary with Bun inside it, so running it needs no Bun and no Node of your own, and your repository needs no install either. It runs on macOS and Linux, on arm64 and x64. The Windows builds ship untested.
 
-The first penguin command sets up `~/.penguin/` and enables the starter catalog. It does not copy workflows into the home:
+The first penguin command sets up `~/.penguin/` and writes the starter catalog into it:
 
 ```
 created ~/.penguin
@@ -30,7 +30,7 @@ Sync writes symlinks and the `.order` file, nothing else. A skill you wrote into
 
 ## The starter catalog
 
-Install enables the starter catalog (`examples/` in the engine package) and writes a `defaults` file that picks the agent, plus a tsconfig for editor types. `pn list workflows` shows those workflows. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
+Install writes the starter catalog to `~/.penguin/starter/` and enables it, along with a `defaults` file that picks the agent and a tsconfig for editor types. Those files are yours to read and copy. They are penguin's to replace: when a new penguin carries a newer catalog it asks before updating, and the tree it replaces moves to `~/.penguin/backups/` whole. `pn list workflows` shows those workflows. A name says what a workflow is. A pipeline is a compound or an outcome, and you start it:
 
 - `pn run ship --ticket ABC-123`: ticket to open PR: triage splits the ticket into tasks, then plan and implement per task in a worktree, then the pull request.
 - `pn run ship-local --ticket "the footer scrolls"`: the same work, landed instead of proposed. It commits, holds until you answer done, then rebases onto main and moves main to it.

@@ -1,6 +1,6 @@
 {
   "name": "@mikaelweiss/penguin-engine",
-  "version": "0.0.6",
+  "private": true,
   "description": "penguin run process, catalog discovery, and the author API",
   "license": "Apache-2.0",
   "type": "module",
@@ -30,6 +30,6 @@
     "zod": "^4.4.3"
   },
   "nx": {
-    "tags": ["npm:public", "scope:engine"]
+    "tags": ["scope:engine"]
   }
 }

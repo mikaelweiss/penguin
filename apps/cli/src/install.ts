@@ -1,6 +1,9 @@
 import {
     catalogsFile,
+    declineStarter,
     defaultsFile,
+    ensureStarter,
+    extractStarter,
     homeCatalog,
     installed,
     linkSkills,
@@ -10,7 +13,10 @@ import {
     skillSources,
     skillsDir,
     starterCatalog,
+    standalone,
+    starterState,
     userRoot,
+    version,
     writableCatalog,
     writeEnv,
     type SkillSource,
@@ -30,6 +36,7 @@ export async function install(): Promise<void> {
   if (interactive()) await intro();
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(runsRoot(), { recursive: true });
+  if (standalone()) ensureStarter();
   if (fresh) {
     enableStarter(dir);
     writeEnv(process.cwd(), await installed(process.cwd()));
@@ -45,6 +52,33 @@ function enableStarter(dir: string): void {
   const defaults = fs.readFileSync(path.join(shipped, "defaults"), "utf8");
   fs.writeFileSync(defaultsFile(), defaults.endsWith("\n") ? defaults : `${defaults}\n`);
   fs.copyFileSync(path.join(shipped, "tsconfig.json"), path.join(dir, "tsconfig.json"));
+}
+
+/** Keeps the extracted starter catalog current, and never replaces one without asking. */
+export async function refreshStarter(): Promise<void> {
+  if (!standalone()) return;
+  const state = starterState();
+  if (state.kind === "missing") {
+    extractStarter();
+    return;
+  }
+  if (state.kind !== "stale") return;
+  if (interactive() && !(await wantsUpdate(state.installed))) {
+    declineStarter();
+    return;
+  }
+  const kept = extractStarter();
+  say(`\nupdated the starter catalog to ${version}`);
+  if (kept !== undefined) say(`the files you had are in ${short(kept)}`);
+}
+
+async function wantsUpdate(installed: string): Promise<boolean> {
+  const { pickOne } = await import("./tui/ask.tsx");
+  const answer = await pickOne(
+    `The starter catalog came from penguin ${installed}, and this is ${version}. Update it?`,
+    [{ label: "update it", note: "the files you have move to backups" }, { label: "keep what I have" }],
+  );
+  return answer === 0;
 }
 
 export async function firstRun(): Promise<boolean> {

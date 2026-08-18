@@ -1,6 +1,6 @@
 {
   "name": "@mikaelweiss/penguin",
-  "version": "0.0.6",
+  "private": true,
   "description": "Run one workflow file as a live process, with any coding agent CLI.",
   "license": "Apache-2.0",
   "repository": {
@@ -29,6 +29,6 @@
     "react": "^19.2.8"
   },
   "nx": {
-    "tags": ["npm:public", "scope:cli"]
+    "tags": ["scope:cli"]
   }
 }

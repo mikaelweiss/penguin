@@ -1,6 +1,6 @@
 {
   "name": "@mikaelweiss/penguin-viewer",
-  "version": "0.0.6",
+  "private": true,
   "description": "Read a penguin run directory: project events, follow live, write the inbox",
   "license": "Apache-2.0",
   "type": "module",
@@ -18,6 +18,6 @@
     "@mikaelweiss/penguin-engine": "workspace:*"
   },
   "nx": {
-    "tags": ["npm:public", "scope:viewer"]
+    "tags": ["scope:viewer"]
   }
 }

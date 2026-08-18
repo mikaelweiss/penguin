@@ -1,17 +1,24 @@
 {
-  // "paths" points at the penguin install. Run `bun pm ls -g` to find it.
+  // "paths" finds penguin's own types: the extracted starter catalog first, then an npm install.
   "compilerOptions": {
     "target": "es2023",
     "lib": ["es2023"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "types": ["node"],
+    "typeRoots": ["./starter/types/@types", "./node_modules/@types", "../../../node_modules/@types"],
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "penguin": ["./node_modules/@mikaelweiss/penguin/src/index.ts", "../src/author/index.ts"],
+      "penguin": [
+        "./starter/types/penguin/author/index.d.ts",
+        "./node_modules/@mikaelweiss/penguin/src/index.ts",
+        "../src/author/index.ts"
+      ],
+      "undici-types": ["./starter/types/undici-types", "../../../node_modules/undici-types"],
       "zod": [
+        "./starter/types/zod",
         "../node_modules/zod",
         "../../../node_modules/zod",
         "./node_modules/@mikaelweiss/penguin-engine/node_modules/zod",
