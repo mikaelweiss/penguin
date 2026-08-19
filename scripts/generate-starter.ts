@@ -38,9 +38,9 @@ export async function generateStarter(version: string): Promise<{ source: string
   return { source, files };
 }
 
-async function writeStarter(version: string): Promise<string[]> {
+export async function writeStarter(version: string): Promise<string[]> {
   const { source, files } = await generateStarter(version);
-  fs.writeFileSync(generatedFile, source);
+  if (fs.readFileSync(generatedFile, "utf8") !== source) fs.writeFileSync(generatedFile, source);
   return files;
 }
 
