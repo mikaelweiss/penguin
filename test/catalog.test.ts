@@ -1580,6 +1580,7 @@ function codexHost(script: (argv: string[]) => Scripted): {
   const events: ViewEvent[] = [];
   const host: Host = {
     cwd: process.cwd(),
+    state: process.cwd(),
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: async (argv, options) => {
       runs.push({ argv, stdin: options?.stdin });

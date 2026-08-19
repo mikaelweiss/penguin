@@ -18,6 +18,7 @@ const TOKEN = "s3cret-jira-token";
 function stubHost(credential: Host["credential"]): Host {
   return {
     cwd: process.cwd(),
+    state: process.cwd(),
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: async () => 0,
     wait: <T,>(_label: string, body: () => Promise<T>) => body(),

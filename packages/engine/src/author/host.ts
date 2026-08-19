@@ -47,6 +47,8 @@ export type CredentialRequest = {
 export type Host = {
   /** The run's invoking folder. Relative cwd options resolve against it. */
   cwd: string;
+  /** penguin's state folder, where an adapter puts what it keeps between runs. */
+  state: string;
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   exec(argv: string[], options?: ExecOptions): Promise<number>;
   wait<T>(label: string, body: () => Promise<T>): Promise<T>;

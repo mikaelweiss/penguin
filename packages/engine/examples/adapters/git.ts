@@ -107,9 +107,12 @@ export default adapter({
           name: string,
           options?: { ref?: string },
         ): Promise<{ ok: boolean; path: string; exists: boolean; reason: string }> {
-          const target = path.resolve(host.cwd, "..", name);
+          const root = await host.shell("git rev-parse --show-toplevel");
+          const project = path.basename(root.stdout.trim() === "" ? host.cwd : root.stdout.trim());
+          const target = path.join(host.state, "worktrees", project, name);
           if (fs.existsSync(target))
             return { ok: false, path: target, exists: true, reason: `${target} already exists` };
+          fs.mkdirSync(path.dirname(target), { recursive: true });
           if (options?.ref !== undefined) {
             const fetched = await host.shell(`git fetch origin ${quoted(options.ref)}`);
             if (fetched.code !== 0)
@@ -122,7 +125,7 @@ export default adapter({
               reason: done.stderr.trim(),
             };
           }
-          const done = await host.shell(`git worktree add ${quoted(target)}`);
+          const done = await host.shell(`git worktree add -b ${quoted(name)} ${quoted(target)}`);
           return { ok: done.code === 0, path: target, exists: false, reason: done.stderr.trim() };
         },
         async remove(target: string, options?: { force?: boolean }): Promise<Done> {

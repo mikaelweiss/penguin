@@ -107,7 +107,7 @@ Agent turns return a typed envelope (zod-validated): verdicts, numbers, file pat
 
 ## Worktrees
 
-`ctx.vcs.worktree.add(name)` creates a sibling worktree and returns its path, which later sessions take as `cwd`. With a `ref` option it fetches that ref from origin and checks the worktree out at it, detached. A path already in use is never overwritten: the call fails with `exists` true and the path it wanted, and the workflow decides what happens. `ctx.vcs.pull(ref, {cwd})` fetches the ref again and resets the worktree to it. Removal is always explicit: `ctx.vcs.worktree.remove(path)`, with a `force` option that deletes the path even when git refuses it. Nothing removes a worktree by itself, at any point in a run's life. A forgotten worktree costs disk. A removed one costs work.
+`ctx.vcs.worktree.add(name)` creates a worktree at `~/.local/state/penguin/worktrees/<project>/<name>` on a branch of that name, and returns its path, which later sessions take as `cwd`. The project is the folder name of the repository root, so two repositories of different names never share a worktree path. With a `ref` option it fetches that ref from origin and checks the worktree out at it, detached. A path already in use is never overwritten: the call fails with `exists` true and the path it wanted, and the workflow decides what happens. `ctx.vcs.pull(ref, {cwd})` fetches the ref again and resets the worktree to it. Removal is always explicit: `ctx.vcs.worktree.remove(path)`, with a `force` option that deletes the path even when git refuses it. Nothing removes a worktree by itself, at any point in a run's life. A forgotten worktree costs disk. A removed one costs work.
 
 ## Skills
 

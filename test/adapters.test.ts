@@ -68,6 +68,7 @@ process.exit(plan.code ?? 0);
 function stubHost(events: ViewEvent[]): Host {
   return {
     cwd: process.cwd(),
+    state: process.cwd(),
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: (argv, options) => runArgv(argv, options?.cwd ?? process.cwd(), options),
     wait: <T,>(_label: string, body: () => Promise<T>) => body(),
@@ -313,6 +314,7 @@ async function gh(replies: Shelled[], answers: string[]): Promise<GhBox> {
   const asked: string[] = [];
   const host: Host = {
     cwd: process.cwd(),
+    state: process.cwd(),
     shell: async (cmd) => {
       commands.push(cmd);
       const next = replies.shift() ?? { code: 0 };
@@ -413,4 +415,80 @@ test("a failure no person can fix stays a failure and asks nothing", async () =>
     reason: "could not compute title or body defaults: no commits",
   });
   assert.deepEqual(box.asked, []);
+});
+
+const gitFile = fileURLToPath(new URL("../packages/engine/examples/adapters/git.ts", import.meta.url));
+
+type Git = {
+  push(branch: string, options?: { cwd?: string }): Promise<{ ok: boolean; reason: string }>;
+  worktree: {
+    add(
+      name: string,
+      options?: { ref?: string },
+    ): Promise<{ ok: boolean; path: string; exists: boolean; reason: string }>;
+  };
+};
+
+type GitBox = { api: Git; commands: string[] };
+
+/** A git whose every call is scripted, under a state root the case owns. */
+async function git(t: TestContext, replies: Shelled[]): Promise<GitBox & { state: string }> {
+  const state = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-state-")));
+  t.after(() => fs.rmSync(state, { recursive: true, force: true }));
+  const commands: string[] = [];
+  const host: Host = {
+    cwd: "/repo/app",
+    state,
+    shell: async (cmd) => {
+      commands.push(cmd);
+      const next = replies.shift() ?? { code: 0 };
+      return { code: next.code, stdout: next.stdout ?? "", stderr: next.stderr ?? "" };
+    },
+    exec: async () => 0,
+    wait: <T,>(_label: string, body: () => Promise<T>) => body(),
+    emit: () => {},
+    gate: (() => {
+      throw new Error("the git adapter asks no gate");
+    }) as Host["gate"],
+    credential: (() => {
+      throw new Error("the git adapter asks for no credential");
+    }) as Host["credential"],
+  };
+  const definition = await loadAdapter(gitFile);
+  return { api: definition.build(host) as Git, commands, state };
+}
+
+test("a worktree is cut under the run state root, on a branch of its own name", async (t) => {
+  const box = await git(t, [{ code: 0, stdout: "/repo/app\n" }, { code: 0 }]);
+
+  const made = await box.api.worktree.add("stop-the-footer-scrolling");
+
+  const target = path.join(box.state, "worktrees", "app", "stop-the-footer-scrolling");
+  assert.deepEqual(made, { ok: true, path: target, exists: false, reason: "" });
+  assert.deepEqual(box.commands, [
+    "git rev-parse --show-toplevel",
+    `git worktree add -b 'stop-the-footer-scrolling' '${target}'`,
+  ]);
+  assert.ok(fs.existsSync(path.dirname(target)), "the project folder was not made");
+});
+
+test("a worktree path that is taken is reported, and git is never called", async (t) => {
+  const box = await git(t, [{ code: 0, stdout: "/repo/app\n" }]);
+  const target = path.join(box.state, "worktrees", "app", "taken");
+  fs.mkdirSync(target, { recursive: true });
+
+  const made = await box.api.worktree.add("taken");
+
+  assert.equal(made.ok, false);
+  assert.equal(made.exists, true);
+  assert.deepEqual(box.commands, ["git rev-parse --show-toplevel"]);
+});
+
+test("a push names the branch and its remote", async (t) => {
+  const box = await git(t, [{ code: 0 }]);
+
+  const done = await box.api.push("stop-the-footer-scrolling", { cwd: "/work" });
+
+  assert.deepEqual(done, { ok: true, reason: "" });
+  assert.deepEqual(box.commands, ["git push -u origin 'stop-the-footer-scrolling'"]);
 });

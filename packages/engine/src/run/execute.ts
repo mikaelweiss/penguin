@@ -5,7 +5,7 @@ import type { CredentialRequest, Host } from "../author/host.ts";
 import * as adapters from "../catalog/adapters.ts";
 import { load } from "../catalog/loader.ts";
 import { messageOf, PenguinError } from "../errors.ts";
-import { runDir } from "../paths.ts";
+import { runDir, stateRoot } from "../paths.ts";
 import type { ViewEvent } from "../protocol/events.ts";
 import { acquire } from "../protocol/lock.ts";
 import { type RunRecord, readRun } from "../protocol/record.ts";
@@ -316,6 +316,7 @@ class Execution {
   private host(): Host {
     return {
       cwd: this.record.cwd,
+      state: stateRoot(),
       shell: (cmd, options) =>
         runCommand(cmd, this.resolveCwd(options?.cwd), { stdin: options?.stdin }),
       exec: (argv, options) => runArgv(argv, this.resolveCwd(options?.cwd), options),
