@@ -7,10 +7,12 @@ A workflow is one TypeScript file: a params schema and a run function over `ctx`
 ## Install
 
 ```sh
-npm install -g @mikaelweiss/penguin   # bun, pnpm, and yarn work the same
+npm install -g @mikaelweiss/penguin
 ```
 
 penguin is one binary with Bun inside it, so running it needs no Bun and no Node of your own, and your repository needs no install either. It runs on macOS and Linux, on arm64 and x64. The Windows builds ship untested.
+
+A postinstall script puts the binary for your machine at the `pn` command. npm runs it. bun and pnpm skip postinstall by default, so after `bun add -g @mikaelweiss/penguin` run `bun pm -g trust @mikaelweiss/penguin`, and after a pnpm install run `pnpm approve-builds`. A `pn` that prints how to finish the install is telling you this step is still open.
 
 The first penguin command sets up `~/.penguin/` and writes the starter catalog into it:
 

@@ -13,9 +13,11 @@ function placeholder(name: string): string {
   return [
     `echo "penguin's postinstall script did not run, so the binary is not here." >&2`,
     'echo "" >&2',
-    'echo "That happens with --ignore-scripts, and with package managers that skip" >&2',
-    'echo "postinstall by default. To finish the install, run:" >&2',
-    `echo "  cd node_modules/${name} && node postinstall.mjs" >&2`,
+    'echo "bun and pnpm skip postinstall by default, and so does --ignore-scripts." >&2',
+    'echo "Finish the install with the line that matches your package manager:" >&2',
+    `echo "  bun pm trust ${name}   # add -g for a global install" >&2`,
+    'echo "  pnpm approve-builds" >&2',
+    `echo "  cd node_modules/${name} && node postinstall.mjs   # or bun postinstall.mjs" >&2`,
     "exit 1",
     "",
   ].join("\n");
