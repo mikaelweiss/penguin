@@ -5,7 +5,8 @@ const Ready = z.union([z.enum(["done", "skip"]), z.string()]);
 
 const ISSUE_FIELDS = "number,title,body,state,url";
 const PR_FIELDS = "number,title,body,state,isDraft,headRefOid,url";
-const WATCHED_FIELDS = "state,isDraft,body,headRefOid,url,comments";
+const WATCHED_FIELDS = "state,isDraft,body,headRefOid,url,comments,reviews";
+const LOGIN_READ = "gh api user -q .login";
 const QUEUE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){isInMergeQueue}}}";
 const QUEUE_PATH = ".data.repository.pullRequest.isInMergeQueue";
@@ -46,6 +47,8 @@ type Requested = {
 
 type Written = { author?: { login?: string }; createdAt?: string; body?: string };
 
+type Judged = { author?: { login?: string }; state?: string };
+
 type Watched = {
   state: string;
   isDraft: boolean;
@@ -54,12 +57,14 @@ type Watched = {
   url: string;
   isInMergeQueue: boolean;
   comments?: Written[];
+  reviews?: Judged[];
 };
 
 type Place = { owner: string; repo: string; number: string };
 
 type Change =
   | { kind: "closed"; state: string }
+  | { kind: "approved" }
   | { kind: "draft" }
   | { kind: "ready" }
   | { kind: "queued" }
@@ -95,10 +100,14 @@ function queueRead(place: Place): string {
   return `gh api graphql -f query=${quoted(QUEUE_QUERY)} -f owner=${quoted(place.owner)} -f name=${quoted(place.repo)} -F number=${quoted(place.number)} -q ${QUEUE_PATH}`;
 }
 
-function changedBetween(last: Watched, snap: Watched): Change[] {
+function changedBetween(last: Watched, snap: Watched, me: string): Change[] {
   const found: Change[] = [];
   if (snap.state !== last.state && snap.state !== "OPEN") {
     found.push({ kind: "closed", state: snap.state });
+  }
+  const signed = (snap.reviews ?? []).slice((last.reviews ?? []).length);
+  if (signed.some((one) => one.state === "APPROVED" && one.author?.login === me)) {
+    found.push({ kind: "approved" });
   }
   if (snap.isDraft && !last.isDraft) found.push({ kind: "draft" });
   if (!snap.isDraft && last.isDraft) found.push({ kind: "ready" });
@@ -232,8 +241,19 @@ export default adapter({
         async changes(pr: string): Promise<{ next(): Promise<Change> }> {
           let last: Watched | undefined;
           let place: Place | undefined;
+          let me: string | undefined;
           let failing = false;
           const queue: Change[] = [];
+          // The watch reports your approval alone, so it needs the login gh signs the review with.
+          const login = async (): Promise<string> => {
+            if (me !== undefined) return me;
+            const who = await gh(LOGIN_READ);
+            if (who.code !== 0) throw new Error(who.stderr.trim());
+            const found = who.stdout.trim();
+            if (found === "") throw new Error("gh named no login for you");
+            me = found;
+            return found;
+          };
           return {
             next: () =>
               host.wait(`watching PR ${pr}`, async () => {
@@ -241,6 +261,7 @@ export default adapter({
                   const ready = queue.shift();
                   if (ready !== undefined) return ready;
                   try {
+                    const yours = await login();
                     const done = await gh(`gh pr view ${quoted(pr)} --json ${WATCHED_FIELDS}`);
                     if (done.code !== 0) throw new Error(done.stderr.trim());
                     const snap = JSON.parse(done.stdout) as Watched;
@@ -249,7 +270,7 @@ export default adapter({
                     const asked = await gh(queueRead(place));
                     if (asked.code !== 0) throw new Error(asked.stderr.trim());
                     snap.isInMergeQueue = asked.stdout.trim() === "true";
-                    if (last !== undefined) queue.push(...changedBetween(last, snap));
+                    if (last !== undefined) queue.push(...changedBetween(last, snap, yours));
                     last = snap;
                     failing = false;
                   } catch (error) {

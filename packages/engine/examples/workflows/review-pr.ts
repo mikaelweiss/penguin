@@ -48,7 +48,7 @@ function noted(notes: Note[]): string {
 
 export default workflow({
   description:
-    "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until it closes",
+    "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until your approval lands or it closes",
   params: z.object({ pr: z.string() }),
 
   async run({ params, agent, vcs, github, view, gate }) {
@@ -187,6 +187,13 @@ export default workflow({
           });
           return "closed";
         }
+        if (change.kind === "approved") {
+          await turn.stop();
+          view.event({
+            message: `You approved PR #${pr.number}, the review stops`,
+          });
+          return "approved";
+        }
         if (change.kind === "draft") {
           await turn.stop();
           view.event({
@@ -255,7 +262,7 @@ export default workflow({
           rounds += 1;
           view.fact({ phase: "reviewing", round: rounds });
           const outcome = await view.activity(`review round ${rounds}`, review);
-          if (outcome === "closed") break;
+          if (outcome === "closed" || outcome === "approved") break;
           if (outcome === "draft") {
             inDraft = true;
             continue;
@@ -273,6 +280,12 @@ export default workflow({
         inbound = changes.next();
         if (change.kind === "closed") {
           view.event({ message: `PR #${pr.number} is ${change.state}` });
+          break;
+        }
+        if (change.kind === "approved") {
+          view.event({
+            message: `You approved PR #${pr.number}, the review stops`,
+          });
           break;
         }
         if (change.kind === "draft") inDraft = true;

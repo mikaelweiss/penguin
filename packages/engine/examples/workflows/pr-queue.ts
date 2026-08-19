@@ -19,7 +19,7 @@ export default workflow({
     const counted = (): void =>
       view.fact({ reviewing: reviewing.size, taken, ended });
 
-    // A review lives until its PR closes, so it runs beside the watch, never in front of it.
+    // A review lives until you approve its PR or it closes, so it runs beside the watch, never in front of it.
     const take = (request: Requested): void => {
       reviewing.add(request.number);
       taken += 1;

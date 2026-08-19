@@ -329,6 +329,11 @@ const startQueuedGithub = mergeQueueGithub
     `          { file: "/dequeue.txt", change: { kind: "dequeued" } },`,
   );
 
+const approvedGithub = fakeGithub.replace(
+  'resolve({ kind: "closed", state: "MERGED" });',
+  'resolve({ kind: "approved" });',
+);
+
 const queueGithub = `import fs from "node:fs";
 import { adapter } from "penguin";
 
@@ -1225,7 +1230,7 @@ test("the catalog commit workflow writes nothing when the tree is clean", async 
   assert.equal(box.sessions().length, 0);
 });
 
-test("the catalog review-pr workflow approves a clean PR and follows it to the close", async (t) => {
+test("the catalog review-pr workflow approves a clean PR and stops there", async (t) => {
   const box = sandbox(t);
   catalogReady(
     box,
@@ -1256,9 +1261,10 @@ test("the catalog review-pr workflow approves a clean PR and follows it to the c
 
 test("the catalog review-pr workflow waits while the PR sits in the merge queue", async (t) => {
   const box = sandbox(t);
+  // Blockers keep the review alive past the first round, because an approve ends the run.
   catalogReady(
     box,
-    '{"eyeball":false,"reason":"the change spans the parser","blockers":[],"nonBlockers":["tiny nit"]}',
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":["the flag is wrong"],"nonBlockers":[]}',
   );
   outsideReady(box);
   box.writeAdapter("gh", mergeQueueGithub);
@@ -1272,6 +1278,7 @@ test("the catalog review-pr workflow waits while the PR sits in the merge queue"
   );
   assert.equal(started.code, 0, started.output);
 
+  await answerGate(box, "review-pr-1", "### Blockers", "send");
   // The second queued fact proves the loop read the commits change and started no round.
   await waitFor(() => queuedFacts(box, "review-pr-1") >= 2);
 
@@ -1279,6 +1286,7 @@ test("the catalog review-pr workflow waits while the PR sits in the merge queue"
   assert.equal(box.lines("commented.txt").length, 4);
 
   box.write("dequeue.txt", "left");
+  await answerGate(box, "review-pr-1", "### Blockers", "send");
   await waitFor(() => box.lines("commented.txt").length === 8);
 
   box.write("close.txt", "merged");
@@ -1286,7 +1294,7 @@ test("the catalog review-pr workflow waits while the PR sits in the merge queue"
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], { rounds: 2, posted: 2 });
-  assert.ok(box.exists("approved.txt"), "the PR was not approved");
+  assert.ok(!box.exists("approved.txt"), "the PR was approved despite a blocker");
 
   const messages = box
     .events("review-pr-1")
@@ -1326,13 +1334,11 @@ test("the catalog review-pr workflow waits when the PR is queued before the run 
   assert.equal(box.exists("commented.txt"), false);
 
   box.write("dequeue.txt", "left");
-  await waitFor(() => box.exists("commented.txt"));
-
-  box.write("close.txt", "merged");
   const ended = await box.waitForEnd("review-pr-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.ok(box.exists("commented.txt"), "the review posted nothing");
   assert.ok(box.exists("approved.txt"), "the PR was not approved");
 });
 
@@ -1367,6 +1373,41 @@ test("the catalog review-pr workflow gates on blockers and posts without approvi
   assert.ok(
     !box.exists("approved.txt"),
     "the PR was approved despite a blocker",
+  );
+});
+
+test("the catalog review-pr workflow stops when you approve the PR yourself", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"eyeball":false,"reason":"the change spans the parser","blockers":["the flag is wrong"],"nonBlockers":[]}',
+  );
+  outsideReady(box);
+  box.writeAdapter("gh", approvedGithub);
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "review-pr.ts"),
+    "--pr",
+    "42",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "review-pr-1", "### Blockers", "send");
+  const ended = await box.waitForEnd("review-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { rounds: 1, posted: 1 });
+  assert.ok(!box.exists("approved.txt"), "penguin approved the PR itself");
+
+  const messages = box
+    .events("review-pr-1")
+    .filter((event) => event["type"] === "event")
+    .map((event) => String(event["message"]));
+  assert.ok(
+    messages.includes("You approved PR #42, the review stops"),
+    messages.join("\n"),
   );
 });
 
