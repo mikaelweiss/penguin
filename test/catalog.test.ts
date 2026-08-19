@@ -630,7 +630,7 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer","branch":"stop-the-footer-scrolling"}',
   );
   outsideReady(box);
 
@@ -672,14 +672,14 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   assert.ok(round !== undefined);
   assert.ok(ancestors(spans, round).includes(await description("implement.ts")));
 
-  const worktree = path.join(box.project, "penguin-ABC-1");
+  const worktree = path.join(box.project, "stop-the-footer-scrolling");
   const dirs = box.sessions().map((line) => line.cwd);
   assert.ok(
     dirs.includes(worktree),
     `no session ran in the worktree: ${dirs.join(", ")}`,
   );
   assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
-  assert.deepEqual(box.lines("pushed.txt"), ["penguin-ABC-1"]);
+  assert.deepEqual(box.lines("pushed.txt"), ["stop-the-footer-scrolling"]);
 });
 
 test("the catalog open-pr workflow holds at the gate when the pull request is already open", async (t) => {
@@ -897,7 +897,7 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer","branch":"stop-the-footer-scrolling"}',
   );
   outsideReady(box);
 
@@ -915,7 +915,7 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
   await answerGate(
     box,
     "ship-local-1",
-    "penguin-the-footer-scrolls is ready",
+    "stop-the-footer-scrolling is ready",
     "done",
   );
   const ended = await box.waitForEnd("ship-local-1");
@@ -929,11 +929,11 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
   assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
   assert.deepEqual(box.lines("merged.txt"), [
     "origin/main true",
-    "penguin-the-footer-scrolls true",
+    "stop-the-footer-scrolling true",
   ]);
   assert.deepEqual(box.lines("onto.txt"), ["main"]);
   assert.deepEqual(box.lines("removed.txt"), [
-    path.join(box.project, "penguin-the-footer-scrolls"),
+    path.join(box.project, "stop-the-footer-scrolling"),
   ]);
 
   const labels = activities(box, "ship-local-1").map((span) => span.label);
@@ -945,7 +945,7 @@ test("the catalog work workflow holds each task at a gate and takes the change",
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer","branch":"Stop the footer scrolling!"}',
   );
   outsideReady(box);
 
@@ -971,6 +971,10 @@ test("the catalog work workflow holds each task at a gate and takes the change",
     2,
     `the change ran no second implement: ${labels.join(", ")}`,
   );
+
+  const dirs = box.sessions().map((line) => line.cwd);
+  const worktree = path.join(box.project, "stop-the-footer-scrolling");
+  assert.ok(dirs.includes(worktree), `the branch name was not reduced: ${dirs.join(", ")}`);
 });
 
 test("the catalog land workflow gives a rebase conflict to an agent, then moves main", async (t) => {

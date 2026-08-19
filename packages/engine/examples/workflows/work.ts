@@ -8,9 +8,13 @@ import triage from "./triage.ts";
 
 const Ack = z.union([z.enum(["ok"]), z.string()]);
 const Tried = z.union([z.enum(["done"]), z.string()]);
+const Named = z.object({
+  branch: z.string().describe("the branch name, lowercase words with dashes between them"),
+});
 
-function slug(ticket: string): string {
-  const cut = ticket.trim().replaceAll(/[^A-Za-z0-9]+/g, "-").slice(0, 40);
+/** What git takes as a branch name, whatever the agent answered. */
+function slug(name: string): string {
+  const cut = name.trim().toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").slice(0, 50);
   const trimmed = cut.replaceAll(/^-+|-+$/g, "");
   return trimmed === "" ? "work" : trimmed;
 }
@@ -23,7 +27,7 @@ export default workflow({
   }),
 
   async run(ctx) {
-    const { params, vcs, view, gate } = ctx;
+    const { params, agent, vcs, view, gate } = ctx;
     const nothing = { done: false, path: "", branch: "", acceptance: "", gates: "", base: "" };
 
     const triaged = await triage(ctx, { ticket: params.ticket });
@@ -32,7 +36,11 @@ export default workflow({
       return nothing;
     }
 
-    const branch = `penguin-${slug(params.ticket)}`;
+    const named = (await agent().run("penguin-branch", {
+      input: `# Ticket\n\n${params.ticket}\n\n# What triage read\n\n${triaged.context}`,
+      result: Named,
+    }))!;
+    const branch = slug(named.branch);
     const ws = await vcs.worktree.add(branch);
     if (!ws.ok) {
       await gate(`No worktree: ${ws.reason}`, Ack);
