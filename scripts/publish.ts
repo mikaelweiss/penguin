@@ -39,7 +39,11 @@ async function publish(dir: string, name: string, version: string, dry: boolean)
     process.stdout.write(`packed ${name}@${version}: ${packed.match(/Packed size: .*/)?.[0] ?? "unknown size"}\n`);
     return;
   }
-  await $`npm publish --access public *.tgz`.cwd(dir);
+  const tarball = fs.readdirSync(dir).find((file) => file.endsWith(".tgz"));
+  if (!tarball) throw new Error(`no tarball packed for ${name}`);
+  // npm skips its own 2FA prompt unless stdout is a terminal, and Bun's $ pipes it.
+  const npm = Bun.spawn(["npm", "publish", "--access", "public", tarball], { cwd: dir, stdio: ["inherit", "inherit", "inherit"] });
+  if ((await npm.exited) !== 0) throw new Error(`npm publish failed for ${name}`);
   process.stdout.write(`published ${name}@${version}\n`);
 }
 
