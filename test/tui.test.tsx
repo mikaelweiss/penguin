@@ -1,6 +1,7 @@
 import { type AdapterFound as Found } from "@mikaelweiss/penguin-engine/catalog";
 import type { ViewEvent } from "@mikaelweiss/penguin-engine/protocol";
 import { controlFor } from "@mikaelweiss/penguin-viewer";
+import { buildKittyKeyboardFlags } from "@opentui/core";
 import type { TestRendererSetup } from "@opentui/core/testing";
 import { testRender } from "@opentui/react/test-utils";
 import assert from "node:assert/strict";
@@ -2341,6 +2342,41 @@ test("the shell takes ctrl-c while it holds the keyboard, and the run keeps runn
     await idle(setup);
     assert.deepEqual(left, [], "ctrl-c never reached the run");
     assert.equal(sleeper.killed, false, "the run process is untouched");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the shell pops the kitty protocol, so ctrl-c reaches it as a control byte", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  const pushed: number[] = [];
+  let popped = 0;
+  const renderer = setup.renderer;
+  renderer.disableKittyKeyboard = () => {
+    popped += 1;
+  };
+  renderer.enableKittyKeyboard = (flags?: number) => {
+    pushed.push(flags ?? 0);
+  };
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    assert.equal(popped, 1, "the shell taking the keys pops the protocol the terminal is in");
+    assert.deepEqual(pushed, [], "the protocol stays popped while the shell holds the keys");
+    await toShell(setup);
+    await frameWith(setup, (text) => !text.includes(path.basename(work)));
+    assert.deepEqual(pushed, [buildKittyKeyboardFlags({})], "leaving the shell pushes back what penguin asked for");
   } finally {
     setup.renderer.destroy();
   }

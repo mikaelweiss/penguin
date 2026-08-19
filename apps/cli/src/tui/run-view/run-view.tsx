@@ -6,7 +6,7 @@ import {
 } from "@mikaelweiss/penguin-engine/protocol";
 import { attachmentsDir } from "@mikaelweiss/penguin-engine/run";
 import { type Attention, controlFor, deliver, Feed, provide } from "@mikaelweiss/penguin-viewer";
-import { decodePasteBytes, type KeyEvent } from "@opentui/core";
+import { buildKittyKeyboardFlags, decodePasteBytes, type KeyEvent } from "@opentui/core";
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { spawn } from "node:child_process";
 import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -209,12 +209,9 @@ export function RunView({
 
   /** A shell reads the legacy sequences, so the kitty protocol steps aside while it has the keys. */
   useEffect(() => {
-    if (place !== "shell") return;
-    const was = renderer.useKittyKeyboard;
-    renderer.useKittyKeyboard = false;
-    return () => {
-      renderer.useKittyKeyboard = was;
-    };
+    if (place !== "shell" || !renderer.useKittyKeyboard) return;
+    renderer.disableKittyKeyboard();
+    return () => renderer.enableKittyKeyboard(buildKittyKeyboardFlags({}));
   }, [place, renderer]);
 
   const leave = (left: Left): void => {
