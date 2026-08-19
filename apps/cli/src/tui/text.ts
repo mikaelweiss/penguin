@@ -31,6 +31,13 @@ export function cut(text: string, columns: number): string {
   return `${out}…${styled ? RESET : ""}`;
 }
 
+/** Text at most `columns` wide, keeping its end, which is the half that names a directory. */
+export function tail(text: string, columns: number): string {
+  const limit = Math.max(1, columns);
+  if (wide(text) <= limit) return text;
+  return `…${text.slice(text.length - limit + 1)}`;
+}
+
 /** The parts that fit one row, two spaces apart. The first part that does not fit ends the row. */
 export function fit(parts: string[], columns: number): string {
   let row = "";

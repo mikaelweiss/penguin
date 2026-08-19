@@ -183,6 +183,7 @@ In a run view, the run's tree fills the left pane: each activity, session, and s
 - The view opens with the tree focused. `esc` moves focus to the input bar, where every key you type goes to the bar and `ctrl-u` empties the draft. Enter sends and hands the keyboard back to the tree. Enter on an empty draft sends nothing and keeps the keyboard in the bar.
 - With the tree focused, arrows move the selection and left and right fold a node. The pane scrolls to keep your selection in view. `esc` returns you to the bar. `q` goes to the dashboard.
 - With the tree focused, `y` copies the directory the selected node runs in. A node with several directories draws a list to pick one.
+- `ctrl-/` opens a shell under the input bar, in the directory the selected node runs in, and `ctrl-/` closes it. Every key goes to the shell while it holds the keyboard, `Ctrl-C` included. Click the tree, the bar, or the shell to move the keyboard between them, and clicking a tree row moves the panel to that node's directory. penguin keeps one shell per directory per run, so a shell you leave keeps running and comes back with its history. Drag the divider to resize the panel. The run ending closes its shells.
 - `Ctrl-C` stops the run. penguin kills the steps in flight and records the stop.
 
 Closing the terminal never touches the run.

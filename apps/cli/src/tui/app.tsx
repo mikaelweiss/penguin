@@ -1,6 +1,7 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { type ReactNode, useState } from "react";
+import { shells } from "../machine/shell.ts";
 import { Dashboard, type Open } from "./dashboard.tsx";
 import { type Left, RunView } from "./run-view/run-view.tsx";
 
@@ -58,6 +59,7 @@ export async function mount(start: Start): Promise<number> {
     root.render(<App start={start} onDone={done} />);
   });
   root.unmount();
+  shells.closeAll();
   renderer.destroy();
   if (left.note !== undefined) {
     const out = left.note.startsWith("pn:") ? process.stderr : process.stdout;

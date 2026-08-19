@@ -185,7 +185,9 @@ function mask(field: FormField, text: string): string {
   return field.secret ? "*".repeat(text.length) : text;
 }
 
-export type Copying = {
+export type Picking = {
+  title: string;
+  keys: string;
   dirs: string[];
   cursor: number;
   isOpen(): boolean;
@@ -193,33 +195,31 @@ export type Copying = {
   key(event: KeyEvent): void;
 };
 
-type Copy = { dirs: string[]; cursor: number };
+type Pick = { dirs: string[]; cursor: number };
 
-const CLOSED: Copy = { dirs: [], cursor: 0 };
+const CLOSED: Pick = { dirs: [], cursor: 0 };
 
 /**
- * The `y` key on any screen. One directory copies at once, several open the picker.
+ * A directory question. One directory answers itself, several open the picker.
  * A ref holds the picker: a terminal delivers several keys with no render between them.
  */
-export function useCopy(report: (note: string) => void): Copying {
-  const held = useRef<Copy>(CLOSED);
+export function usePickDir(title: string, keys: string, take: (dir: string) => void): Picking {
+  const held = useRef<Pick>(CLOSED);
   const [, bump] = useReducer((count: number) => count + 1, 0);
-  const set = (next: Copy): void => {
+  const set = (next: Pick): void => {
     held.current = next;
     bump();
   };
-  const copy = async (target: string): Promise<void> => {
-    const done = await copyText(target);
-    report("ok" in done ? `copied ${target}` : done.warn);
-  };
   return {
+    title,
+    keys,
     dirs: held.current.dirs,
     cursor: held.current.cursor,
     isOpen: () => held.current.dirs.length > 0,
     start(dirs: string[]): void {
       const only = dirs[0];
       if (only === undefined) return;
-      if (dirs.length === 1) return void copy(only);
+      if (dirs.length === 1) return take(only);
       set({ dirs, cursor: 0 });
     },
     /** A terminal folds an escape that precedes another key into a modifier, and neither key acts. */
@@ -235,30 +235,31 @@ export function useCopy(report: (note: string) => void): Copying {
       if (event.name === "return" || event.name === "enter") {
         const target = open.dirs[open.cursor];
         set(CLOSED);
-        if (target !== undefined) void copy(target);
+        if (target !== undefined) take(target);
       }
     },
   };
 }
 
+/** The `y` key on any screen: the directory under the cursor reaches the clipboard. */
+export function useCopy(report: (note: string) => void): Picking {
+  const copy = async (target: string): Promise<void> => {
+    const done = await copyText(target);
+    report("ok" in done ? `copied ${target}` : done.warn);
+  };
+  return usePickDir("copy which directory?", "arrows move, enter copies, esc cancels", (dir) => void copy(dir));
+}
+
 /** The directory picker, the same on every screen. */
-export function CopyList({
-  dirs,
-  cursor,
-  width,
-}: {
-  dirs: string[];
-  cursor: number;
-  width: number;
-}): ReactNode {
+export function DirList({ picking, width }: { picking: Picking; width: number }): ReactNode {
   return (
     <Choices
-      title="copy which directory?"
-      choices={dirs.map((one) => ({ label: one }))}
-      cursor={cursor}
+      title={picking.title}
+      choices={picking.dirs.map((one) => ({ label: one }))}
+      cursor={picking.cursor}
       chosen={[]}
       many={false}
-      keys="arrows move, enter copies, esc cancels"
+      keys={picking.keys}
       width={width}
     />
   );

@@ -12,11 +12,13 @@ import { spawn } from "node:child_process";
 import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { pasteImage } from "../../machine/clipboard.ts";
 import { openEditor } from "../../machine/open-editor.ts";
+import { type Shell, shells } from "../../machine/shell.ts";
 import { Editor } from "../editor.ts";
-import { Choices, type Copying, CopyList, Fields, InputBar, useCopy } from "../input.tsx";
+import { Choices, DirList, Fields, InputBar, type Picking, useCopy, usePickDir } from "../input.tsx";
 import { cut, fit } from "../text.ts";
 import { ink } from "../theme.ts";
 import { type Ask, type Fix, fixes, notes, why } from "./credential.ts";
+import { MIN_ROWS, PANE_ROWS, ShellPane } from "./shell-pane.tsx";
 import { brief, statusLine } from "./status.ts";
 import { Transcript } from "./transcript.tsx";
 import { type Selection, Tree, treeKeys, treeRows } from "./tree.tsx";
@@ -27,6 +29,8 @@ const SAMPLE = 1000;
 export const PANE = 34;
 
 export type Left = { back: boolean; code: number; note?: string };
+
+type Place = "input" | "tree" | "shell";
 
 type Pick = { key: string; cursor: number; chosen: number[] };
 
@@ -61,7 +65,13 @@ export function RunView({
   const renderer = useRenderer();
   const [editor] = useState(() => new Editor());
   const [selected, setSelected] = useState<Selection>({ kind: "node", id: node ?? "root" });
-  const [focus, setFocus] = useState<"input" | "tree">("tree");
+  const [focus, setFocus] = useState<Place>("tree");
+  const [pane, setPane] = useState({ open: false, rows: PANE_ROWS });
+  const [shell, setShell] = useState<Shell | undefined>(undefined);
+  const picked = useRef(new Map<string, string>());
+  const asking = useRef("");
+  const visited = useRef(new Set<string>());
+  const sizing = useRef(false);
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [dropped, setDropped] = useState<Set<string>>(() => new Set());
   const held = useRef<{ pick: Pick; form: Form }>({ pick: NO_PICK, form: NO_FORM });
@@ -135,7 +145,7 @@ export function RunView({
 
   const phase = projection.phase();
   const ended = phase !== "live" || !alive;
-  const place = ended ? "tree" : focus;
+  const place: Place = ended && focus !== "shell" ? "tree" : focus;
   const rows = treeRows(projection, closed);
   const nodeId = selected.kind === "node" ? selected.id : projection.sessionNode(selected.id);
   const attention = projection.attention();
@@ -150,6 +160,62 @@ export function RunView({
   const control = asked !== undefined || list !== undefined;
   const keys = !ended && place === "tree" && !control ? treeKeys(PANE) : [];
   const room = Math.max(1, size.height - 2 - keys.length);
+  const spot = `${selected.kind}:${selected.id}`;
+  const dirs = selected.kind === "session" ? [projection.sessionDir(selected.id)] : projection.directories(selected.id);
+  const mine = picked.current.get(spot);
+  const path = dirs.length === 1 ? dirs[0] : mine !== undefined && dirs.includes(mine) ? mine : undefined;
+  const paneRows = Math.max(MIN_ROWS, Math.min(pane.rows, size.height - 6));
+
+  const shellPick = usePickDir("open a shell in which directory?", "arrows move, enter opens, esc cancels", (dir) => {
+    picked.current.set(asking.current, dir);
+    bump();
+  });
+
+  const askDir = (): void => {
+    asking.current = spot;
+    shellPick.start(dirs);
+  };
+
+  const togglePane = (): void => {
+    if (pane.open) {
+      visited.current.clear();
+      setPane((was) => ({ ...was, open: false }));
+      setFocus("tree");
+      return;
+    }
+    setPane((was) => ({ ...was, open: true }));
+    setFocus("shell");
+  };
+
+  /** A node whose subtree holds several directories asks which one, once per node while the pane is open. */
+  useEffect(() => {
+    if (!pane.open || path !== undefined || dirs.length < 2 || visited.current.has(spot)) return;
+    visited.current.add(spot);
+    askDir();
+  }, [pane.open, path, spot, dirs.length]);
+
+  useEffect(() => {
+    if (!pane.open || path === undefined) return setShell(undefined);
+    setShell(shells.open(name, path, Math.max(1, width), Math.max(1, paneRows)));
+  }, [pane.open, path, name]);
+
+  useEffect(() => {
+    if (!ended) return;
+    shells.closeRun(name);
+    setShell(undefined);
+    setPane((was) => ({ ...was, open: false }));
+    setFocus("tree");
+  }, [ended, name]);
+
+  /** A shell reads the legacy sequences, so the kitty protocol steps aside while it has the keys. */
+  useEffect(() => {
+    if (place !== "shell") return;
+    const was = renderer.useKittyKeyboard;
+    renderer.useKittyKeyboard = false;
+    return () => {
+      renderer.useKittyKeyboard = was;
+    };
+  }, [place, renderer]);
 
   const leave = (left: Left): void => {
     onLeave(left);
@@ -449,6 +515,9 @@ export function RunView({
 
   useKeyboard((key: KeyEvent) => {
     if (key.eventType === "release") return;
+    if (opens(key)) return togglePane();
+    if (shellPick.isOpen()) return shellPick.key(key);
+    if (place === "shell") return void shell?.write(key.raw);
     if (key.ctrl && key.name === "c") return stopRun();
     if (copying.isOpen()) return copying.key(key);
     if (!ended) {
@@ -479,8 +548,10 @@ export function RunView({
   });
 
   usePaste((event) => {
-    if (ended || copying.isOpen()) return;
+    if (copying.isOpen() || shellPick.isOpen()) return;
     const pasted = decodePasteBytes(event.bytes);
+    if (place === "shell") return void shell?.write(pasted);
+    if (ended) return;
     if (asked !== undefined) {
       if (asked.phase === "rejected" && !(form.key === keyOf(asked) && form.retype)) return;
       return fieldPaste(pasted, asked);
@@ -501,7 +572,19 @@ export function RunView({
   });
 
   return (
-    <box style={{ flexDirection: "column", width: size.width, height: size.height }}>
+    <box
+      style={{ flexDirection: "column", width: size.width, height: size.height }}
+      onMouseDrag={(event) => {
+        if (!sizing.current) return;
+        setPane((was) => ({ ...was, rows: Math.max(MIN_ROWS, size.height - 2 - event.y) }));
+      }}
+      onMouseUp={() => {
+        sizing.current = false;
+      }}
+      onMouseDragEnd={() => {
+        sizing.current = false;
+      }}
+    >
       <box style={{ flexDirection: "row", flexGrow: 1 }}>
         <box
           style={{
@@ -512,12 +595,24 @@ export function RunView({
             flexShrink: 0,
             overflow: "hidden",
           }}
+          onMouseDown={() => setFocus("tree")}
         >
           <text fg={ink.dim} style={{ flexShrink: 0 }}>
             {cut(` ${name}  ${agent}`, PANE)}
           </text>
           <box style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, minHeight: 1, overflow: "hidden" }}>
-            <Tree rows={rows} selected={selected} frame={frame} width={PANE - 1} height={room} />
+            <Tree
+              rows={rows}
+              selected={selected}
+              frame={frame}
+              width={PANE - 1}
+              height={room}
+              onPick={(row) => {
+                setSelected({ kind: row.kind, id: row.id });
+                setFocus("tree");
+                setNote("");
+              }}
+            />
           </box>
           {keys.length > 0 ? (
             <box style={{ flexDirection: "column", flexShrink: 0 }}>
@@ -530,7 +625,12 @@ export function RunView({
           ) : null}
         </box>
         <box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 1, overflow: "hidden" }}>
-          <Transcript entries={entries} live={!ended} width={width} />
+          <box
+            style={{ flexDirection: "column", flexGrow: 1, flexBasis: 0, minHeight: 1, overflow: "hidden" }}
+            onMouseDown={() => setFocus(ended ? "tree" : "input")}
+          >
+            <Transcript entries={entries} live={!ended} width={width} />
+          </box>
           <Bottom
             ended={ended}
             asked={asked}
@@ -546,7 +646,25 @@ export function RunView({
             blocked={state.state === "blocked"}
             note={note}
             width={width}
+            picking={shellPick}
           />
+          {pane.open ? (
+            <ShellPane
+              shell={shell}
+              {...(path === undefined ? {} : { path })}
+              rows={paneRows}
+              width={width}
+              focused={place === "shell"}
+              onFocus={() => setFocus("shell")}
+              onGrab={() => {
+                sizing.current = true;
+              }}
+              onEnd={() => {
+                setPane((was) => ({ ...was, open: false }));
+                setFocus("tree");
+              }}
+            />
+          ) : null}
         </box>
       </box>
       <text fg={ink.dim} style={{ flexShrink: 0 }}>
@@ -571,6 +689,7 @@ function Bottom({
   blocked,
   note,
   width,
+  picking,
 }: {
   ended: boolean;
   asked: Ask | undefined;
@@ -578,7 +697,7 @@ function Bottom({
   gate: Extract<Attention, { kind: "gate" }> | undefined;
   list: { list: string[]; many: boolean } | undefined;
   pick: Pick;
-  copy: Copying;
+  copy: Picking;
   editor: Editor;
   focused: boolean;
   selected: Selection;
@@ -586,9 +705,13 @@ function Bottom({
   blocked: boolean;
   note: string;
   width: number;
+  picking: Picking;
 }): ReactNode {
+  if (picking.dirs.length > 0) {
+    return <DirList picking={picking} width={width} />;
+  }
   if (copy.dirs.length > 0) {
-    return <CopyList dirs={copy.dirs} cursor={copy.cursor} width={width} />;
+    return <DirList picking={copy} width={width} />;
   }
   if (ended) {
     return (
@@ -670,6 +793,11 @@ function Bottom({
 function keyOf(one: Attention): string {
   if (one.kind === "gate") return `gate:${one.gate ?? one.question}`;
   return `credential:${one.name}:${one.phase}`;
+}
+
+/** Ctrl-/ reaches penguin as ctrl and underscore on a plain terminal, and as ctrl and slash under kitty. */
+function opens(key: KeyEvent): boolean {
+  return key.ctrl && (key.name === "/" || key.name === "_");
 }
 
 /** The options belong to the key, so a re-ask with other labels starts clean. */

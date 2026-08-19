@@ -12,6 +12,7 @@ import { act, type ReactNode } from "react";
 import { agentLabel, agentLine } from "../apps/cli/src/attach/attach.ts";
 import { watchAsLines } from "../apps/cli/src/attach/plain.ts";
 import { computerLine, strained } from "../apps/cli/src/machine/memory.ts";
+import { shells } from "../apps/cli/src/machine/shell.ts";
 import { Ask, Pick } from "../apps/cli/src/tui/ask.tsx";
 import { Dashboard, type Open } from "../apps/cli/src/tui/dashboard.tsx";
 import { Editor } from "../apps/cli/src/tui/editor.ts";
@@ -2148,4 +2149,353 @@ test("every agent header label fits the pane the run view cuts it to", (t) => {
   assert.equal(absent, "agent: default missing");
   assert.ok(absent.length <= room, absent);
   assert.ok(agentLine([one("claude")]).length > room, "the full line is what the pane cannot hold");
+});
+
+/** A real directory to open a shell in, with $SHELL fixed so every machine spawns the same one. */
+function workspace(t: TestContext, name = "work"): string {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `penguin-${name}-`)));
+  const prior = process.env["SHELL"];
+  process.env["SHELL"] = "/bin/sh";
+  t.after(() => {
+    restore("SHELL", prior);
+    shells.closeAll();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return dir;
+}
+
+async function toShell(setup: TestRendererSetup): Promise<void> {
+  await press(setup, ["\x1f"]);
+  await settle(setup);
+}
+
+function rowOf(frame: string, text: string): number {
+  return frame.split("\n").findIndex((row) => row.includes(text));
+}
+
+/** The bottom row of the screen that holds anything. */
+function lastRow(frame: string): string {
+  const rows = frame.split("\n");
+  while (rows.length > 0 && (rows.at(-1) ?? "").trim() === "") rows.pop();
+  return rows.at(-1) ?? "";
+}
+
+async function shellSays(setup: TestRendererSetup, text: string): Promise<void> {
+  await type(setup, `echo ${text}`);
+  await press(setup, ["RETURN"]);
+  await shown(setup, text);
+}
+
+test("ctrl-/ opens a shell under the input bar, and ctrl-/ closes it", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+      { type: "state", state: "running", detail: "drafting" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    const frame = await shown(setup, path.basename(work));
+    assert.ok(rowOf(frame, "to run >") < rowOf(frame, path.basename(work)), "the input bar sits above the panel");
+    assert.match(lastRow(frame), /running/, "the status line still holds the last row");
+    await toShell(setup);
+    await frameWith(setup, (text) => !text.includes(path.basename(work)));
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the shell in the panel runs commands, and a full-screen app draws in the pane", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    await shellSays(setup, "penguin-ran-here");
+    await type(setup, "printf '\\033[?1049h\\033[HPENGUIN-ALT'");
+    await press(setup, ["RETURN"]);
+    const frame = await shown(setup, "PENGUIN-ALT");
+    assert.ok(!frame.includes("penguin-ran-here"), "the alternate screen replaces what the shell drew before it");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("one shell per path: a shell off screen keeps its output for the selection that comes back", async (t) => {
+  const box = sandbox(t);
+  const first = workspace(t, "one");
+  const second = workspace(t, "two");
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: first },
+      { type: "session", id: "s2", name: "critic", use: "claude", dir: second },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toTree(setup);
+    await press(setup, ["ARROW_DOWN"]);
+    await toShell(setup);
+    await shown(setup, path.basename(first));
+    await shellSays(setup, "penguin-in-one");
+
+    const planner = rowOf(setup.captureCharFrame(), "planner");
+    await act(async () => {
+      await setup.mockMouse.click(3, planner + 1);
+    });
+    await shown(setup, path.basename(second));
+    assert.ok(!setup.captureCharFrame().includes("penguin-in-one"), "the other path draws its own shell");
+
+    await act(async () => {
+      await setup.mockMouse.click(60, 20);
+    });
+    await shellSays(setup, "penguin-in-two");
+
+    await act(async () => {
+      await setup.mockMouse.click(3, planner);
+    });
+    await shown(setup, "penguin-in-one");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the run ending closes that run's shells", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  const dir = box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    ],
+    { live: true },
+  );
+  const held = shells.open("plan-1", work, 80, 10);
+  assert.ok(held !== undefined && held.alive, "the shell starts alive");
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    fs.rmSync(path.join(dir, "lock"));
+    await arrive(
+      setup,
+      dir,
+      [{ type: "run", phase: "done", run: "plan-1", result: "done" }],
+      (text) => text.includes("this run is done"),
+    );
+    assert.equal(held.alive, false, "the run ending closed the shell it held");
+    assert.ok(!setup.captureCharFrame().includes(path.basename(work)), "the panel closed with the run");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the shell takes ctrl-c while it holds the keyboard, and the run keeps running", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  const dir = box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    ],
+    { live: true },
+  );
+  const sleeper = Bun.spawn(["sleep", "30"]);
+  fs.writeFileSync(path.join(dir, "lock"), String(sleeper.pid));
+  t.after(() => sleeper.kill());
+  const left: Left[] = [];
+  const setup = await screen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={(one) => left.push(one)} />,
+  );
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    await act(async () => {
+      setup.mockInput.pressCtrlC();
+    });
+    await idle(setup);
+    assert.deepEqual(left, [], "ctrl-c never reached the run");
+    assert.equal(sleeper.killed, false, "the run process is untouched");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a node with two directories asks which one, and the answer opens the shell there", async (t) => {
+  const box = sandbox(t);
+  const first = workspace(t, "one");
+  const second = workspace(t, "two");
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: first },
+      { type: "session", id: "s2", name: "critic", use: "claude", dir: second },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await frameWith(setup, (text) => text.includes("open a shell in which directory?"));
+    await press(setup, ["RETURN"]);
+    await shown(setup, path.basename(first));
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a directory that is gone opens no shell and says so", async (t) => {
+  const box = sandbox(t);
+  workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: "/work/wt-gone" },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await frameWith(setup, (text) => text.includes("is gone, so no shell opens there"));
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("dragging the divider resizes the panel, and the transcript keeps a row", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    const before = rowOf(await shown(setup, path.basename(work)), path.basename(work));
+    await act(async () => {
+      await setup.mockMouse.drag(50, before, 50, before - 4);
+    });
+    await setup.flush();
+    const after = rowOf(setup.captureCharFrame(), path.basename(work));
+    assert.equal(after, before - 4, "the divider follows the drag");
+    await act(async () => {
+      await setup.mockMouse.drag(50, after, 50, 0);
+    });
+    await setup.flush();
+    assert.ok(rowOf(setup.captureCharFrame(), path.basename(work)) > 0, "the panel leaves the rows above it a row");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("leaving the shell closes the panel, and ctrl-/ opens a fresh one", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    await shellSays(setup, "penguin-before-exit");
+    await type(setup, "exit");
+    await press(setup, ["RETURN"]);
+    await frameWith(setup, (text) => !text.includes(path.basename(work)));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    assert.ok(!setup.captureCharFrame().includes("penguin-before-exit"), "the new shell starts clean");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("the panel keeps the colors the shell prints", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    ],
+    { live: true },
+  );
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("to run"));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    await type(setup, "printf '\\033[31mpenguin-red\\033[0m\\n'");
+    await press(setup, ["RETURN"]);
+    await shown(setup, "penguin-red");
+    const painted = setup
+      .captureSpans()
+      .lines.flatMap((line) => line.spans)
+      .find((span) => span.text.includes("penguin-red") && span.fg.g === 0 && span.fg.b === 0);
+    assert.ok(painted !== undefined, "the red the shell printed reaches the screen");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a done run opens a shell too, and its keys reach it", async (t) => {
+  const box = sandbox(t);
+  const work = workspace(t);
+  box.run("plan-1", [
+    { type: "run", phase: "started", run: "plan-1" },
+    { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+    { type: "run", phase: "done", run: "plan-1", result: "done" },
+  ]);
+  const setup = await screen(<RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("this run is done"));
+    await toShell(setup);
+    await shown(setup, path.basename(work));
+    await shellSays(setup, "penguin-after-done");
+  } finally {
+    setup.renderer.destroy();
+  }
 });

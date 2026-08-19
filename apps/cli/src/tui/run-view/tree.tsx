@@ -67,17 +67,21 @@ export function Tree({
   frame,
   width,
   height,
+  onPick,
 }: {
   rows: TreeRow[];
   selected: Selection;
   frame: number;
   width: number;
   height: number;
+  onPick(row: TreeRow): void;
 }): ReactNode {
   return (
     <box style={{ flexDirection: "column" }}>
       {inView(rows, selected, height).map((row) => (
-        <TreeLine key={row.key} row={row} selected={isSelected(row, selected)} frame={frame} width={width} />
+        <box key={row.key} style={{ flexDirection: "column" }} onMouseDown={() => onPick(row)}>
+          <TreeLine row={row} selected={isSelected(row, selected)} frame={frame} width={width} />
+        </box>
       ))}
     </box>
   );

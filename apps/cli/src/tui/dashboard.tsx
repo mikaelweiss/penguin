@@ -4,7 +4,7 @@ import type { KeyEvent } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import { type Computer, computerLine, readComputer, strained } from "../machine/memory.ts";
-import { CopyList, useCopy } from "./input.tsx";
+import { DirList, useCopy } from "./input.tsx";
 import { Launcher } from "./launcher.tsx";
 import { cut } from "./text.ts";
 import { glyph, ink, stateColor } from "./theme.ts";
@@ -200,7 +200,7 @@ export function Dashboard({
           />
         ))}
         {copying.isOpen() ? (
-          <CopyList dirs={copying.dirs} cursor={copying.cursor} width={size.width} />
+          <DirList picking={copying} width={size.width} />
         ) : (
           <text fg={ink.faint}>{cut(note === "" ? keysLine(showDone) : note, size.width)}</text>
         )}
