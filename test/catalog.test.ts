@@ -42,6 +42,7 @@ export default adapter({
     stageAll: async () => ({ ok: true, reason: "" }),
     commit: async (message) => {
       fs.appendFileSync(host.cwd + "/committed.txt", message + "\\n");
+      fs.writeFileSync(host.cwd + "/clean.txt", "clean");
       return { ok: true, reason: "" };
     },
     dirty: async () => ({
@@ -49,9 +50,18 @@ export default adapter({
       dirty: !fs.existsSync(host.cwd + "/clean.txt"),
       reason: "",
     }),
-    head: async () => ({ ok: true, branch: "main", sha: "abc1234", reason: "" }),
+    head: async (options) => ({
+      ok: true,
+      branch: options?.cwd === undefined ? "main" : options.cwd.split("/").pop(),
+      sha: "abc1234",
+      reason: "",
+    }),
     fetch: async () => ({ ok: true, reason: "" }),
     pull: async () => ({ ok: true, reason: "" }),
+    push: async (branch) => {
+      fs.appendFileSync(host.cwd + "/pushed.txt", branch + "\\n");
+      return { ok: true, reason: "" };
+    },
     merge: async (branch, options) => {
       fs.appendFileSync(host.cwd + "/merged.txt", branch + " " + String(options?.ffOnly) + "\\n");
       return { ok: true, reason: "" };
@@ -607,7 +617,7 @@ test("the catalog composes the pipelines out of the steps", async () => {
     "land",
     "work",
   ]);
-  assert.deepEqual(importsOf("work.ts"), ["baseline", "implement", "plan", "triage"]);
+  assert.deepEqual(importsOf("work.ts"), ["baseline", "commit", "implement", "plan", "triage"]);
   assert.deepEqual(importsOf("pr-queue.ts"), ["review-pr"]);
   assert.equal(typeof (await load(path.join(workflows, "ship.ts"))), "function");
   assert.equal(
@@ -620,7 +630,7 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer"}',
   );
   outsideReady(box);
 
@@ -667,11 +677,13 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
     dirs.includes(worktree),
     `no session ran in the worktree: ${dirs.join(", ")}`,
   );
+  assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
+  assert.deepEqual(box.lines("pushed.txt"), ["penguin-ABC-1"]);
 });
 
 test("the catalog open-pr workflow holds at the gate when the pull request is already open", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, "none");
+  catalogReady(box, '{"message":"fix: pin the footer"}');
   outsideReady(box);
   box.writeAdapter(
     "gh",
@@ -693,7 +705,9 @@ test("the catalog open-pr workflow holds at the gate when the pull request is al
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
-  assert.equal(box.sessions().length, 0);
+  assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
+  assert.deepEqual(box.lines("pushed.txt"), ["main"]);
+  assert.equal(box.sessions().length, 1, "one turn, the commit message");
 });
 
 test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {
@@ -987,7 +1001,7 @@ test("the catalog land workflow lands on a target that is ahead of origin", asyn
 test("the catalog land workflow gates when the checkout is on another branch", async (t) => {
   const box = sandbox(t);
   catalogReady(box, "{}");
-  box.writeAdapter("git", fakeVcs.replace('branch: "main"', 'branch: "side"'));
+  box.writeAdapter("git", fakeVcs.replace('? "main" :', '? "side" :'));
 
   const started = box.penguin(
     "run",

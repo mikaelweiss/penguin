@@ -12,7 +12,8 @@ type Rebase = Done & { conflicted: boolean; files: string[] };
 export default adapter({
   role: "vcs",
   name: "git",
-  description: "git working copies: staging, commits, worktrees, and rebasing a branch onto another",
+  description:
+    "git working copies: staging, commits, pushes, worktrees, and rebasing a branch onto another",
   build: (host) => {
     async function unmerged(cwd: string | undefined): Promise<string[]> {
       const done = await host.shell("git diff --name-only --diff-filter=U", { cwd });
@@ -74,6 +75,12 @@ export default adapter({
           { cwd: options?.cwd },
         );
         return { ok: done.code === 0, reason: done.stderr.trim() };
+      },
+      async push(branch: string, options?: { cwd?: string }): Promise<Done> {
+        const done = await host.shell(`git push -u origin ${quoted(branch)}`, {
+          cwd: options?.cwd,
+        });
+        return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
       },
       async merge(
         branch: string,

@@ -1,6 +1,7 @@
 import { workflow } from "penguin";
 import { z } from "zod";
 import baseline from "./baseline.ts";
+import commit from "./commit.ts";
 import implement from "./implement.ts";
 import plan from "./plan.ts";
 import triage from "./triage.ts";
@@ -61,6 +62,7 @@ export default workflow({
             `The review did not approve the change:\n\n${built.blocking}\n\nTake a look.`,
             Ack,
           );
+        await commit(ctx, { dir: ws.path });
       });
     }
 

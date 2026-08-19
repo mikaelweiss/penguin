@@ -126,9 +126,6 @@ function blocking(done: CommandResult): string | undefined {
   if (/no git remotes found/.test(done.stderr)) {
     return "This checkout has no git remote. Run `git remote add origin <url>`, then reply done.";
   }
-  if (/you must first push the current branch/.test(done.stderr)) {
-    return "The branch is not on the remote. Run `git push -u origin HEAD`, then reply done.";
-  }
   return undefined;
 }
 

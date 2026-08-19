@@ -54,7 +54,7 @@ export type Host = {
   /**
    * A question for the user, the same gate a workflow asks. The run shows blocked
    * with the question until a viewer answers. An adapter asks it when only a person
-   * can clear the way: sign in to a CLI, install a tool, push a branch.
+   * can clear the way: sign in to a CLI, install a tool, add a remote.
    */
   gate(question: string): Promise<string>;
   gate<Shape extends z.ZodType>(question: string, shape: Shape): Promise<z.infer<Shape>>;
