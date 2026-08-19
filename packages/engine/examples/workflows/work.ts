@@ -7,6 +7,7 @@ import plan from "./plan.ts";
 import triage from "./triage.ts";
 
 const Ack = z.union([z.enum(["ok"]), z.string()]);
+const Tried = z.union([z.enum(["done"]), z.string()]);
 
 function slug(ticket: string): string {
   const cut = ticket.trim().replaceAll(/[^A-Za-z0-9]+/g, "-").slice(0, 40);
@@ -63,6 +64,23 @@ export default workflow({
             Ack,
           );
         await commit(ctx, { dir: ws.path });
+
+        for (;;) {
+          const answer = await gate(
+            `Task ${index + 1} of ${total} is in ${ws.path}. Try it.\n\n${planned.acceptance}\n\nReply done, or say what to change.`,
+            Tried,
+          );
+          if (answer === "done") break;
+          await implement(ctx, {
+            task: answer,
+            acceptance: planned.acceptance,
+            dir: ws.path,
+            baseline: before.gates,
+            base: head.sha,
+            rounds: params.rounds,
+          });
+          await commit(ctx, { dir: ws.path });
+        }
       });
     }
 

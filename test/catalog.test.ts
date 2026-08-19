@@ -644,6 +644,7 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "ship-1", "pin the footer", "approve");
+  await answerGate(box, "ship-1", "Task 1 of 1 is in", "done");
   await answerGate(box, "ship-1", "PR is up:", "done");
   const ended = await box.waitForEnd("ship-1");
 
@@ -910,6 +911,7 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
   assert.equal(started.code, 0, started.output);
 
   await answerGate(box, "ship-local-1", "pin the footer", "approve");
+  await answerGate(box, "ship-local-1", "Task 1 of 1 is in", "done");
   await answerGate(
     box,
     "ship-local-1",
@@ -937,6 +939,38 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
   const labels = activities(box, "ship-local-1").map((span) => span.label);
   assert.ok(labels.includes(await description("commit.ts")), labels.join(", "));
   assert.ok(labels.includes(await description("land.ts")), labels.join(", "));
+});
+
+test("the catalog work workflow holds each task at a gate and takes the change", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer"}',
+  );
+  outsideReady(box);
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "work.ts"),
+    "--ticket",
+    "the footer scrolls",
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "work-1", "pin the footer", "approve");
+  await answerGate(box, "work-1", "Task 1 of 1 is in", "make the footer sticky");
+  await answerGate(box, "work-1", "Task 1 of 1 is in", "done");
+  const ended = await box.waitForEnd("work-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  const built = await description("implement.ts");
+  const labels = activities(box, "work-1").map((span) => span.label);
+  assert.equal(
+    labels.filter((label) => label === built).length,
+    2,
+    `the change ran no second implement: ${labels.join(", ")}`,
+  );
 });
 
 test("the catalog land workflow gives a rebase conflict to an agent, then moves main", async (t) => {
