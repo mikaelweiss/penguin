@@ -27,6 +27,7 @@ async function pi(lines: unknown[], outcome: { code?: number; stderr?: string } 
   const host: Host = {
     cwd: "/repo",
     state: "/state/penguin",
+    catalogs: [],
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     async exec(argv, options) {
       const at = argv.indexOf("-e");

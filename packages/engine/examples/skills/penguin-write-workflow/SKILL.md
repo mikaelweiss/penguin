@@ -5,9 +5,9 @@ description: Writes the workflow file and its new skills from an approved design
 
 # Write the workflow
 
-Build exactly what the design says. The input names the design file and the destination.
+Build exactly what the design says. The input carries the design and names the destination.
 
-1. Read the design.
+1. Read the design in the input.
 2. Write the workflow file to `<destination>/workflows/<name>.ts`. The name is kebab-case and becomes the run name, so keep it short.
 3. Write any shared code the workflow imports to `<destination>/helpers/<name>.ts`, and import it from the workflow by relative path (`../helpers/<name>.ts`).
 4. Write each new skill the design names to `<destination>/skills/<skill-name>/SKILL.md`: frontmatter with `name` (the directory name) and `description`, then the craft in markdown.

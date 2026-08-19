@@ -69,6 +69,7 @@ function stubHost(events: ViewEvent[]): Host {
   return {
     cwd: process.cwd(),
     state: process.cwd(),
+    catalogs: [],
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: (argv, options) => runArgv(argv, options?.cwd ?? process.cwd(), options),
     wait: <T,>(_label: string, body: () => Promise<T>) => body(),
@@ -315,6 +316,7 @@ async function gh(replies: Shelled[], answers: string[]): Promise<GhBox> {
   const host: Host = {
     cwd: process.cwd(),
     state: process.cwd(),
+    catalogs: [],
     shell: async (cmd) => {
       commands.push(cmd);
       const next = replies.shift() ?? { code: 0 };
@@ -439,6 +441,7 @@ async function git(t: TestContext, replies: Shelled[]): Promise<GitBox & { state
   const host: Host = {
     cwd: "/repo/app",
     state,
+    catalogs: [],
     shell: async (cmd) => {
       commands.push(cmd);
       const next = replies.shift() ?? { code: 0 };

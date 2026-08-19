@@ -49,6 +49,8 @@ export type Host = {
   cwd: string;
   /** penguin's state folder, where an adapter puts what it keeps between runs. */
   state: string;
+  /** The catalog directories penguin reads definitions from, earliest first. Only the ones that exist. */
+  catalogs: string[];
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   exec(argv: string[], options?: ExecOptions): Promise<number>;
   wait<T>(label: string, body: () => Promise<T>): Promise<T>;

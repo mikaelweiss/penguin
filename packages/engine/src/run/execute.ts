@@ -1,8 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import fs from "node:fs";
 import path from "node:path";
 import { type AgentOptions, type Ctx, type View, type Workflow, COMPOSE } from "../author/ctx.ts";
 import type { CredentialRequest, Host } from "../author/host.ts";
 import * as adapters from "../catalog/adapters.ts";
+import { roots } from "../catalog/catalogs.ts";
 import { load } from "../catalog/loader.ts";
 import { messageOf, PenguinError } from "../errors.ts";
 import { runDir, stateRoot } from "../paths.ts";
@@ -317,6 +319,9 @@ class Execution {
     return {
       cwd: this.record.cwd,
       state: stateRoot(),
+      catalogs: roots(this.record.cwd)
+        .map((catalog) => catalog.dir)
+        .filter((dir) => fs.existsSync(dir)),
       shell: (cmd, options) =>
         runCommand(cmd, this.resolveCwd(options?.cwd), { stdin: options?.stdin }),
       exec: (argv, options) => runArgv(argv, this.resolveCwd(options?.cwd), options),

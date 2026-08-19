@@ -2,7 +2,7 @@ import { workflow } from "penguin";
 import { z } from "zod";
 
 const Approval = z.union([z.enum(["approve", "revise"]), z.string()]);
-const Design = z.object({ path: z.string(), summary: z.string() });
+const Design = z.object({ design: z.string().describe("the whole design, in markdown") });
 const Written = z.object({ file: z.string(), name: z.string() });
 const Review = z.object({
   verdict: z.enum(["approved", "changes_needed"]),
@@ -14,7 +14,7 @@ function revision(idea: string, answer: string): string {
 }
 
 function brief(design: string, dest: string, findings: string[]): string {
-  const task = `Build the workflow from the design at ${design}. Write it under ${dest}.`;
+  const task = `Build the workflow from the design below. Write it under ${dest}.\n\n# Design\n\n${design}`;
   const last = findings.at(-1);
   if (last === undefined) return task;
   return `${task}\n\n# Review findings to address\n\n${last}`;
@@ -36,15 +36,14 @@ export default workflow({
       input: params.idea,
       result: Design,
     }))!;
-    let answer = await gate("Approve the design?", Approval);
+    let answer = await gate(`${design.design}\n\nApprove the design?`, Approval);
     while (answer !== "approve") {
       design = (await author.run("penguin-design-workflow", {
         input: revision(params.idea, answer),
         result: Design,
       }))!;
-      answer = await gate("Approve the design?", Approval);
+      answer = await gate(`${design.design}\n\nApprove the design?`, Approval);
     }
-    view.artifact({ title: "Design", path: design.path });
 
     let written: z.infer<typeof Written> | undefined;
     const findings: string[] = [];
@@ -53,12 +52,12 @@ export default workflow({
       approved = await view.activity(`round ${round} of ${params.rounds}`, async () => {
         view.fact({ round: `${round}/${params.rounds}` });
         written = (await author.run("penguin-write-workflow", {
-          input: brief(design.path, dest, findings),
+          input: brief(design.design, dest, findings),
           result: Written,
         }))!;
         const reviewer = agent();
         const review = (await reviewer.run("penguin-review-workflow", {
-          input: `Design: ${design.path}\nWorkflow: ${written.file}`,
+          input: `# Design\n\n${design.design}\n\n# Workflow\n\n${written.file}`,
           result: Review,
         }))!;
         findings.push(review.findings);

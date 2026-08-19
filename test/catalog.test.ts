@@ -1446,7 +1446,7 @@ test("the catalog make-workflow workflow designs, writes, and reviews the new wo
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"path":"workflow-design.md","summary":"one summary","file":"new-thing.ts","name":"new-thing","verdict":"approved","findings":"none"}',
+    '{"design":"one design","file":"new-thing.ts","name":"new-thing","verdict":"approved","findings":"none"}',
   );
 
   const started = box.penguin(
@@ -1458,7 +1458,7 @@ test("the catalog make-workflow workflow designs, writes, and reviews the new wo
   );
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "make-workflow-1", "Approve the design?", "approve");
+  await answerGate(box, "make-workflow-1", "one design\n\nApprove the design?", "approve");
   const ended = await box.waitForEnd("make-workflow-1");
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
@@ -1480,7 +1480,7 @@ test("the catalog make-workflow workflow stops after its round bound", async (t)
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"path":"workflow-design.md","summary":"one summary","file":"new-thing.ts","name":"new-thing","verdict":"changes_needed","findings":"the loop has no bound"}',
+    '{"design":"one design","file":"new-thing.ts","name":"new-thing","verdict":"changes_needed","findings":"the loop has no bound"}',
   );
 
   const started = box.penguin(
@@ -1494,7 +1494,7 @@ test("the catalog make-workflow workflow stops after its round bound", async (t)
   );
   assert.equal(started.code, 0, started.output);
 
-  await answerGate(box, "make-workflow-1", "Approve the design?", "approve");
+  await answerGate(box, "make-workflow-1", "one design\n\nApprove the design?", "approve");
   await answerGate(box, "make-workflow-1", "2 rounds and still findings", "ok");
   const ended = await box.waitForEnd("make-workflow-1");
 
@@ -1581,6 +1581,7 @@ function codexHost(script: (argv: string[]) => Scripted): {
   const host: Host = {
     cwd: process.cwd(),
     state: process.cwd(),
+    catalogs: [],
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: async (argv, options) => {
       runs.push({ argv, stdin: options?.stdin });

@@ -61,6 +61,9 @@ export default adapter({
       // A run has no one to ask, so a denied edit costs the turn. `permission` in the session options overrides it.
       const permission = turn.options["permission"];
       argv.push("--permission-mode", typeof permission === "string" ? permission : "acceptEdits");
+      // Skills read the catalogs and run `pn list`, and a run has nobody to approve either.
+      for (const dir of host.catalogs) argv.push("--add-dir", dir);
+      argv.push("--allowedTools", "Bash(pn list:*)");
 
       let buffer = "";
       let stderr = "";

@@ -926,6 +926,47 @@ export default workflow({
   assert.equal(ended["result"], "open");
 });
 
+test("host.catalogs names the catalog directories that exist, earliest first", async (t) => {
+  const box = sandbox(t);
+  box.write(".penguin/skills/.keep", "");
+  box.writeAdapter(
+    "lister",
+    `import { adapter } from "penguin";
+
+export default adapter({
+  role: "catalog",
+  name: "lister",
+  description: "answers with the catalog directories the host names",
+  build: (host) => ({
+    async dirs() {
+      return host.catalogs;
+    },
+  }),
+});
+`,
+  );
+  box.write(
+    "w.ts",
+    `import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "test",
+  params: z.object({}),
+  async run({ catalog }) {
+    return await catalog.dirs();
+  },
+});
+`,
+  );
+
+  assert.equal(box.penguin("run", "./w.ts", "--background").code, 0);
+  const ended = await box.waitForEnd("w-1");
+
+  assert.equal(ended["phase"], "done");
+  assert.deepEqual(ended["result"], [path.join(box.project, ".penguin"), box.home]);
+});
+
 test("host.wait shows the run idle with the label", async (t) => {
   const box = sandbox(t);
   box.withClock();

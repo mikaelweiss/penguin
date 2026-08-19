@@ -5,7 +5,9 @@ cd "$(dirname "$0")/.."
 
 (cd apps/cli && bun unlink) || true
 
-rm -rf ~/.penguin
+# Only what penguin regenerates. Workflows, helpers, adapters, and skills are the user's.
+rm -rf ~/.penguin/starter
+rm -f ~/.penguin/penguin-env.d.ts
 
 bun install
 
