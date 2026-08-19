@@ -79,7 +79,7 @@ export async function build(only: Target[], skipInstall: boolean): Promise<strin
   const manifest = (await Bun.file(path.join(root, "package.json")).json()) as Record<string, unknown>;
   const version = manifest["version"] as string;
   await checkStarter(version);
-  if (!skipInstall) await $`bun install --os=* --cpu=*`.cwd(root).quiet();
+  if (!skipInstall) await $`bun install ${"--os=*"} ${"--cpu=*"}`.cwd(root).quiet();
   for (const target of only) {
     process.stdout.write(`building ${packageName(target)}\n`);
     await buildOne(target, version, manifest);
