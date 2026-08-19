@@ -178,8 +178,13 @@ export default adapter({
         /** The branch's pull request. One that is open already is the answer, not a failure. */
         async create(options?: {
           cwd?: string;
+          head?: string;
+          base?: string;
         }): Promise<{ ok: boolean; url: string; existed: boolean; reason: string }> {
-          const done = await gh("gh pr create --fill", { cwd: options?.cwd });
+          // A stack names its own head: the tree sits on the top branch while every PR below it opens.
+          const head = options?.head === undefined ? "" : ` --head ${quoted(options.head)}`;
+          const base = options?.base === undefined ? "" : ` --base ${quoted(options.base)}`;
+          const done = await gh(`gh pr create --fill${head}${base}`, { cwd: options?.cwd });
           if (done.code === 0) {
             return { ok: true, url: done.stdout.trim(), existed: false, reason: "" };
           }
@@ -187,7 +192,8 @@ export default adapter({
           if (!/already exists/.test(done.stderr)) {
             return { ok: false, url: "", existed: false, reason };
           }
-          const open = await gh("gh pr view --json url", { cwd: options?.cwd });
+          const which = options?.head === undefined ? "" : ` ${quoted(options.head)}`;
+          const open = await gh(`gh pr view${which} --json url`, { cwd: options?.cwd });
           if (open.code !== 0) return { ok: false, url: "", existed: false, reason };
           const url = String((JSON.parse(open.stdout) as { url?: unknown }).url ?? "");
           if (url === "") return { ok: false, url: "", existed: false, reason };

@@ -90,6 +90,12 @@ export default adapter({
         const done = await host.shell(`git merge${how} ${quoted(branch)}`, { cwd: options?.cwd });
         return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
       },
+      branch: {
+        async create(name: string, options?: { cwd?: string }): Promise<Done> {
+          const done = await host.shell(`git checkout -b ${quoted(name)}`, { cwd: options?.cwd });
+          return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
+        },
+      },
       rebase: {
         async onto(ref: string, options?: { cwd?: string }): Promise<Rebase> {
           return rebased(`git rebase ${quoted(ref)}`, options?.cwd);
@@ -105,7 +111,7 @@ export default adapter({
       worktree: {
         async add(
           name: string,
-          options?: { ref?: string },
+          options?: { ref?: string; from?: string },
         ): Promise<{ ok: boolean; path: string; exists: boolean; reason: string }> {
           const root = await host.shell("git rev-parse --show-toplevel");
           const project = path.basename(root.stdout.trim() === "" ? host.cwd : root.stdout.trim());
@@ -125,7 +131,11 @@ export default adapter({
               reason: done.stderr.trim(),
             };
           }
-          const done = await host.shell(`git worktree add -b ${quoted(name)} ${quoted(target)}`);
+          // A local ref, so a worktree can start on a commit that has never reached the remote.
+          const start = options?.from === undefined ? "" : ` ${quoted(options.from)}`;
+          const done = await host.shell(
+            `git worktree add -b ${quoted(name)} ${quoted(target)}${start}`,
+          );
           return { ok: done.code === 0, path: target, exists: false, reason: done.stderr.trim() };
         },
         async remove(target: string, options?: { force?: boolean }): Promise<Done> {
