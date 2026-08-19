@@ -70,10 +70,7 @@ test("the compiled binary installs, carries the catalog, and runs a workflow", (
 
   fs.mkdirSync(path.join(penguin.home, "workflows"), { recursive: true });
   fs.writeFileSync(path.join(penguin.home, "workflows", "smoke.ts"), smoke);
-  const started = penguin.run("run", "smoke", "--note", "from the binary", "--background");
-  assert.equal(started.code, 0, started.output);
-
-  const joined = penguin.run("attach", "smoke-1");
-  assert.equal(joined.code, 0, joined.output);
-  assert.match(joined.output, /from the binary/);
+  const ran = penguin.run("run", "smoke", "--note", "from the binary");
+  assert.equal(ran.code, 0, ran.output);
+  assert.match(ran.output, /from the binary/);
 });

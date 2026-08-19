@@ -3,7 +3,7 @@ import { $ } from "bun";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeStarter } from "./generate-starter.ts";
+import { generateStarter, generatedFile } from "./generate-starter.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dist = path.join(root, "dist");
@@ -33,6 +33,13 @@ export function binaryName(target: Target): string {
 
 function compileTarget(target: Target): string {
   return `bun-${target.os === "win32" ? "windows" : target.os}-${target.arch}`;
+}
+
+/** A binary carries the generated catalog, so a build refuses to ship a stale one. */
+async function checkStarter(version: string): Promise<void> {
+  const { source } = await generateStarter(version);
+  if (fs.readFileSync(generatedFile, "utf8") === source) return;
+  throw new Error(`${path.relative(root, generatedFile)} is stale. Run \`bun run generate\`.`);
 }
 
 async function buildOne(target: Target, version: string, manifest: Record<string, unknown>): Promise<void> {
@@ -71,7 +78,7 @@ async function buildOne(target: Target, version: string, manifest: Record<string
 export async function build(only: Target[], skipInstall: boolean): Promise<string> {
   const manifest = (await Bun.file(path.join(root, "package.json")).json()) as Record<string, unknown>;
   const version = manifest["version"] as string;
-  await writeStarter(version);
+  await checkStarter(version);
   if (!skipInstall) await $`bun install --os=* --cpu=*`.cwd(root).quiet();
   for (const target of only) {
     process.stdout.write(`building ${packageName(target)}\n`);

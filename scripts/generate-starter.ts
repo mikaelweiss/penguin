@@ -6,7 +6,7 @@ import { generateTypes } from "./generate-types.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const examples = path.join(root, "packages", "engine", "examples");
-const target = path.join(root, "packages", "engine", "src", "catalog", "starter.generated.ts");
+export const generatedFile = path.join(root, "packages", "engine", "src", "catalog", "starter.generated.ts");
 
 function walk(dir: string, prefix = ""): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
@@ -38,14 +38,14 @@ export async function generateStarter(version: string): Promise<{ source: string
   return { source, files };
 }
 
-export async function writeStarter(version: string): Promise<string[]> {
+async function writeStarter(version: string): Promise<string[]> {
   const { source, files } = await generateStarter(version);
-  fs.writeFileSync(target, source);
+  fs.writeFileSync(generatedFile, source);
   return files;
 }
 
 if (import.meta.main) {
   const manifest = (await Bun.file(path.join(root, "package.json")).json()) as { version: string };
   const files = await writeStarter(manifest.version);
-  process.stdout.write(`wrote ${path.relative(root, target)}: ${files.length} files\n`);
+  process.stdout.write(`wrote ${path.relative(root, generatedFile)}: ${files.length} files\n`);
 }
