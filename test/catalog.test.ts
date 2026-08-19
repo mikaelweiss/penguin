@@ -57,8 +57,10 @@ export default adapter({
       ok: true,
       branch: options?.cwd === undefined ? "main" : options.cwd.split("/").pop(),
       sha: "abc1234",
+      detached: false,
       reason: "",
     }),
+    defaultBranch: async () => ({ ok: true, branch: "main", reason: "" }),
     fetch: async () => ({ ok: true, reason: "" }),
     pull: async () => ({ ok: true, reason: "" }),
     push: async (branch) => {
@@ -123,7 +125,8 @@ export default adapter({
       stage: async () => ({ ok: true, reason: "" }),
       commit: async () => ({ ok: true, reason: "" }),
       dirty: async () => ({ ok: true, dirty: false, reason: "" }),
-      head: async () => ({ ok: true, branch: "main", sha: at(tip, "main2"), reason: "" }),
+      head: async () => ({ ok: true, branch: "main", sha: at(tip, "main2"), detached: false, reason: "" }),
+      defaultBranch: async () => ({ ok: true, branch: "main", reason: "" }),
       fetch: async () => ({ ok: true, reason: "" }),
       pull: async () => ({ ok: true, reason: "" }),
       merge: async (branch, options) => {
@@ -166,7 +169,8 @@ export default adapter({
     stage: async () => ({ ok: true, reason: "" }),
     commit: async () => ({ ok: true, reason: "" }),
     dirty: async () => ({ ok: true, dirty: true, reason: "" }),
-    head: async () => ({ ok: true, branch: "main", sha: "abc1234", reason: "" }),
+    head: async () => ({ ok: true, branch: "main", sha: "abc1234", detached: false, reason: "" }),
+    defaultBranch: async () => ({ ok: true, branch: "main", reason: "" }),
     fetch: async () => ({ ok: true, reason: "" }),
     pull: async () => ({ ok: true, reason: "" }),
     merge: async () => ({ ok: true, reason: "" }),
@@ -707,6 +711,7 @@ test("the catalog open-pr workflow holds at the gate when the pull request is al
   );
   assert.equal(started.code, 0, started.output);
 
+  await answerGate(box, "open-pr-1", "The checkout is on main", "ok");
   await answerGate(box, "open-pr-1", "PR is up:", "done");
   const ended = await box.waitForEnd("open-pr-1");
 
@@ -716,6 +721,133 @@ test("the catalog open-pr workflow holds at the gate when the pull request is al
   assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
   assert.deepEqual(box.lines("pushed.txt"), ["main"]);
   assert.equal(box.sessions().length, 2, "two turns, the commit and the pull request");
+});
+
+test("the catalog open-pr workflow stops at the default branch gate", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"files":["src/footer.ts"],"message":"fix: pin the footer","title":"fix: pin the footer","body":"the footer scrolls away"}',
+  );
+  outsideReady(box);
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "open-pr.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "open-pr-1", "The checkout is on main", "stop");
+  const ended = await box.waitForEnd("open-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { url: "" });
+  assert.ok(!box.exists("staged.txt"), "nothing staged");
+  assert.ok(!box.exists("pushed.txt"), "nothing pushed");
+  assert.equal(box.sessions().length, 0, "no agent ran");
+});
+
+test("the catalog open-pr workflow ends at a gate when the checkout is detached", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"files":["src/footer.ts"],"message":"fix: pin the footer","title":"fix: pin the footer","body":"the footer scrolls away"}',
+  );
+  outsideReady(box);
+  box.writeAdapter("git", fakeVcs.replace("detached: false", "detached: true"));
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "open-pr.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "open-pr-1", "The checkout is detached", "ok");
+  const ended = await box.waitForEnd("open-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { url: "" });
+  assert.ok(!box.exists("pushed.txt"), "nothing pushed");
+});
+
+test("the catalog open-pr workflow retries the push after the user clears the way", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"files":["src/footer.ts"],"message":"fix: pin the footer","title":"fix: pin the footer","body":"the footer scrolls away"}',
+  );
+  outsideReady(box);
+  box.writeAdapter(
+    "git",
+    fakeVcs.replace(
+      `    push: async (branch) => {
+      fs.appendFileSync(host.cwd + "/pushed.txt", branch + "\\n");
+      return { ok: true, reason: "" };
+    },`,
+      `    push: async (branch) => {
+      if (!fs.existsSync(host.cwd + "/remote-ok.txt"))
+        return { ok: false, reason: "no upstream" };
+      fs.appendFileSync(host.cwd + "/pushed.txt", branch + "\\n");
+      return { ok: true, reason: "" };
+    },`,
+    ),
+  );
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "open-pr.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "open-pr-1", "The checkout is on main", "ok");
+  await waitFor(() =>
+    String(box.lastState("open-pr-1")?.["detail"] ?? "").startsWith(
+      "The branch did not reach the remote",
+    ),
+  );
+  fs.writeFileSync(path.join(box.project, "remote-ok.txt"), "ok");
+  box.send("open-pr-1", "retry");
+  await answerGate(box, "open-pr-1", "PR is up:", "done");
+  const ended = await box.waitForEnd("open-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
+  assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
+  assert.deepEqual(box.lines("pushed.txt"), ["main"]);
+});
+
+test("the catalog open-pr workflow hands the gate answer to the feedback agent", async (t) => {
+  const box = sandbox(t);
+  catalogReady(
+    box,
+    '{"files":["src/footer.ts"],"message":"fix: pin the footer","title":"fix: pin the footer","body":"the footer scrolls away"}',
+  );
+  box.setAgent(
+    '{"files":["src/footer.ts"],"message":"fix: pin the footer","title":"fix: pin the footer","body":"the footer scrolls away"}',
+    "prompts.txt",
+  );
+  outsideReady(box);
+
+  const started = box.penguin(
+    "run",
+    path.join(workflows, "open-pr.ts"),
+    "--background",
+  );
+  assert.equal(started.code, 0, started.output);
+
+  await answerGate(box, "open-pr-1", "The checkout is on main", "ok");
+  await answerGate(box, "open-pr-1", "PR is up:", "make the header sticky");
+  await answerGate(box, "open-pr-1", "PR is up:", "done");
+  const ended = await box.waitForEnd("open-pr-1");
+
+  assert.equal(ended["phase"], "done", JSON.stringify(ended));
+  const prompts = box.invocations("prompts.txt");
+  const feedback = prompts.find((prompt) => prompt.includes("make the header sticky"));
+  assert.ok(feedback !== undefined, `no prompt carried the feedback: ${prompts.join("\n")}`);
+  assert.match(String(feedback), /https:\/\/example\.test\/pr\/7/);
 });
 
 test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {

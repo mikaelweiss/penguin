@@ -54,7 +54,9 @@ export default adapter({
           reason: done.stderr.trim(),
         };
       },
-      async head(options?: { cwd?: string }): Promise<Done & { branch: string; sha: string }> {
+      async head(
+        options?: { cwd?: string },
+      ): Promise<Done & { branch: string; sha: string; detached: boolean }> {
         const done = await host.shell(
           "git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD",
           { cwd: options?.cwd },
@@ -64,8 +66,17 @@ export default adapter({
           ok: done.code === 0,
           branch: branch.trim(),
           sha: sha.trim(),
+          detached: branch.trim() === "HEAD",
           reason: done.stderr.trim(),
         };
+      },
+      /** The branch origin calls its default. Unset origin/HEAD answers not ok, never a guess. */
+      async defaultBranch(options?: { cwd?: string }): Promise<Done & { branch: string }> {
+        const done = await host.shell("git symbolic-ref --short refs/remotes/origin/HEAD", {
+          cwd: options?.cwd,
+        });
+        const branch = done.stdout.trim().replace(/^origin\//, "");
+        return { ok: done.code === 0 && branch !== "", branch, reason: done.stderr.trim() };
       },
       async fetch(ref: string, options?: { cwd?: string }): Promise<Done> {
         const done = await host.shell(`git fetch origin ${quoted(ref)}`, { cwd: options?.cwd });

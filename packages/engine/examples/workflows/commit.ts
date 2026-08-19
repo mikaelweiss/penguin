@@ -14,26 +14,35 @@ export default workflow({
 
   async run({ params, agent, vcs, view }) {
     const state = await vcs.dirty({ cwd: params.dir });
+    if (!state.ok) {
+      view.fact({ commit: "failed" });
+      return { ok: false, committed: false, message: "", reason: state.reason };
+    }
     if (!state.dirty) {
       view.fact({ commit: "nothing to commit" });
-      return { committed: false, message: "", reason: state.reason };
+      return { ok: true, committed: false, message: "", reason: state.reason };
     }
 
     const writer = agent({ cwd: params.dir });
     const written = (await writer.run("penguin-commit", { result: Commit }))!;
     if (written.files.length === 0) {
       view.fact({ commit: "nothing worth committing" });
-      return { committed: false, message: written.message, reason: "the agent picked no files" };
+      return {
+        ok: true,
+        committed: false,
+        message: written.message,
+        reason: "the agent picked no files",
+      };
     }
 
     const staged = await vcs.stage(written.files, { cwd: params.dir });
     if (!staged.ok) {
       view.fact({ commit: "failed" });
-      return { committed: false, message: written.message, reason: staged.reason };
+      return { ok: false, committed: false, message: written.message, reason: staged.reason };
     }
 
     const done = await vcs.commit(written.message, { cwd: params.dir });
     view.fact({ commit: done.ok ? "written" : "failed" });
-    return { committed: done.ok, message: written.message, reason: done.reason };
+    return { ok: done.ok, committed: done.ok, message: written.message, reason: done.reason };
   },
 });
