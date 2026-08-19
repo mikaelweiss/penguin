@@ -297,7 +297,7 @@ type Shelled = { code: number; stdout?: string; stderr?: string };
 
 type Github = {
   pr: {
-    create(options?: { cwd?: string }): Promise<{
+    create(options?: { cwd?: string; title?: string; body?: string }): Promise<{
       ok: boolean;
       url: string;
       existed: boolean;
@@ -307,18 +307,20 @@ type Github = {
   };
 };
 
-type GhBox = { api: Github; commands: string[]; asked: string[] };
+type GhBox = { api: Github; commands: string[]; stdins: string[]; asked: string[] };
 
 /** A gh whose every call is scripted, and a user who answers each gate in turn. */
 async function gh(replies: Shelled[], answers: string[]): Promise<GhBox> {
   const commands: string[] = [];
+  const stdins: string[] = [];
   const asked: string[] = [];
   const host: Host = {
     cwd: process.cwd(),
     state: process.cwd(),
     catalogs: [],
-    shell: async (cmd) => {
+    shell: async (cmd, options) => {
       commands.push(cmd);
+      stdins.push(options?.stdin ?? "");
       const next = replies.shift() ?? { code: 0 };
       return { code: next.code, stdout: next.stdout ?? "", stderr: next.stderr ?? "" };
     },
@@ -334,7 +336,7 @@ async function gh(replies: Shelled[], answers: string[]): Promise<GhBox> {
     }) as Host["credential"],
   };
   const definition = await loadAdapter(ghFile);
-  return { api: definition.build(host) as Github, commands, asked };
+  return { api: definition.build(host) as Github, commands, stdins, asked };
 }
 
 test("a signed out gh holds the call at a gate and runs it again", async () => {
@@ -400,6 +402,24 @@ test("a branch whose pull request is open already answers with the open one", as
   });
   assert.deepEqual(box.asked, []);
   assert.deepEqual(box.commands, ["gh pr create --fill", "gh pr view --json url"]);
+});
+
+test("a create with a title and a body passes them instead of filling from the commits", async () => {
+  const box = await gh([{ code: 0, stdout: "https://github.com/acme/app/pull/9\n" }], []);
+
+  const made = await box.api.pr.create({
+    title: "fix: pin the footer",
+    body: "the footer scrolls away",
+  });
+
+  assert.deepEqual(made, {
+    ok: true,
+    url: "https://github.com/acme/app/pull/9",
+    existed: false,
+    reason: "",
+  });
+  assert.deepEqual(box.commands, ["gh pr create --title 'fix: pin the footer' --body-file -"]);
+  assert.deepEqual(box.stdins, ["the footer scrolls away"]);
 });
 
 test("a failure no person can fix stays a failure and asks nothing", async () => {

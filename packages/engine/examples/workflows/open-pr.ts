@@ -4,6 +4,10 @@ import commit from "./commit.ts";
 
 const Ack = z.union([z.enum(["ok"]), z.string()]);
 const Feedback = z.union([z.enum(["address-feedback", "done"]), z.string()]);
+const Description = z.object({
+  title: z.string().describe("the pull request title, one line"),
+  body: z.string().describe("the pull request body, markdown, empty when the title says it all"),
+});
 
 export default workflow({
   description: "open the pull request and answer its review feedback",
@@ -26,7 +30,14 @@ export default workflow({
       return { url: "" };
     }
 
-    const pr = await github.pr.create({ cwd: params.dir });
+    const written = (await agent({ cwd: params.dir }).run("penguin-open-pr", {
+      result: Description,
+    }))!;
+    const pr = await github.pr.create({
+      cwd: params.dir,
+      title: written.title,
+      body: written.body,
+    });
     if (!pr.ok) {
       await gate(`No pull request: ${pr.reason}`, Ack);
       return { url: "" };

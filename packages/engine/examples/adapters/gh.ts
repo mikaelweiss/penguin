@@ -180,11 +180,19 @@ export default adapter({
           cwd?: string;
           head?: string;
           base?: string;
+          title?: string;
+          body?: string;
         }): Promise<{ ok: boolean; url: string; existed: boolean; reason: string }> {
           // A stack names its own head: the tree sits on the top branch while every PR below it opens.
           const head = options?.head === undefined ? "" : ` --head ${quoted(options.head)}`;
           const base = options?.base === undefined ? "" : ` --base ${quoted(options.base)}`;
-          const done = await gh(`gh pr create --fill${head}${base}`, { cwd: options?.cwd });
+          const done =
+            options?.title === undefined
+              ? await gh(`gh pr create --fill${head}${base}`, { cwd: options?.cwd })
+              : await gh(
+                  `gh pr create --title ${quoted(options.title)} --body-file -${head}${base}`,
+                  { cwd: options?.cwd, stdin: options.body ?? "" },
+                );
           if (done.code === 0) {
             return { ok: true, url: done.stdout.trim(), existed: false, reason: "" };
           }

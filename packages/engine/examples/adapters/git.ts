@@ -36,8 +36,10 @@ export default adapter({
     }
 
     return {
-      async stageAll(options?: { cwd?: string }): Promise<Done> {
-        const done = await host.shell("git add -A", { cwd: options?.cwd });
+      async stage(files: string[], options?: { cwd?: string }): Promise<Done> {
+        const done = await host.shell(`git add -- ${files.map(quoted).join(" ")}`, {
+          cwd: options?.cwd,
+        });
         return { ok: done.code === 0, reason: done.stderr.trim() };
       },
       async commit(message: string, options?: { cwd?: string }): Promise<Done> {

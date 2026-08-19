@@ -39,7 +39,10 @@ export default adapter({
   name: "git",
   description: "fake vcs",
   build: (host) => ({
-    stageAll: async () => ({ ok: true, reason: "" }),
+    stage: async (files) => {
+      fs.appendFileSync(host.cwd + "/staged.txt", files.join(" ") + "\\n");
+      return { ok: true, reason: "" };
+    },
     commit: async (message) => {
       fs.appendFileSync(host.cwd + "/committed.txt", message + "\\n");
       fs.writeFileSync(host.cwd + "/clean.txt", "clean");
@@ -117,7 +120,7 @@ export default adapter({
     const tip = host.cwd + "/tip.txt";
     const base = host.cwd + "/base.txt";
     return {
-      stageAll: async () => ({ ok: true, reason: "" }),
+      stage: async () => ({ ok: true, reason: "" }),
       commit: async () => ({ ok: true, reason: "" }),
       dirty: async () => ({ ok: true, dirty: false, reason: "" }),
       head: async () => ({ ok: true, branch: "main", sha: at(tip, "main2"), reason: "" }),
@@ -160,7 +163,7 @@ export default adapter({
   name: "git",
   description: "fake vcs whose worktree path is already taken",
   build: (host) => ({
-    stageAll: async () => ({ ok: true, reason: "" }),
+    stage: async () => ({ ok: true, reason: "" }),
     commit: async () => ({ ok: true, reason: "" }),
     dirty: async () => ({ ok: true, dirty: true, reason: "" }),
     head: async () => ({ ok: true, branch: "main", sha: "abc1234", reason: "" }),
@@ -630,7 +633,7 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer","branch":"stop-the-footer-scrolling"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","files":["src/footer.ts"],"message":"fix: pin the footer","title":"fix: pin the footer","body":"the footer scrolls away","branch":"stop-the-footer-scrolling"}',
   );
   outsideReady(box);
 
@@ -684,7 +687,10 @@ test("the catalog ship workflow runs triage to the pull request", async (t) => {
 
 test("the catalog open-pr workflow holds at the gate when the pull request is already open", async (t) => {
   const box = sandbox(t);
-  catalogReady(box, '{"message":"fix: pin the footer"}');
+  catalogReady(
+    box,
+    '{"files":["src/footer.ts"],"message":"fix: pin the footer","title":"fix: pin the footer","body":"the footer scrolls away"}',
+  );
   outsideReady(box);
   box.writeAdapter(
     "gh",
@@ -706,9 +712,10 @@ test("the catalog open-pr workflow holds at the gate when the pull request is al
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], { url: "https://example.test/pr/7" });
+  assert.deepEqual(box.lines("staged.txt"), ["src/footer.ts"]);
   assert.deepEqual(box.lines("committed.txt"), ["fix: pin the footer"]);
   assert.deepEqual(box.lines("pushed.txt"), ["main"]);
-  assert.equal(box.sessions().length, 1, "one turn, the commit message");
+  assert.equal(box.sessions().length, 2, "two turns, the commit and the pull request");
 });
 
 test("the catalog plan workflow reads a jira key and its comments, given by position", async (t) => {
@@ -897,7 +904,7 @@ test("the catalog ship-local workflow commits, holds, then lands the branch on m
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer","branch":"stop-the-footer-scrolling"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","files":["src/footer.ts"],"message":"fix: pin the footer","branch":"stop-the-footer-scrolling"}',
   );
   outsideReady(box);
 
@@ -945,7 +952,7 @@ test("the catalog work workflow holds each task at a gate and takes the change",
   const box = sandbox(t);
   catalogReady(
     box,
-    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","message":"fix: pin the footer","branch":"Stop the footer scrolling!"}',
+    '{"actionable":true,"reason":"go","tasks":["stop the footer scrolling"],"context":"src/footer.ts holds the footer","green":true,"gates":"bun test: pass","plan":"pin the footer","acceptance":"the footer stays","verdict":"approved","blocking":"","notes":"none","files":["src/footer.ts"],"message":"fix: pin the footer","branch":"Stop the footer scrolling!"}',
   );
   outsideReady(box);
 
