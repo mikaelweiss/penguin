@@ -179,6 +179,44 @@ async function type(setup: TestRendererSetup, text: string): Promise<void> {
   await setup.flush();
 }
 
+/** A terminal that speaks the kitty protocol, which is the only way a cmd chord reaches penguin. */
+async function kittyScreen(node: ReactNode, width = 100, height = 24): Promise<TestRendererSetup> {
+  const setup = await testRender(node, { width, height, kittyKeyboard: true });
+  await setup.flush();
+  return setup;
+}
+
+async function command(setup: TestRendererSetup, key: string): Promise<void> {
+  await act(async () => {
+    setup.mockInput.pressKey(key, { super: true });
+  });
+  await setup.flush();
+}
+
+/** Drag the mouse across a word on the screen, the way a hand selects it. */
+async function selectWord(setup: TestRendererSetup, word: string): Promise<void> {
+  const rows = setup.captureCharFrame().split("\n");
+  const row = rows.findIndex((one) => one.includes(word));
+  assert.ok(row !== -1, `no row held ${word}`);
+  const column = (rows[row] ?? "").indexOf(word);
+  await act(async () => {
+    await setup.mockMouse.drag(column, row, column + word.length, row);
+  });
+  await setup.flush();
+}
+
+/** The clipboard once the copy child has run, which takes longer than a render pass. */
+async function copied(setup: TestRendererSetup, clip: { file(): string }, want: string): Promise<void> {
+  for (let pass = 0; pass < 60; pass += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    await setup.flush();
+    if (clip.file() === want) return;
+  }
+  throw new Error(`the clipboard never held ${want}, it held ${JSON.stringify(clip.file())}`);
+}
+
 /** Room for a copy that never comes, so a negative assertion means something. */
 async function idle(setup: TestRendererSetup): Promise<void> {
   await act(async () => {
@@ -2377,6 +2415,114 @@ test("the shell pops the kitty protocol, so ctrl-c reaches it as a control byte"
     await toShell(setup);
     await frameWith(setup, (text) => !text.includes(path.basename(work)));
     assert.deepEqual(pushed, [buildKittyKeyboardFlags({})], "leaving the shell pushes back what penguin asked for");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("cmd-c copies a selection on the dashboard too", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "zebrafish-1",
+    [
+      { type: "run", phase: "started", run: "zebrafish-1" },
+      { type: "state", state: "running", detail: "drafting the plan" },
+    ],
+    { live: true, workflow: "/work/plan.ts" },
+  );
+  const setup = await kittyScreen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("zebrafish-1"));
+    await selectWord(setup, "zebrafish-1");
+    await command(setup, "c");
+    await copied(setup, clip, "zebrafish-1");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("cmd-c copies the text the mouse selected, and clears the highlight", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "event", level: "info", message: "zebrafish" },
+    ],
+    { live: true },
+  );
+  const setup = await kittyScreen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />,
+  );
+  try {
+    await frameWith(setup, (text) => text.includes("zebrafish"));
+    await selectWord(setup, "zebrafish");
+    assert.equal(setup.renderer.getSelection()?.getSelectedText(), "zebrafish", "the drag selected nothing");
+    await command(setup, "c");
+    await copied(setup, clip, "zebrafish");
+    assert.equal(setup.renderer.hasSelection, false, "the highlight stayed up after the copy");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a cmd chord types nothing, and cmd-c with no selection copies nothing", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "state", state: "blocked", detail: "what next?" },
+    ],
+    { live: true },
+  );
+  const setup = await kittyScreen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />,
+  );
+  try {
+    await frameWith(setup, (text) => text.includes("to run >"));
+    await toInput(setup);
+    await command(setup, "c");
+    await command(setup, "v");
+    await idle(setup);
+    const quiet = setup
+      .captureCharFrame()
+      .split("\n")
+      .find((one) => one.includes("to run >"));
+    assert.ok(quiet?.trimEnd().endsWith("to run >"), `the chord reached the draft: ${quiet}`);
+    assert.equal(clip.file(), "", "an empty selection copied something");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("a selection takes the keyboard back from the shell, so cmd-c is heard", async (t) => {
+  const box = sandbox(t);
+  const clip = clipboard(t);
+  const work = workspace(t);
+  box.run(
+    "plan-1",
+    [
+      { type: "run", phase: "started", run: "plan-1" },
+      { type: "session", id: "s1", name: "planner", use: "claude", dir: work },
+      { type: "event", level: "info", message: "zebrafish" },
+    ],
+    { live: true },
+  );
+  const setup = await kittyScreen(
+    <RunView name="plan-1" agent="agent claude" ownsExit={false} onLeave={nothing} />,
+  );
+  try {
+    await frameWith(setup, (text) => text.includes("zebrafish"));
+    await chord(setup, "/", { ctrl: true });
+    await shown(setup, path.basename(work));
+    await selectWord(setup, "zebrafish");
+    await frameWith(setup, (text) => text.includes("arrows move, left and right fold"));
+    await command(setup, "c");
+    await copied(setup, clip, "zebrafish");
   } finally {
     setup.renderer.destroy();
   }

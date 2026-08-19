@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import { type Computer, computerLine, readComputer, strained } from "../machine/memory.ts";
 import { DirList, useCopy } from "./input.tsx";
 import { Launcher } from "./launcher.tsx";
+import { useCopySelection } from "./selection.ts";
 import { cut } from "./text.ts";
 import { glyph, ink, stateColor } from "./theme.ts";
 
@@ -39,6 +40,7 @@ export function Dashboard({
   const [launching, setLaunching] = useState(false);
   const [note, setNote] = useState("");
   const copying = useCopy(setNote);
+  useCopySelection(setNote);
 
   const live = rows.filter((row) => row.live);
   const done = rows.filter((row) => !row.live);

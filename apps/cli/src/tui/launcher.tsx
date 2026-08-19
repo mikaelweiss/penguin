@@ -22,6 +22,7 @@ import { agentLine, started } from "../attach/attach.ts";
 import { pasteImage } from "../machine/clipboard.ts";
 import { Editor } from "./editor.ts";
 import { Choices, InputBar } from "./input.tsx";
+import { useCopySelection } from "./selection.ts";
 import { cut } from "./text.ts";
 import { ink } from "./theme.ts";
 
@@ -60,6 +61,7 @@ export function Launcher({
   const [warn, setWarn] = useState("");
   const [editor] = useState(() => new Editor());
   const [, bump] = useReducer((count: number) => count + 1, 0);
+  useCopySelection(setWarn);
   const held = useRef<Launch | undefined>(undefined);
   const live = useRef(true);
 
@@ -373,7 +375,7 @@ function oneLine(text: string): string {
 }
 
 function printable(key: KeyEvent): string | undefined {
-  if (key.ctrl || key.meta) return undefined;
+  if (key.ctrl || key.meta || key.super === true) return undefined;
   const sequence = key.sequence;
   if (sequence.length !== 1) return undefined;
   const code = sequence.codePointAt(0) ?? 0;

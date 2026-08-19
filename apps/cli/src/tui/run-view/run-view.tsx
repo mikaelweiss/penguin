@@ -15,6 +15,7 @@ import { openEditor } from "../../machine/open-editor.ts";
 import { type Shell, shells } from "../../machine/shell.ts";
 import { Editor } from "../editor.ts";
 import { Choices, DirList, Fields, InputBar, type Picking, useCopy, usePickDir } from "../input.tsx";
+import { useCopySelection } from "../selection.ts";
 import { cut, fit } from "../text.ts";
 import { ink } from "../theme.ts";
 import { type Ask, type Fix, fixes, notes, why } from "./credential.ts";
@@ -91,6 +92,7 @@ export function RunView({
   const [diff, setDiff] = useState("");
   const [note, setNote] = useState("");
   const copying = useCopy(setNote);
+  useCopySelection(setNote);
 
   useEffect(() => {
     const off = feed.follow(bump);
@@ -212,6 +214,18 @@ export function RunView({
     if (place !== "shell" || !renderer.useKittyKeyboard) return;
     renderer.disableKittyKeyboard();
     return () => renderer.enableKittyKeyboard(buildKittyKeyboardFlags({}));
+  }, [place, renderer]);
+
+  /** A selection is a copy under way, and cmd-c needs the protocol the shell pops, so the tree takes the keys. */
+  useEffect(() => {
+    if (place !== "shell") return;
+    const took = (): void => {
+      if ((renderer.getSelection()?.getSelectedText() ?? "") !== "") setFocus("tree");
+    };
+    renderer.on("selection", took);
+    return () => {
+      renderer.off("selection", took);
+    };
   }, [place, renderer]);
 
   const leave = (left: Left): void => {
@@ -809,7 +823,7 @@ function inserts(key: KeyEvent): boolean {
 }
 
 function printable(key: KeyEvent): string | undefined {
-  if (key.ctrl || key.meta) return undefined;
+  if (key.ctrl || key.meta || key.super === true) return undefined;
   const sequence = key.sequence;
   if (sequence.length !== 1) return undefined;
   const code = sequence.codePointAt(0) ?? 0;

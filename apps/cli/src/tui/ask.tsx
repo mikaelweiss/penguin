@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import type { Attached } from "../machine/clipboard.ts";
 import { Editor } from "./editor.ts";
 import { Choices, InputBar } from "./input.tsx";
+import { useCopySelection } from "./selection.ts";
 import { ink } from "./theme.ts";
 
 export type Choice = { label: string; note?: string };
@@ -77,6 +78,7 @@ export function Ask({
   const [editor] = useState(() => new Editor());
   const [warn, setWarn] = useState("");
   const [, bump] = useState(0);
+  useCopySelection(setWarn);
   const redraw = (): void => bump((count) => count + 1);
 
   useKeyboard((key: KeyEvent) => {
@@ -150,6 +152,7 @@ export function Pick({
   const size = useTerminalDimensions();
   const [cursor, setCursor] = useState(0);
   const [chosen, setChosen] = useState<number[]>(() => (many ? choices.map((_, index) => index) : []));
+  useCopySelection();
 
   useKeyboard((key: KeyEvent) => {
     if (key.eventType === "release") return;
@@ -178,7 +181,7 @@ export function Pick({
 }
 
 function typing(key: KeyEvent): string | undefined {
-  if (key.ctrl || key.meta) return undefined;
+  if (key.ctrl || key.meta || key.super === true) return undefined;
   const sequence = key.sequence;
   if (sequence.length !== 1) return undefined;
   const code = sequence.codePointAt(0) ?? 0;
