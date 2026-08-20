@@ -33,6 +33,7 @@ export {
     pick,
     renderEnv,
     searchedAdapters,
+    writeDefault,
     writeEnv,
     type AdapterFound,
     type Picked

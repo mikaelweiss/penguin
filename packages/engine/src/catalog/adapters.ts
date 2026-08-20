@@ -65,6 +65,16 @@ export function defaults(): Map<string, string> {
   return map;
 }
 
+/** One role's implementation. Other role lines stay. A missing file is created. */
+export function writeDefault(role: string, name: string): void {
+  const map = defaults();
+  map.set(role, name);
+  const file = defaultsFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const lines = [...map].map(([one, chosen]) => `${one} ${chosen}`);
+  fs.writeFileSync(file, `${lines.join("\n")}\n`);
+}
+
 export type Picked = { found: AdapterFound } | { missing: string } | { conflict: string };
 
 export function pick(list: AdapterFound[], role: string, name?: string): Picked {

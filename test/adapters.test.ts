@@ -146,6 +146,7 @@ test("the first turn opens a chat, and the argv carries the print flags", async 
     "--force",
     "--output-format",
     "stream-json",
+    "--trust",
     "--model",
     "sonnet-4.5",
   ]);
@@ -187,7 +188,15 @@ test("a session with no recorded chat id starts a new chat, whatever first says"
 
   await api.turn(turnOf({ cwd: fake.work, first: false }));
 
-  assert.deepEqual(fake.calls()[0]?.argv, ["-p", "--force", "--output-format", "stream-json"]);
+  assert.deepEqual(fake.calls()[0]?.argv, [
+    "-p",
+    "--force",
+    "--output-format",
+    "stream-json",
+    "--trust",
+    "--model",
+    "grok-4.6",
+  ]);
 });
 
 test("the last chat id a turn reports is the one the next turn resumes", async (t) => {
@@ -208,8 +217,11 @@ test("the last chat id a turn reports is the one the next turn resumes", async (
     "--force",
     "--output-format",
     "stream-json",
+    "--trust",
     "--resume",
     "chat-2",
+    "--model",
+    "grok-4.6",
   ]);
 });
 
@@ -226,7 +238,15 @@ test("a turn that dies before any event opens a new chat next time", async (t) =
     ok: false,
     error: "cursor-agent exited with code 2: no credentials found",
   });
-  assert.deepEqual(fake.calls()[1]?.argv, ["-p", "--force", "--output-format", "stream-json"]);
+  assert.deepEqual(fake.calls()[1]?.argv, [
+    "-p",
+    "--force",
+    "--output-format",
+    "stream-json",
+    "--trust",
+    "--model",
+    "grok-4.6",
+  ]);
 });
 
 test("the chat ids never outlive the build that holds them", async (t) => {
@@ -236,7 +256,15 @@ test("the chat ids never outlive the build that holds them", async (t) => {
   await (await cursor([])).turn(turnOf({ cwd: fake.work }));
   await (await cursor([])).turn(turnOf({ cwd: fake.work, first: false }));
 
-  assert.deepEqual(fake.calls()[1]?.argv, ["-p", "--force", "--output-format", "stream-json"]);
+  assert.deepEqual(fake.calls()[1]?.argv, [
+    "-p",
+    "--force",
+    "--output-format",
+    "stream-json",
+    "--trust",
+    "--model",
+    "grok-4.6",
+  ]);
 });
 
 test("a line that does not parse is ignored, and the tail with no newline is read once", async (t) => {

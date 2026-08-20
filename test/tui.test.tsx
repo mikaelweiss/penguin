@@ -278,6 +278,22 @@ function column(frame: string, pattern: RegExp, which: "first" | "last" = "first
 
 const nothing = (): void => {};
 
+function agentIn(box: Box, name: string): void {
+  const dir = path.join(box.home, "adapters");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${name}.ts`),
+    `import { adapter } from "penguin";
+export default adapter({
+  role: "agent",
+  name: ${JSON.stringify(name)},
+  description: "fake test agent",
+  build: () => ({ turn: async () => ({ ok: true, value: null }) }),
+});
+`,
+  );
+}
+
 test("the dashboard lists the live runs, and d reveals the done ones", async (t) => {
   const box = sandbox(t);
   box.run(
@@ -304,6 +320,74 @@ test("the dashboard lists the live runs, and d reveals the done ones", async (t)
     await press(setup, ["d"]);
     const hidden = await frameWith(setup, (text) => !text.includes("ticket-2"));
     assert.ok(!hidden.includes("ticket-2"), "d left the done run on the screen");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("s opens a settings overlay of agent adapters, and the dashboard stays on screen", async (t) => {
+  const box = sandbox(t);
+  agentIn(box, "fake");
+  agentIn(box, "other");
+  fs.writeFileSync(
+    path.join(box.home, "adapters", "git.ts"),
+    `import { adapter } from "penguin";
+export default adapter({
+  role: "vcs",
+  name: "git",
+  description: "fake vcs",
+  build: () => ({}),
+});
+`,
+  );
+  fs.writeFileSync(path.join(box.home, "defaults"), "agent fake\n");
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    const first = await frameWith(setup, (text) => text.includes("s settings"));
+    assert.match(first, /plan-1/);
+    await press(setup, ["s"]);
+    const open = await frameWith(setup, (text) => text.includes("(o) fake"));
+    assert.match(open, /plan-1/, "the overlay covered the dashboard");
+    assert.match(open, /agent adapter/);
+    assert.match(open, /\(o\) fake/);
+    assert.match(open, /\( \) other/);
+    assert.ok(!open.includes("git"), "a vcs adapter listed with the agents");
+    await press(setup, ["j"]);
+    const moved = await frameWith(setup, (text) => text.includes("(o) other"));
+    assert.match(moved, /> \(o\) other/);
+    await press(setup, ["k"]);
+    await frameWith(setup, (text) => text.includes("(o) fake"));
+    await press(setup, ["l"]);
+    await frameWith(setup, (text) => text.includes("(o) other"));
+    await press(setup, ["h"]);
+    const back = await frameWith(setup, (text) => text.includes("(o) fake"));
+    assert.match(back, /> \(o\) fake/);
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("enter on the settings overlay writes the agent default, and esc writes nothing", async (t) => {
+  const box = sandbox(t);
+  agentIn(box, "fake");
+  agentIn(box, "other");
+  fs.writeFileSync(path.join(box.home, "defaults"), "agent fake\n");
+  box.run("plan-1", [{ type: "run", phase: "started", run: "plan-1" }], { live: true });
+  const setup = await screen(<Dashboard onOpen={nothing} onExit={nothing} />);
+  try {
+    await frameWith(setup, (text) => text.includes("plan-1"));
+    await press(setup, ["s"]);
+    await frameWith(setup, (text) => text.includes("(o) fake"));
+    await press(setup, ["j", "RETURN"]);
+    const after = await frameWith(setup, (text) => text.includes("s settings") && !text.includes("agent adapter"));
+    assert.match(after, /plan-1/);
+    assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent other\n");
+    await press(setup, ["s"]);
+    await frameWith(setup, (text) => text.includes("(o) other"));
+    await escape(setup);
+    await frameWith(setup, (text) => text.includes("s settings") && !text.includes("agent adapter"));
+    assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent other\n");
   } finally {
     setup.renderer.destroy();
   }
@@ -1984,7 +2068,7 @@ test("a dashboard with no line answers y with no copy", async (t) => {
     await press(setup, ["y"]);
     await idle(setup);
     assert.equal(clip.file(), "");
-    assert.match(setup.captureCharFrame(), /y copies the directory/);
+    assert.match(setup.captureCharFrame(), /y copies/);
   } finally {
     setup.renderer.destroy();
   }

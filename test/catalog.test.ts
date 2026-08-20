@@ -1,5 +1,5 @@
 import type { AgentAdapter, AgentTurn, Host, ViewEvent } from "@mikaelweiss/penguin-engine";
-import { installed, load, loadAdapter, renderEnv } from "@mikaelweiss/penguin-engine/catalog";
+import { installed, load, loadAdapter, renderEnv, writeDefault } from "@mikaelweiss/penguin-engine/catalog";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -591,6 +591,31 @@ test("the shipped defaults pick claude when a second agent adapter is installed"
 
   assert.equal(started.code, 0, started.output);
   assert.equal(started.stdout, "run w-1 started, agent claude\n");
+});
+
+test("writeDefault sets one role and keeps the others", (t) => {
+  const box = sandbox(t);
+  const prior = process.env["PENGUIN_HOME"];
+  process.env["PENGUIN_HOME"] = box.home;
+  t.after(() => {
+    if (prior === undefined) delete process.env["PENGUIN_HOME"];
+    else process.env["PENGUIN_HOME"] = prior;
+  });
+  box.setDefaults("agent claude\nvcs git");
+  writeDefault("agent", "cursor");
+  assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent cursor\nvcs git\n");
+});
+
+test("writeDefault creates a missing defaults file", (t) => {
+  const box = sandbox(t);
+  const prior = process.env["PENGUIN_HOME"];
+  process.env["PENGUIN_HOME"] = box.home;
+  t.after(() => {
+    if (prior === undefined) delete process.env["PENGUIN_HOME"];
+    else process.env["PENGUIN_HOME"] = prior;
+  });
+  writeDefault("agent", "cursor");
+  assert.equal(fs.readFileSync(path.join(box.home, "defaults"), "utf8"), "agent cursor\n");
 });
 
 test("a default naming an agent that is not installed fails the run and names the file", (t) => {
@@ -1222,6 +1247,7 @@ test("the catalog commit workflow writes nothing when the tree is clean", async 
 
   assert.equal(ended["phase"], "done", JSON.stringify(ended));
   assert.deepEqual(ended["result"], {
+    ok: true,
     committed: false,
     message: "",
     reason: "",

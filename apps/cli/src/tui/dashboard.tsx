@@ -7,13 +7,14 @@ import { type Computer, computerLine, readComputer, strained } from "../machine/
 import { DirList, useCopy } from "./input.tsx";
 import { Launcher } from "./launcher.tsx";
 import { useCopySelection } from "./selection.ts";
+import { Settings } from "./settings.tsx";
 import { cut } from "./text.ts";
 import { glyph, ink, stateColor } from "./theme.ts";
 
 const RESCAN = 2000;
 const SPIN = 200;
 const keysLine = (showDone: boolean): string =>
-  `  arrows or hjkl move, enter opens, y copies the directory, n starts a workflow, d ${showDone ? "hides" : "shows"} done, q quits`;
+  `  arrows or hjkl move, enter opens, y copies, s settings, n starts a workflow, d ${showDone ? "hides" : "shows"} done, q quits`;
 
 export type Open = { name: string; node?: string; agent?: string };
 
@@ -38,6 +39,7 @@ export function Dashboard({
   const [showDone, setShowDone] = useState(false);
   const [computer, setComputer] = useState<Computer | undefined>(undefined);
   const [launching, setLaunching] = useState(false);
+  const [settings, setSettings] = useState(false);
   const [note, setNote] = useState("");
   const copying = useCopy(setNote);
   useCopySelection(setNote);
@@ -123,6 +125,8 @@ export function Dashboard({
     if (key.ctrl && key.name === "c") return onExit();
     if (copying.isOpen()) return copying.key(key);
     if (key.name === "q") return onExit();
+    if (settings) return;
+    if (key.name === "s") return setSettings(true);
     if (key.name === "n") return setLaunching(true);
     if (key.name === "up" || key.name === "k") return move(Math.max(0, at - 1));
     if (key.name === "down" || key.name === "j") return move(Math.min(lines.length - 1, at + 1));
@@ -207,6 +211,7 @@ export function Dashboard({
           <text fg={ink.faint}>{cut(note === "" ? keysLine(showDone) : note, size.width)}</text>
         )}
       </box>
+      {settings ? <Settings onClose={() => setSettings(false)} /> : null}
     </box>
   );
 }

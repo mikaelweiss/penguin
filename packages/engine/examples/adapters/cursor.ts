@@ -101,11 +101,11 @@ export default adapter({
     const chats = new Map<string, string>();
     return {
       async turn(turn: AgentTurn): Promise<AgentTurnResult> {
-        const argv = ["cursor-agent", "-p", "--force", "--output-format", "stream-json"];
+        const argv = ["cursor-agent", "-p", "--force", "--output-format", "stream-json", "--trust"];
         const chat = chats.get(turn.session);
         if (chat !== undefined) argv.push("--resume", chat);
         const model = turn.options["model"];
-        if (typeof model === "string") argv.push("--model", model);
+        argv.push("--model", typeof model === "string" ? model : "grok-4.6");
         const prompt =
           turn.schema === undefined
             ? turn.prompt
