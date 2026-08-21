@@ -4,13 +4,14 @@ There are many factories, but this one is _yours_
 
 ## Getting started
 
-There are three concepts you need to know:
+There are two concepts you need to know:
 
-1. Workflows - what's run. Plain TypeScript functions. You run agents, call adapters, and respond to messages all from here. Workflows are composable: workflows call workflows.
-2. Adapters - how a workflow connects to the outside world. Git, GitHub, Slack, Linear, Jira, Claude, Codex, whatever. You can easily build your own.
-3. Messages - how the outside world talks back. A message can trigger a workflow or answer a question it asked.
+1. Workflows - what's run. Plain TypeScript functions. You call adapters, run agents, and decide what the human sees, all from here. Workflows are composable: workflows call workflows.
+2. Adapters - a workflow's bridge to the outside world. Git, GitHub, Slack, Linear, Jira, Claude, Codex, whatever. Plain functions over plain data. You can easily build your own.
 
-With these three things you can build incredibly complex workflows, including, but not limited to, software factories.
+The human is one more outside thing, so talking to them is one more adapter: `view.show(...)` to tell them something, `view.ask(...)` to wait on their answer. And when something outside keeps talking back, that's not a new concept either: an adapter function just returns an async stream, and the workflow reads it.
+
+With these two things you can build incredibly complex workflows, including, but not limited to, software factories.
 
 ## But why, you ask
 
@@ -33,7 +34,7 @@ Penguin flips that. _You_ decide.
 
 Is the agent done, or is it waiting on you? With most tools you find out by scrolling.
 
-In Penguin the distinction is built in. An agent turn ends as either a typed result or a typed reason a human is needed. A workflow can pause on a question (`ctx.gate("Ship it?")`) and the run shows as blocked until you answer. When nothing needs you, it keeps moving on its own.
+In Penguin the distinction is built in. An agent turn ends in a typed result you define. A workflow can pause on a question (`view.ask("Ship it?")`) and does not move until you answer. When nothing needs you, it keeps moving on its own.
 
 ### You're limited to prose
 

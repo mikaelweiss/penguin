@@ -1,6 +1,4 @@
-import type { z } from "zod";
 import { PenguinError } from "./errors.ts";
-import type { ViewEvent } from "./message.ts";
 
 export type CommandResult = {
   code: number;
@@ -25,42 +23,15 @@ export type Host = {
   state: string;
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   exec(argv: string[], options?: ExecOptions): Promise<number>;
-  /** Marks the run idle while the body waits on something outside penguin. */
-  wait<T>(label: string, body: () => Promise<T>): Promise<T>;
-  emit(event: ViewEvent): void;
-  /**
-   * A question for the user, the same gate a workflow asks. The run shows blocked
-   * with the question until a viewer answers. An adapter asks it when only a person
-   * can clear the way: sign in to a CLI, install a tool, add a remote.
-   */
-  gate(question: string): Promise<string>;
-  gate<Shape extends z.ZodType>(question: string, shape: Shape): Promise<z.infer<Shape>>;
-};
-
-/** One prompt sent to an agent CLI, inside one session. */
-export type AgentTurn = {
-  session: string;
-  first: boolean;
-  cwd: string;
-  prompt: string;
-  schema?: Record<string, unknown>;
-  options: Record<string, unknown>;
-};
-
-export type AgentTurnResult = { ok: true; value: unknown } | { ok: false; error: string };
-
-/** What an adapter with the role "agent" builds. */
-export type AgentAdapter = {
-  turn(turn: AgentTurn): Promise<AgentTurnResult>;
 };
 
 export type Adapter<A = unknown> = {
-  /** What the adapter is, on ctx: vcs, github, agent. One role, many implementations. */
+  /** What the adapter is, on ctx: vcs, github, agent, view. One role, many implementations. */
   role: string;
-  /** Which implementation this is: git, jira, claude. */
+  /** Which implementation this is: git, jira, claude, terminal. */
   name: string;
   description: string;
-  /** Makes the API a workflow calls through ctx.<role>. */
+  /** Makes the API a workflow calls through ctx.<role>. Plain data in, plain data or streams out. */
   build(host: Host): A;
 };
 

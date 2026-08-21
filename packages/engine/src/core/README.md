@@ -1,18 +1,19 @@
-# core
+# The model
 
-This folder is the definition of penguin. Three primitives, one file each:
+penguin has two definitions. Everything else is a value passing between them.
 
-| Primitive | File          | One line                                                        |
-| --------- | ------------- | --------------------------------------------------------------- |
-| Workflow  | `workflow.ts` | Code that runs: params in, steps through adapters, result out.  |
-| Adapter   | `adapter.ts`  | A workflow's connection to the outside world.                   |
-| Message   | `message.ts`  | The outside world's connection to a running workflow.           |
+| Definition | One line                                                                |
+| ---------- | ----------------------------------------------------------------------- |
+| Workflow   | A pure script. It orchestrates adapters and decides what people see.    |
+| Adapter    | A workflow's bridge to one outside thing. Functions over plain data.    |
 
-Everything else in the engine serves these three. Nothing here executes anything: this folder is types, two factory functions, and this document.
+There is no third concept. A message stream is not a definition, it is a return
+value: an adapter function that hands back an `AsyncIterable`. The view is not
+engine machinery, it is an adapter whose outside thing is the person watching.
 
 ## Workflow
 
-A workflow is a plain object with three fields:
+A workflow is a plain object: a description, a Zod params schema, and `run(ctx)`.
 
 ```ts
 import { workflow } from "penguin";
@@ -20,34 +21,41 @@ import { z } from "zod";
 
 export default workflow({
   description: "what this does, one line",
-  params: z.object({ ticket: z.string() }),
+  params: z.object({ dir: z.string().optional() }),
 
-  async run(ctx) {
-    // the work
-    return { done: true };
+  async run({ params, vcs, view }) {
+    const state = await vcs.dirty({ cwd: params.dir });
+    await view.show(state.dirty ? "tree is dirty" : "tree is clean");
+    return { dirty: state.dirty };
   },
 });
 ```
 
-- `description` names the workflow to people and to viewers.
-- `params` is a Zod object. The engine validates params before `run` is called, so inside `run` they are already the right shape.
-- `run(ctx)` is the work. Whatever it returns is the run's result.
+`ctx` is the validated params plus one entry per installed adapter role. That
+is all it is. A workflow touches the world only through `ctx`: it never prints,
+never parses argv, never spawns a process, never reads a file on its own.
 
-`ctx` is everything a workflow can touch:
+The workflow is the only orchestrator and the only narrator. It calls adapter
+functions, consumes the streams they return, and decides what reaches the view.
+Nothing shows a person anything unless workflow code sent it.
 
-- `ctx.params`: the validated params.
-- `ctx.gate(question)`: stop and wait for a person. The run shows blocked with the question until a viewer answers. Pass a Zod shape as the second argument to get a typed answer back.
-- `ctx.messages.next()`: wait for the next message from outside.
-- `ctx.view`: show progress. `activity` groups work under a label, `fact` records a key-value, `event` logs a line, `artifact` points at something produced.
-- `ctx.agent(options)`: open an agent session. `session.run(prompt)` sends one turn. Pass `{ result: zodObject }` to get validated structured output back; add `{ blocked: zodObject }` to let the agent report being stuck instead.
-- `ctx.run(otherWorkflow, params)`: compose. The child runs with the same ctx wiring, its params validated, shown as one activity in the tree.
-- `ctx.<role>` (for example `ctx.vcs`): the installed adapter for that role. See Adapter.
+Workflows compose by function call. `call` parses the child's params and runs
+it with the same ctx:
 
-A workflow never prints, never parses argv, never touches a terminal. It talks to the world only through `ctx`.
+```ts
+import { call } from "penguin";
+import commit from "./commit.ts";
+
+const done = await call(ctx, commit, { dir: "packages/engine" });
+```
+
+Parallel children are `Promise.all` over `call`. No engine machinery involved.
 
 ## Adapter
 
-An adapter connects workflows to one outside thing: git, GitHub, Jira, an agent CLI. It is a plain object with four fields:
+An adapter connects workflows to one outside thing: git, GitHub, an agent CLI,
+the person watching. It is a role, a name, a description, and `build(host)`,
+which returns the functions a workflow calls through `ctx.<role>`.
 
 ```ts
 import { adapter } from "penguin";
@@ -55,31 +63,88 @@ import { adapter } from "penguin";
 export default adapter({
   role: "vcs",
   name: "git",
-  description: "git working copies: staging, commits, pushes",
+  description: "git working copies",
   build: (host) => ({
     async commit(message: string) {
       const done = await host.shell(`git commit -m '${message}'`);
-      return { ok: done.code === 0 };
+      return { ok: done.code === 0, reason: done.stderr.trim() };
     },
   }),
 });
 ```
 
-- `role` is the slot the adapter fills on ctx. A workflow calls `ctx.vcs.commit(...)` and does not care whether git or jj answers.
-- `name` is which implementation this is. One role can have many; the user picks a default when there is more than one.
-- `build(host)` returns the API the workflow calls. Every method call is recorded as a step in the run's events.
+`host` is everything an adapter can touch: `cwd` (the invoking folder),
+`state` (a folder that survives between runs), `shell`, and `exec`. Nothing
+else. An adapter cannot write to the view, cannot ask the user anything, and
+cannot reach another adapter. It bridges, and that is all.
 
-`host` is everything an adapter can touch: `shell` and `exec` to run commands, `state` for a folder that survives between runs, `wait` to mark the run idle while polling something slow, `gate` to ask the user when only a person can clear the way, and `emit` to write events.
+Two rules keep adapters honest:
 
-One role is special: `agent`. An adapter with `role: "agent"` implements `turn(turn)` instead of a free-form API, and powers `ctx.agent`. It sends one prompt to an agent CLI and returns the result. `examples/adapters/claude.ts` is one.
+- **Functions carry plain data.** An adapter function takes and returns
+  JSON-serializable values, or an async stream of them. Never functions,
+  never objects with methods.
+- **Expected outcomes are data, thrown errors mean the bridge broke.** A failed
+  commit returns `{ ok: false, reason }` for the workflow to handle. A throw
+  means the adapter itself could not do its job at all.
 
-## Message
+One role, many implementations. A workflow calls `ctx.vcs.commit(...)` and
+does not care whether git or jj answers. When more than one implementation of
+a role is installed, the user picks a default.
 
-A run is a detached process. Its whole surface is two append-only files in the run directory:
+## The view is an adapter
 
-- `events.jsonl`: out. Every `ViewEvent` the run emits: state changes, steps, gates, agent output, facts. A frontend reads this file to show the run.
-- `inbox.jsonl`: in. Every `Message` the outside world sends: an answer to a gate, or anything else. The run reads this file to hear the world.
+The person watching a run is one outside thing, so they get one adapter: role
+`view`. Its starter API is two functions.
 
-That is the entire contract between a run and any frontend. A website, a desktop app, a CLI, a TUI: each is a window that tails `events.jsonl` and appends to `inbox.jsonl`. Closing the window never touches the run.
+```ts
+await view.show("staged 3 files");
+const branch = await view.ask("Which branch?", z.string());
+```
 
-A `Message` is `{ text, session?, gate? }`. When a gate is open, the next message answers it (`gate` addresses a specific one). When no gate is open, messages queue for `ctx.messages.next()`.
+`show` sends something to whoever is watching. `ask` sends a question and
+resolves when a person answers, validated against the shape when one is given.
+Each call is its own request with its own response. There is no shared inbox,
+no queue, and no routing: an answer reaches its asker because the asker is the
+one awaiting it. Two parallel branches asking at once are two pending
+questions, each answer flowing back to its own caller.
+
+How a view implementation talks to its frontend (a terminal, files, a socket,
+a web page) is that implementation's business, not the engine's.
+
+## Agents are adapters
+
+An agent CLI is one more outside thing. The starter `agent` role speaks in
+plain data: `open(options)` returns a session id, `turn(session, prompt)`
+returns a handle with `output` (a stream of what the agent is doing) and
+`value` (a promise of the result, typed when a result shape is given).
+
+```ts
+const session = await agent.open({ cwd: params.dir });
+const turn = agent.turn(session, PROMPT, { result: Commit });
+for await (const chunk of turn.output) await view.show(chunk.text);
+const commit = await turn.value;
+```
+
+The workflow decides whether agent output reaches the view, and how. The
+engine has no idea agents exist.
+
+## Resume
+
+Workflows are reconcilers. They inspect the world through adapters before
+acting, and act only on what is missing, the way `commit` checks `vcs.dirty`
+first. So resuming an interrupted run is running the workflow again: its own
+checks skip what is already done. The world is the state store. There is no
+journal and no replay.
+
+## The engine
+
+The engine has four jobs, and any feature that needs a fifth is either a new
+adapter, a new workflow, or out of scope:
+
+1. **Catalog.** Find workflow and adapter files across catalog directories.
+2. **Ctx.** Validate params and wire installed adapter roles onto ctx.
+3. **Process.** Own the run's working directory and the processes it spawns.
+4. **Trace.** Append each adapter call and outcome to a log, for debugging.
+
+The engine does not route messages, hold state machines, retry agent turns,
+render anything, or know one adapter role from another.

@@ -1,7 +1,7 @@
 {
   "name": "@mikaelweiss/penguin-engine",
   "private": true,
-  "description": "the penguin core definitions, catalog discovery, and the run process",
+  "description": "the penguin core definitions and catalog discovery",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -12,10 +12,6 @@
     "./catalog": {
       "types": "./src/catalog/index.ts",
       "default": "./src/catalog/index.ts"
-    },
-    "./run": {
-      "types": "./src/run/index.ts",
-      "default": "./src/run/index.ts"
     }
   },
   "files": ["src", "examples"],

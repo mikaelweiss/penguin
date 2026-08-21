@@ -1,5 +1,28 @@
-import { adapter } from "penguin";
-import type { AgentTurn, AgentTurnResult } from "penguin";
+import crypto from "node:crypto";
+import path from "node:path";
+import { z } from "zod";
+import { adapter, PenguinError } from "penguin";
+
+type OpenOptions = {
+  cwd?: string;
+  model?: string;
+  permission?: string;
+};
+
+type Chunk = { kind: "text" | "thinking" | "tool"; text: string; detail?: string };
+
+type Turn<T> = { output: AsyncIterable<Chunk>; value: Promise<T> };
+
+type TurnFn = {
+  (session: string, prompt: string): Turn<null>;
+  <Shape extends z.ZodObject>(
+    session: string,
+    prompt: string,
+    options: { result: Shape },
+  ): Turn<z.infer<Shape>>;
+};
+
+type Attempt = { ok: true; value: unknown } | { ok: false; error: string };
 
 type ContentBlock = {
   type?: string;
@@ -46,21 +69,74 @@ function flatten(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function issues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => {
+      const at = issue.path.join(".");
+      return at === "" ? issue.message : `${at}: ${issue.message}`;
+    })
+    .join(", ");
+}
+
+function jsonSchema(shape: z.ZodObject): Record<string, unknown> {
+  const schema = z.toJSONSchema(shape) as Record<string, unknown>;
+  delete schema["$schema"];
+  return schema;
+}
+
+class Channel<T> implements AsyncIterable<T> {
+  private items: T[] = [];
+  private waiters: ((result: IteratorResult<T>) => void)[] = [];
+  private done = false;
+
+  push(item: T): void {
+    const waiter = this.waiters.shift();
+    if (waiter !== undefined) waiter({ value: item, done: false });
+    else this.items.push(item);
+  }
+
+  end(): void {
+    this.done = true;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter({ value: undefined, done: true });
+    }
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: (): Promise<IteratorResult<T>> => {
+        const item = this.items.shift();
+        if (item !== undefined) return Promise.resolve({ value: item, done: false });
+        if (this.done) return Promise.resolve({ value: undefined, done: true });
+        return new Promise((resolve) => this.waiters.push(resolve));
+      },
+    };
+  }
+}
+
 export default adapter({
   role: "agent",
   name: "claude",
   description:
     "runs prompts on the claude CLI. A session is one conversation: the first turn opens it, later turns resume it.",
-  build: (host) => ({
-    async turn(turn: AgentTurn): Promise<AgentTurnResult> {
+  build: (host) => {
+    const sessions = new Map<string, OpenOptions>();
+    const started = new Set<string>();
+
+    async function runOnce(
+      session: string,
+      first: boolean,
+      options: OpenOptions,
+      prompt: string,
+      schema: Record<string, unknown> | undefined,
+      emit: (chunk: Chunk) => void,
+    ): Promise<Attempt> {
       const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
-      if (turn.schema !== undefined) argv.push("--json-schema", JSON.stringify(turn.schema));
-      argv.push(turn.first ? "--session-id" : "--resume", turn.session);
-      const model = turn.options["model"];
-      if (typeof model === "string") argv.push("--model", model);
-      // A run has no one to ask, so a denied edit costs the turn. `permission` in the session options overrides it.
-      const permission = turn.options["permission"];
-      argv.push("--permission-mode", typeof permission === "string" ? permission : "acceptEdits");
+      if (schema !== undefined) argv.push("--json-schema", JSON.stringify(schema));
+      argv.push(first ? "--session-id" : "--resume", session);
+      if (options.model !== undefined) argv.push("--model", options.model);
+      // A run has no one to ask, so a denied edit costs the turn. `permission` overrides it.
+      argv.push("--permission-mode", options.permission ?? "acceptEdits");
 
       let buffer = "";
       let stderr = "";
@@ -77,24 +153,13 @@ export default adapter({
         if (event.type === "assistant") {
           for (const block of event.message?.content ?? []) {
             if (block.type === "text" && block.text !== undefined && block.text !== "") {
-              host.emit({ type: "agent", session: turn.session, kind: "text", text: block.text });
+              emit({ kind: "text", text: block.text });
             }
             if (block.type === "thinking" && block.thinking !== undefined && block.thinking !== "") {
-              host.emit({
-                type: "agent",
-                session: turn.session,
-                kind: "thinking",
-                text: block.thinking,
-              });
+              emit({ kind: "thinking", text: block.thinking });
             }
             if (block.type === "tool_use" && block.name !== undefined) {
-              host.emit({
-                type: "agent",
-                session: turn.session,
-                kind: "tool",
-                text: block.name,
-                detail: target(block.input),
-              });
+              emit({ kind: "tool", text: block.name, detail: target(block.input) });
             }
           }
         }
@@ -107,8 +172,8 @@ export default adapter({
       };
 
       const code = await host.exec(argv, {
-        cwd: turn.cwd,
-        stdin: turn.prompt,
+        cwd: path.resolve(host.cwd, options.cwd ?? "."),
+        stdin: prompt,
         onOutput: (chunk, stream) => {
           if (stream === "stderr") {
             stderr += chunk;
@@ -126,14 +191,62 @@ export default adapter({
         const tail = stderr.trim().split("\n").at(-1) ?? "";
         return {
           ok: false,
-          error: tail === "" ? `claude exited with code ${code}` : `claude exited with code ${code}: ${tail}`,
+          error:
+            tail === "" ? `claude exited with code ${code}` : `claude exited with code ${code}: ${tail}`,
         };
       }
       if (failed !== undefined) return { ok: false, error: failed };
-      if (turn.schema !== undefined && value === undefined) {
+      if (schema !== undefined && value === undefined) {
         return { ok: false, error: "claude returned no structured output" };
       }
       return { ok: true, value: value ?? null };
-    },
-  }),
+    }
+
+    const turn = ((session: string, prompt: string, options?: { result?: z.ZodObject }) => {
+      const opened = sessions.get(session);
+      if (opened === undefined) {
+        throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
+      }
+      const output = new Channel<Chunk>();
+      const schema = options?.result === undefined ? undefined : jsonSchema(options.result);
+      const value = (async () => {
+        try {
+          let failure: string | undefined;
+          for (let tries = 0; tries < 2; tries++) {
+            const first = !started.has(session);
+            started.add(session);
+            const sent =
+              failure === undefined
+                ? prompt
+                : `${prompt}\n\n# Correction\n\nThe last attempt failed: ${failure}\nDo the turn again and fix that.`;
+            const attempt = await runOnce(session, first, opened, sent, schema, (chunk) =>
+              output.push(chunk),
+            );
+            if (!attempt.ok) {
+              failure = attempt.error;
+              continue;
+            }
+            if (options?.result === undefined) return null;
+            const checked = options.result.safeParse(attempt.value);
+            if (checked.success) return checked.data;
+            failure = issues(checked.error);
+          }
+          throw new PenguinError(`the turn failed twice: ${failure}`);
+        } finally {
+          output.end();
+        }
+      })();
+      value.catch(() => {});
+      return { output, value };
+    }) as TurnFn;
+
+    return {
+      async open(options?: OpenOptions): Promise<string> {
+        const id = crypto.randomUUID();
+        sessions.set(id, options ?? {});
+        return id;
+      },
+      turn,
+    };
+  },
 });

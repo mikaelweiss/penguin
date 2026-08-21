@@ -13,16 +13,8 @@ export function stateRoot(): string {
   return path.join(os.homedir(), ".local", "state", "penguin");
 }
 
-export function runsRoot(): string {
-  return path.join(stateRoot(), "runs");
-}
-
 export function projectHome(cwd: string): string {
   return path.join(cwd, ".penguin");
-}
-
-export function runDir(name: string): string {
-  return path.join(runsRoot(), name);
 }
 
 export function defaultsFile(): string {
@@ -31,24 +23,4 @@ export function defaultsFile(): string {
 
 export function catalogsFile(): string {
   return path.join(home(), "catalogs");
-}
-
-export function envFile(dir: string): string {
-  return path.join(dir, "penguin-env.d.ts");
-}
-
-export function eventsPath(dir: string): string {
-  return path.join(dir, "events.jsonl");
-}
-
-export function inboxPath(dir: string): string {
-  return path.join(dir, "inbox.jsonl");
-}
-
-export function runJsonPath(dir: string): string {
-  return path.join(dir, "run.json");
-}
-
-export function transcriptsDir(dir: string): string {
-  return path.join(dir, "transcripts");
 }

@@ -31,18 +31,23 @@ export default workflow({
   async run({ params, agent, vcs, view }) {
     const state = await vcs.dirty({ cwd: params.dir });
     if (!state.ok) {
-      view.fact({ commit: "failed" });
+      await view.show(`commit failed: ${state.reason}`);
       return { ok: false, committed: false, message: "", reason: state.reason };
     }
     if (!state.dirty) {
-      view.fact({ commit: "nothing to commit" });
+      await view.show("nothing to commit");
       return { ok: true, committed: false, message: "", reason: state.reason };
     }
 
-    const writer = agent({ cwd: params.dir });
-    const written = (await writer.run(PICK, { result: Commit }))!;
+    const session = await agent.open({ cwd: params.dir });
+    const turn = agent.turn(session, PICK, { result: Commit });
+    for await (const chunk of turn.output) {
+      if (chunk.kind === "text") await view.show(chunk.text);
+      if (chunk.kind === "tool") await view.show(`  ${chunk.text}: ${chunk.detail ?? ""}`);
+    }
+    const written = await turn.value;
     if (written.files.length === 0) {
-      view.fact({ commit: "nothing worth committing" });
+      await view.show("nothing worth committing");
       return {
         ok: true,
         committed: false,
@@ -53,12 +58,12 @@ export default workflow({
 
     const staged = await vcs.stage(written.files, { cwd: params.dir });
     if (!staged.ok) {
-      view.fact({ commit: "failed" });
+      await view.show(`staging failed: ${staged.reason}`);
       return { ok: false, committed: false, message: written.message, reason: staged.reason };
     }
 
     const done = await vcs.commit(written.message, { cwd: params.dir });
-    view.fact({ commit: done.ok ? "written" : "failed" });
+    await view.show(done.ok ? `committed: ${written.message.split("\n")[0]}` : `commit failed: ${done.reason}`);
     return { ok: done.ok, committed: done.ok, message: written.message, reason: done.reason };
   },
 });
