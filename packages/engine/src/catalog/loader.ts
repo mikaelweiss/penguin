@@ -1,8 +1,8 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import * as zod from "zod";
-import type { Workflow } from "../author/ctx.ts";
-import { PenguinError } from "../errors.ts";
+import { PenguinError } from "../core/errors.ts";
+import type { Workflow } from "../core/workflow.ts";
 
 let registered = false;
 
@@ -20,7 +20,7 @@ export function register(): void {
     name: "penguin-definitions",
     setup(build) {
       build.module("penguin", async () => ({
-        exports: { ...(await import("../author/index.ts")) },
+        exports: { ...(await import("../core/index.ts")) },
         loader: "object",
       }));
       build.module("zod", () => ({ exports: { ...zod }, loader: "object" }));
@@ -41,7 +41,7 @@ export async function load(file: string): Promise<Workflow> {
   const definition = (await importDefault(file)) as Workflow | undefined;
   if (
     definition === undefined ||
-    typeof definition !== "function" ||
+    typeof definition !== "object" ||
     typeof definition.run !== "function" ||
     typeof definition.params?.parse !== "function"
   ) {

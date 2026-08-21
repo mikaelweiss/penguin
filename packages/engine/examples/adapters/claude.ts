@@ -50,7 +50,7 @@ export default adapter({
   role: "agent",
   name: "claude",
   description:
-    "runs skills on the claude CLI. A handle is one conversation: the first turn opens the session, later turns resume it.",
+    "runs prompts on the claude CLI. A session is one conversation: the first turn opens it, later turns resume it.",
   build: (host) => ({
     async turn(turn: AgentTurn): Promise<AgentTurnResult> {
       const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
@@ -61,9 +61,6 @@ export default adapter({
       // A run has no one to ask, so a denied edit costs the turn. `permission` in the session options overrides it.
       const permission = turn.options["permission"];
       argv.push("--permission-mode", typeof permission === "string" ? permission : "acceptEdits");
-      // Skills read the catalogs and run `pn list`, and a run has nobody to approve either.
-      for (const dir of host.catalogs) argv.push("--add-dir", dir);
-      argv.push("--allowedTools", "Bash(pn list:*)");
 
       let buffer = "";
       let stderr = "";

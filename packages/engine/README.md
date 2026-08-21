@@ -1,7 +1,11 @@
 # @mikaelweiss/penguin-engine
 
-The run process, catalog discovery, and the author API (`workflow`, `adapter`).
+The whole of penguin. Frontends are windows into it, and none live here.
 
-penguin splits control flow from craft. This package is the control-flow half: it finds workflow and adapter files, starts a detached run, executes the run function, holds the lock, and appends events and transcripts. It owns no terminal. Closing a viewer never reaches here.
+Three folders under `src/`, in dependency order:
 
-The starter catalog is this package's `examples/` directory. The engine itself depends on no adapter and no definition.
+- `core/` defines what a workflow, an adapter, and a message are. Start there: [src/core/README.md](src/core/README.md).
+- `catalog/` finds workflow and adapter files across catalog directories.
+- `run/` executes one workflow as a detached process and keeps its history as files any frontend can read.
+
+`examples/` is the starter catalog: a small set of real definitions to copy from.

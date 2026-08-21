@@ -1,4 +1,4 @@
-import { PenguinError, messageOf } from "../errors.ts";
+import { PenguinError, messageOf } from "../core/errors.ts";
 import { execute } from "./execute.ts";
 
 const [name] = process.argv.slice(2);

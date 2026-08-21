@@ -1,6 +1,9 @@
+export { PenguinError, messageOf } from "../core/errors.ts";
+export { eventsPath, inboxPath, runDir, runsRoot, transcriptsDir } from "../paths.ts";
 export { allocateRun, createRun, discardRun, finishRun } from "./create.ts";
-export { PenguinError, messageOf } from "../errors.ts";
 export { execute } from "./execute.ts";
-export { attachmentsDir } from "../paths.ts";
-export { liveRows, runRows, type LiveRow, type RunOnDisk } from "./runs.ts";
+export { Tail } from "./follow.ts";
+export { alive, holder } from "./lock.ts";
+export { readRun, type RunRecord } from "./record.ts";
+export { runsOnDisk, type RunOnDisk } from "./runs.ts";
 export { startRun } from "./start.ts";

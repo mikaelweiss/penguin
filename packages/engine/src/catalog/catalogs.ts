@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { catalogsFile, home, projectHome } from "../paths.ts";
 
 export type CatalogScope = "project" | "home" | "starter" | "catalog";
-export type WritableCatalog = "project" | "home";
 
 export type Catalog = {
   dir: string;
@@ -28,21 +27,12 @@ export function roots(cwd: string): Catalog[] {
   return [projectCatalog(cwd), homeCatalog(), ...enabled()];
 }
 
-/** The catalog install and sync-skills can write. Enabled catalogs are never this. */
-export function writableCatalog(cwd: string, which: WritableCatalog): Catalog {
-  return which === "project" ? projectCatalog(cwd) : homeCatalog();
-}
-
 export function workflowsDir(catalog: Catalog): string {
   return path.join(catalog.dir, "workflows");
 }
 
 export function adaptersDir(catalog: Catalog): string {
   return path.join(catalog.dir, "adapters");
-}
-
-export function skillsDir(catalog: Catalog): string {
-  return path.join(catalog.dir, "skills");
 }
 
 function enabled(): Catalog[] {

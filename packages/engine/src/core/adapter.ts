@@ -1,5 +1,6 @@
 import type { z } from "zod";
-import type { ViewEvent } from "../protocol/events.ts";
+import { PenguinError } from "./errors.ts";
+import type { ViewEvent } from "./message.ts";
 
 export type CommandResult = {
   code: number;
@@ -16,43 +17,15 @@ export type ExecOptions = ShellOptions & {
   onOutput?: (chunk: string, stream: "stdout" | "stderr") => void;
 };
 
-export type CredentialField = {
-  /** The key under which the value is stored, and the key on the returned object. */
-  name: string;
-  /** What to show the human who types the value. */
-  label: string;
-  /** An environment variable that supplies the value instead. */
-  env?: string;
-  /** A secret value: never shown, never logged. */
-  secret?: boolean;
-};
-
-export type CredentialRequest = {
-  /** The name of the stored record: lowercase letters, digits, and dashes. */
-  name: string;
-  /** What the credential is for, shown to the human. */
-  label: string;
-  /** Where the human makes the key. The viewer shows it as a link. */
-  url?: string;
-  /** One line of extra instruction. */
-  hint?: string;
-  fields: readonly CredentialField[];
-  /**
-   * Why the provider refused the values. penguin asks the user to try again, type them
-   * again, edit the file, or stop the run, then returns whatever the store holds after.
-   */
-  rejected?: string;
-};
-
+/** What the engine hands an adapter's build function. */
 export type Host = {
   /** The run's invoking folder. Relative cwd options resolve against it. */
   cwd: string;
   /** penguin's state folder, where an adapter puts what it keeps between runs. */
   state: string;
-  /** The catalog directories penguin reads definitions from, earliest first. Only the ones that exist. */
-  catalogs: string[];
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   exec(argv: string[], options?: ExecOptions): Promise<number>;
+  /** Marks the run idle while the body waits on something outside penguin. */
   wait<T>(label: string, body: () => Promise<T>): Promise<T>;
   emit(event: ViewEvent): void;
   /**
@@ -62,16 +35,9 @@ export type Host = {
    */
   gate(question: string): Promise<string>;
   gate<Shape extends z.ZodType>(question: string, shape: Shape): Promise<z.infer<Shape>>;
-  /**
-   * The values the adapter needs from the user, one field per value. Environment
-   * variables win, then the stored record. Anything still missing blocks the run
-   * until a viewer takes it and writes it to the store.
-   */
-  credential<const R extends CredentialRequest>(
-    request: R,
-  ): Promise<Record<R["fields"][number]["name"], string>>;
 };
 
+/** One prompt sent to an agent CLI, inside one session. */
 export type AgentTurn = {
   session: string;
   first: boolean;
@@ -83,13 +49,29 @@ export type AgentTurn = {
 
 export type AgentTurnResult = { ok: true; value: unknown } | { ok: false; error: string };
 
+/** What an adapter with the role "agent" builds. */
 export type AgentAdapter = {
   turn(turn: AgentTurn): Promise<AgentTurnResult>;
 };
 
 export type Adapter<A = unknown> = {
+  /** What the adapter is, on ctx: vcs, github, agent. One role, many implementations. */
   role: string;
+  /** Which implementation this is: git, jira, claude. */
   name: string;
   description: string;
+  /** Makes the API a workflow calls through ctx.<role>. */
   build(host: Host): A;
 };
+
+export function adapter<A>(definition: Adapter<A>): Adapter<A> {
+  for (const field of ["role", "name", "description"] as const) {
+    if (typeof definition[field] !== "string" || definition[field].trim() === "") {
+      throw new PenguinError(`an adapter needs a ${field}`);
+    }
+  }
+  if (typeof definition.build !== "function") {
+    throw new PenguinError("an adapter needs a build function");
+  }
+  return definition;
+}

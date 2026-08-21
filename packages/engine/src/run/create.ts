@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type RunRecord } from "../protocol/record.ts";
+import { type RunRecord } from "./record.ts";
 import { inboxPath, runDir, runJsonPath, runsRoot, transcriptsDir } from "../paths.ts";
 
 export function createRun(file: string, params: unknown): string {

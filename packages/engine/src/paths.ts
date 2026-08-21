@@ -21,16 +21,6 @@ export function projectHome(cwd: string): string {
   return path.join(cwd, ".penguin");
 }
 
-export function userRoot(): string {
-  return os.homedir();
-}
-
-export function short(target: string): string {
-  const root = userRoot();
-  if (target !== root && !target.startsWith(`${root}${path.sep}`)) return target;
-  return `~${target.slice(root.length)}`;
-}
-
 export function runDir(name: string): string {
   return path.join(runsRoot(), name);
 }
@@ -41,14 +31,6 @@ export function defaultsFile(): string {
 
 export function catalogsFile(): string {
   return path.join(home(), "catalogs");
-}
-
-export function credentialsDir(): string {
-  return path.join(stateRoot(), "credentials");
-}
-
-export function credentialFile(name: string): string {
-  return path.join(credentialsDir(), `${name}.json`);
 }
 
 export function envFile(dir: string): string {
@@ -69,8 +51,4 @@ export function runJsonPath(dir: string): string {
 
 export function transcriptsDir(dir: string): string {
   return path.join(dir, "transcripts");
-}
-
-export function attachmentsDir(dir: string): string {
-  return path.join(dir, "attachments");
 }

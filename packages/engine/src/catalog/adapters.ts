@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Adapter } from "../author/host.ts";
-import { PenguinError } from "../errors.ts";
-import { defaultsFile, envFile } from "../paths.ts";
+import type { Adapter } from "../core/adapter.ts";
+import { PenguinError } from "../core/errors.ts";
+import { defaultsFile } from "../paths.ts";
 import * as catalogs from "./catalogs.ts";
 import { importDefault } from "./loader.ts";
 
@@ -52,6 +52,7 @@ export async function loadAdapter(file: string): Promise<Adapter> {
   return definition;
 }
 
+/** The implementation the user chose per role, from ~/.penguin/defaults: one "role name" per line. */
 export function defaults(): Map<string, string> {
   const file = defaultsFile();
   const map = new Map<string, string>();
@@ -65,16 +66,6 @@ export function defaults(): Map<string, string> {
   return map;
 }
 
-/** One role's implementation. Other role lines stay. A missing file is created. */
-export function writeDefault(role: string, name: string): void {
-  const map = defaults();
-  map.set(role, name);
-  const file = defaultsFile();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const lines = [...map].map(([one, chosen]) => `${one} ${chosen}`);
-  fs.writeFileSync(file, `${lines.join("\n")}\n`);
-}
-
 export type Picked = { found: AdapterFound } | { missing: string } | { conflict: string };
 
 export function pick(list: AdapterFound[], role: string, name?: string): Picked {
@@ -85,7 +76,7 @@ export function pick(list: AdapterFound[], role: string, name?: string): Picked 
     const found = implementations.find((entry) => entry.name === wanted);
     if (found !== undefined) return { found };
     if (implementations.length === 0) {
-      return { missing: `no ${role} adapter is installed. pn list adapters shows what penguin found.` };
+      return { missing: `no ${role} adapter is installed` };
     }
     const names = implementations.map((entry) => entry.name).join(", ");
     const fix = name === undefined ? ` Edit ${defaultsFile()} to choose one.` : "";
@@ -93,7 +84,7 @@ export function pick(list: AdapterFound[], role: string, name?: string): Picked 
   }
   const first = implementations[0];
   if (first === undefined) {
-    return { missing: `no ${role} adapter is installed. pn list adapters shows what penguin found.` };
+    return { missing: `no ${role} adapter is installed` };
   }
   if (implementations.length > 1) {
     const names = implementations.map((entry) => entry.name).join(", ");
@@ -102,45 +93,6 @@ export function pick(list: AdapterFound[], role: string, name?: string): Picked 
     };
   }
   return { found: first };
-}
-
-export function writeEnv(cwd: string, list: AdapterFound[]): void {
-  for (const catalog of [catalogs.projectCatalog(cwd), catalogs.homeCatalog()]) {
-    if (fs.existsSync(catalog.dir)) writeEnvFile(catalog.dir, list);
-  }
-}
-
-export function renderEnv(dir: string, list: AdapterFound[]): string {
-  const chosen: AdapterFound[] = [];
-  for (const role of [...new Set(list.map((entry) => entry.role))].sort()) {
-    if (role === "agent") continue;
-    const picked = pick(list, role);
-    if ("found" in picked) chosen.push(picked.found);
-  }
-  const imports = chosen.map(
-    (entry, index) => `import type adapter${index} from "${specifier(dir, entry.file)}";`,
-  );
-  const fields = chosen.map(
-    (entry, index) => `    ${entry.role}: ReturnType<(typeof adapter${index})["build"]>;`,
-  );
-  const body =
-    chosen.length === 0
-      ? "export {};\n"
-      : `${imports.join("\n")}\n\ndeclare module "penguin" {\n  interface Adapters {\n${fields.join("\n")}\n  }\n}\n`;
-  return `// penguin writes this file from the installed adapters. Do not edit.\n${body}`;
-}
-
-function writeEnvFile(dir: string, list: AdapterFound[]): void {
-  const content = renderEnv(dir, list);
-  const file = envFile(dir);
-  if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === content) return;
-  fs.writeFileSync(file, content);
-}
-
-function specifier(dir: string, file: string): string {
-  const relative = path.relative(dir, file);
-  if (relative.startsWith("..")) return file;
-  return `./${relative}`;
 }
 
 async function scan(dir: string, scope: catalogs.CatalogScope): Promise<AdapterFound[]> {

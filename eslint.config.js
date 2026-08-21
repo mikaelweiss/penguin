@@ -6,11 +6,9 @@ export default [
   {
     ignores: ["**/node_modules/**", "packages/engine/examples/**"],
   },
+  ...tseslint.configs.recommended,
   {
     files: ["**/*.ts"],
-    languageOptions: {
-      parser: tseslint.parser,
-    },
     plugins: {
       "@nx": nx,
     },
@@ -29,6 +27,11 @@ export default [
           ],
         },
       ],
+    },
+  },
+  {
+    rules: {
+      "@typescript-eslint/no-empty-object-type": "off",
     },
   },
 ];

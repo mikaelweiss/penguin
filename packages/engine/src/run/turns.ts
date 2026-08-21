@@ -1,26 +1,23 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentOptions, AgentRunOptions, AgentSession } from "../author/ctx.ts";
-import type { AgentAdapter, AgentTurnResult, Host } from "../author/host.ts";
+import type { AgentAdapter, AgentTurnResult, Host } from "../core/adapter.ts";
+import { PenguinError } from "../core/errors.ts";
+import type { ViewEvent } from "../core/message.ts";
+import type { AgentOptions, AgentSession } from "../core/workflow.ts";
 import * as adapters from "../catalog/adapters.ts";
-import { resolve as resolveSkill } from "../catalog/skills.ts";
-import { PenguinError } from "../errors.ts";
 import { transcriptsDir } from "../paths.ts";
-import type { ViewEvent } from "../protocol/events.ts";
-import type { RunRecord } from "../protocol/record.ts";
 import {
-    type AnySchema,
-    type ObjectSchema,
-    envelopeOf,
-    schemaIssues,
-    turnSchema,
+  type AnySchema,
+  type ObjectSchema,
+  envelopeOf,
+  schemaIssues,
+  turnSchema,
 } from "./schema.ts";
 import { type Children, children, inScope, kill } from "./spawn.ts";
 
 type LiveRun = {
   dir: string;
-  record: RunRecord;
   found: adapters.AdapterFound[];
   emit(event: ViewEvent): void;
   activityId(): string | undefined;
@@ -39,8 +36,7 @@ type TurnCall = {
   api: AgentAdapter;
   cwd: string;
   options: Record<string, unknown>;
-  skill: string;
-  input: string | undefined;
+  prompt: string;
   result: ObjectSchema | undefined;
   blocked: ObjectSchema | undefined;
   first: () => boolean;
@@ -52,7 +48,7 @@ type Attempt =
   | { kind: "stopped" }
   | { kind: "failed"; failure: string };
 
-/** Agent sessions and the turn loop: skill, prompt, retry once, then gate. */
+/** Agent sessions and the turn loop: prompt, retry once, then gate. */
 export class Turns {
   private run: LiveRun;
   private named = new Map<string, number>();
@@ -75,8 +71,8 @@ export class Turns {
 
     let attempts = 0;
     const runTurn = (
-      skill: string,
-      runOptions?: AgentRunOptions & { result?: ObjectSchema; blocked?: ObjectSchema },
+      prompt: string,
+      runOptions?: { result?: ObjectSchema; blocked?: ObjectSchema },
     ) => {
       if (runOptions?.blocked !== undefined && runOptions.result === undefined) {
         throw new PenguinError("a turn with a blocked schema needs a result schema too");
@@ -86,8 +82,7 @@ export class Turns {
         api,
         cwd: dir,
         options: rest,
-        skill,
-        input: runOptions?.input,
+        prompt,
         result: runOptions?.result,
         blocked: runOptions?.blocked,
         first: () => attempts === 0,
@@ -132,21 +127,20 @@ export class Turns {
     halted: Promise<void>,
   ): Promise<unknown> {
     const id = this.run.nextId();
-    const skillText = readSkill(call.skill, this.run.record.workflow, this.run.record.cwd);
     const envelope = envelopeOf(call);
     const schema = turnSchema(call);
-    const label = `agent ${call.skill}`;
+    const label = `agent: ${head(call.prompt)}`;
     const activity = this.run.activityId();
     this.run.emit({ type: "step", phase: "start", id, label, activity });
     this.run.begin(id, label);
     try {
       for (;;) {
-        const attempt = await this.tryTurn(call, skillText, envelope, schema, set, stopped, id, activity);
+        const attempt = await this.tryTurn(call, envelope, schema, set, stopped, id, activity);
         if (attempt.kind === "stopped") return this.endStep(id, label, activity, false, undefined);
         if (attempt.kind === "done") return this.endStep(id, label, activity, true, attempt.value);
         const answer = await this.run.paused(() =>
           this.run.gateUntil(
-            `The agent step ${call.skill} failed twice: ${attempt.failure} Reply to run the step again.`,
+            `The agent turn "${head(call.prompt)}" failed twice: ${attempt.failure} Reply to run the turn again.`,
             halted,
           ),
         );
@@ -159,7 +153,6 @@ export class Turns {
 
   private async tryTurn(
     call: TurnCall,
-    skillText: string,
     envelope: AnySchema | undefined,
     schema: Record<string, unknown> | undefined,
     set: Children,
@@ -169,8 +162,8 @@ export class Turns {
   ): Promise<Attempt> {
     let failure: string | undefined;
     for (let tries = 0; tries < 2; tries++) {
-      const prompt = composePrompt(skillText, call.input, failure);
-      transcribe(this.run.dir, call.session, `\n>>> ${call.skill}\n\n${prompt}\n`);
+      const prompt = composePrompt(call.prompt, failure);
+      transcribe(this.run.dir, call.session, `\n>>> turn\n\n${prompt}\n`);
       const first = call.first();
       call.bump();
       let outcome: AgentTurnResult;
@@ -237,12 +230,9 @@ export class Turns {
   }
 }
 
-function readSkill(skill: string, workflow: string, cwd: string): string {
-  const found = resolveSkill(skill, workflow, cwd);
-  if (found.file === undefined) {
-    throw new PenguinError(`no skill ${skill}. Looked in ${found.searched.join(", ")}`);
-  }
-  return fs.readFileSync(found.file, "utf8");
+function head(prompt: string): string {
+  const line = prompt.trim().split("\n")[0] ?? "";
+  return line.length > 48 ? `${line.slice(0, 48)}...` : line;
 }
 
 function transcribe(dir: string, session: string, text: string): void {
@@ -251,11 +241,10 @@ function transcribe(dir: string, session: string, text: string): void {
   fs.appendFileSync(path.join(folder, `${session}.txt`), text);
 }
 
-function composePrompt(skillText: string, input: string | undefined, failure: string | undefined): string {
-  const parts = [skillText.trim()];
-  if (input !== undefined && input !== "") parts.push(`# Input\n\n${input}`);
+function composePrompt(prompt: string, failure: string | undefined): string {
+  const parts = [prompt.trim()];
   if (failure !== undefined) {
-    parts.push(`# Correction\n\nThe last attempt failed: ${failure}\nDo the step again and fix that.`);
+    parts.push(`# Correction\n\nThe last attempt failed: ${failure}\nDo the turn again and fix that.`);
   }
   return `${parts.join("\n\n")}\n`;
 }

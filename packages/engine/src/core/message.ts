@@ -1,3 +1,17 @@
+/**
+ * Messages travel in two directions. A Message goes into the run: a viewer or
+ * another process appends it to inbox.jsonl. A ViewEvent comes out of the run:
+ * the engine appends it to events.jsonl. A frontend is a window: it reads
+ * events and writes messages, and nothing more.
+ */
+
+export type Message = {
+  text: string;
+  session?: string;
+  /** Which gate the message answers. Routing only: a delivered message never carries it. */
+  gate?: string;
+};
+
 export type ViewEvent =
   | {
       type: "run";
@@ -32,7 +46,6 @@ export type ViewEvent =
       activity?: string;
     }
   | { type: "artifact"; title: string; path?: string; url?: string }
-  | { type: "watch"; elapsed?: boolean; diff?: string }
   | {
       type: "agent";
       session: string;
@@ -50,25 +63,4 @@ export type ViewEvent =
       schema?: Record<string, unknown>;
       activity?: string;
     }
-  | { type: "gate"; phase: "answered"; id: string; question: string; answer: string; activity?: string }
-  | {
-      type: "credential";
-      phase: "asked";
-      name: string;
-      label: string;
-      url?: string;
-      hint?: string;
-      fields: { name: string; label: string; secret: boolean; env?: string }[];
-    }
-  | {
-      type: "credential";
-      phase: "rejected";
-      name: string;
-      label: string;
-      reason: string;
-      where: string;
-      url?: string;
-      hint?: string;
-      fields: { name: string; label: string; secret: boolean; env?: string }[];
-    }
-  | { type: "credential"; phase: "ready"; name: string; where: string };
+  | { type: "gate"; phase: "answered"; id: string; question: string; answer: string; activity?: string };

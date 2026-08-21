@@ -1,12 +1,8 @@
-// penguin writes this file from the installed adapters. Do not edit.
-import type adapter0 from "./adapters/gh.ts";
-import type adapter1 from "./adapters/jira.ts";
-import type adapter2 from "./adapters/git.ts";
+// Maps each installed adapter role onto ctx, so workflows type-check. Maintained by hand.
+import type git from "./adapters/git.ts";
 
 declare module "penguin" {
   interface Adapters {
-    github: ReturnType<(typeof adapter0)["build"]>;
-    jira: ReturnType<(typeof adapter1)["build"]>;
-    vcs: ReturnType<(typeof adapter2)["build"]>;
+    vcs: ReturnType<(typeof git)["build"]>;
   }
 }

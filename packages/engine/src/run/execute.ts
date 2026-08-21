@@ -1,18 +1,16 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import fs from "node:fs";
 import path from "node:path";
-import { type AgentOptions, type Ctx, type View, type Workflow, COMPOSE } from "../author/ctx.ts";
-import type { CredentialRequest, Host } from "../author/host.ts";
+import type { Host } from "../core/adapter.ts";
+import { messageOf, PenguinError } from "../core/errors.ts";
+import type { ViewEvent } from "../core/message.ts";
+import type { AgentOptions, Ctx, View, Workflow } from "../core/workflow.ts";
 import * as adapters from "../catalog/adapters.ts";
-import { roots } from "../catalog/catalogs.ts";
 import { load } from "../catalog/loader.ts";
-import { messageOf, PenguinError } from "../errors.ts";
 import { runDir, stateRoot } from "../paths.ts";
-import type { ViewEvent } from "../protocol/events.ts";
-import { acquire } from "../protocol/lock.ts";
-import { type RunRecord, readRun } from "../protocol/record.ts";
 import { Bus } from "./bus.ts";
 import { Inbox } from "./inbox.ts";
+import { acquire } from "./lock.ts";
+import { type RunRecord, readRun } from "./record.ts";
 import { type AnySchema, schemaIssues } from "./schema.ts";
 import { killActive, runArgv, runCommand } from "./spawn.ts";
 import { Turns } from "./turns.ts";
@@ -42,7 +40,7 @@ export async function execute(name: string): Promise<number> {
     const found = await adapters.installed(record.cwd);
     execution = new Execution(dir, record, found, bus);
     execution.open();
-    const result = await runner(definition)(execution.ctx(params));
+    const result = await run(definition, execution.ctx(params));
     execution.close();
     bus.emit({ type: "run", phase: "done", run: name, result });
     return 0;
@@ -55,8 +53,8 @@ export async function execute(name: string): Promise<number> {
   }
 }
 
-function runner(definition: Workflow): (ctx: Ctx<unknown>) => Promise<unknown> {
-  return definition.run as (ctx: Ctx<unknown>) => Promise<unknown>;
+function run(definition: Workflow, ctx: Ctx<unknown>): Promise<unknown> {
+  return (definition.run as (ctx: Ctx<unknown>) => Promise<unknown>)(ctx);
 }
 
 type ActivityStore = { id: string };
@@ -98,7 +96,6 @@ class Execution {
     });
     this.turns = new Turns({
       dir,
-      record,
       found,
       emit: (event) => this.emit(event),
       activityId: () => this.als.getStore()?.id,
@@ -132,14 +129,12 @@ class Execution {
       messages: { next: () => this.inbox.read().message },
       view: this.view(),
       agent: (options?: AgentOptions) => this.turns.session(options ?? {}),
+      run: (child: Workflow, args: unknown) => this.child(child, args),
     };
     const cached = new Map<string, unknown>();
     const target = base as unknown as Ctx<Params>;
     return new Proxy(target, {
       get: (_, prop) => {
-        if (prop === COMPOSE) {
-          return (definition: Workflow, args: unknown) => this.compose(definition, args);
-        }
         if (typeof prop !== "string") return undefined;
         if (prop in base) return base[prop];
         if (roles.has(prop)) {
@@ -169,7 +164,7 @@ class Execution {
     return { ...carrier, activity } as ViewEvent;
   }
 
-  private async compose(definition: Workflow, args: unknown): Promise<unknown> {
+  private async child(definition: Workflow, args: unknown): Promise<unknown> {
     const checked = definition.params.safeParse(args);
     if (!checked.success) {
       throw new PenguinError(
@@ -178,7 +173,7 @@ class Execution {
     }
     return this.activity(
       definition.description,
-      () => runner(definition)(this.ctx(checked.data)),
+      () => run(definition, this.ctx(checked.data)),
       summary(checked.data),
     );
   }
@@ -195,7 +190,6 @@ class Execution {
           data: entry.data,
         }),
       artifact: (entry) => this.emit({ type: "artifact", ...entry }),
-      watch: (readouts) => this.emit({ type: "watch", ...readouts }),
     };
   }
 
@@ -319,9 +313,6 @@ class Execution {
     return {
       cwd: this.record.cwd,
       state: stateRoot(),
-      catalogs: roots(this.record.cwd)
-        .map((catalog) => catalog.dir)
-        .filter((dir) => fs.existsSync(dir)),
       shell: (cmd, options) =>
         runCommand(cmd, this.resolveCwd(options?.cwd), { stdin: options?.stdin }),
       exec: (argv, options) => runArgv(argv, this.resolveCwd(options?.cwd), options),
@@ -329,7 +320,6 @@ class Execution {
       emit: (event: ViewEvent) => this.emit(event),
       gate: ((question: string, shape?: AnySchema) =>
         this.paused(() => this.inbox.gate(question, shape))) as Host["gate"],
-      credential: (request: CredentialRequest) => this.inbox.credential(request),
     };
   }
 

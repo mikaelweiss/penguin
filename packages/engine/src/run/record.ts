@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { PenguinError } from "../errors.ts";
+import { PenguinError } from "../core/errors.ts";
 import { runJsonPath } from "../paths.ts";
 
 export type RunRecord = {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { eventsPath } from "../paths.ts";
-import type { ViewEvent } from "../protocol/events.ts";
+import type { ViewEvent } from "../core/message.ts";
 
 export class Bus {
   private file: string;

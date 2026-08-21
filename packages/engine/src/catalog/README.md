@@ -1,7 +1,7 @@
 # catalog
 
-**What.** What penguin can use, and where it lives: workflow, adapter, and skill files across catalog directories, plus the homes install writes.
+**What.** Where definitions live, and how they are found: workflow and adapter files across catalog directories.
 
-**Why.** Listing and loading definitions is not executing a run. The project, the home, and enabled catalogs are one ordered scan, and earlier wins.
+**Why.** Listing and loading definitions is not executing a run. The project (`.penguin/`), the home (`~/.penguin/`), and enabled catalogs are one ordered scan, and earlier wins.
 
-The starter catalog is the package's `examples/` directory, scanned last.
+The starter catalog is the package's `examples/` directory.
