@@ -5,8 +5,6 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "types": ["bun"],
-    "jsx": "react-jsx",
-    "jsxImportSource": "@opentui/react",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -16,9 +14,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "penguin": ["./packages/engine/src/author/index.ts"],
-      "@mikaelweiss/penguin-viewer": ["./packages/viewer/src/index.ts"]
+      "penguin": ["./packages/engine/src/author/index.ts"]
     }
   },
-  "include": ["packages", "apps", "test"]
+  "include": ["packages"]
 }

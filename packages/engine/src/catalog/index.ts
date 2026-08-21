@@ -9,8 +9,6 @@ export {
     userRoot
 } from "../paths.ts";
 
-export { standalone } from "../binary.ts";
-
 export * as catalogs from "./catalogs.ts";
 export {
   adaptersDir,
@@ -61,18 +59,6 @@ export {
     type SkillRoot,
     type SkillSource
 } from "./skills.ts";
-
-export {
-    backupStarter,
-    backupsDir,
-    declineStarter,
-    ensureStarter,
-    extractStarter,
-    starterDir,
-    starterState,
-    version,
-    type StarterState
-} from "./starter.ts";
 
 export { load } from "./loader.ts";
 export { coerce, parseParams, unfilled, usage, validate, type Asked, type ParamsSchema } from "./params.ts";

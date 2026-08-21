@@ -2,12 +2,6 @@
 
 There are many factories, but this one is _yours_
 
-## Install
-
-```sh
-npm install -g @mikaelweiss/penguin
-```
-
 ## Getting started
 
 There are three concepts you need to know in order to get started:
@@ -89,8 +83,6 @@ You can build a workflow that has steps, blockers, and all, without ever even ca
 You can make workflows that respond to all kinds of triggers: Slack, GitHub, Jira, User, a webhook, anything you can bulid an adapter for
 
 Penguin is the ultimately composable workflow builder
-
-Install with: `npm install -g @mikaelweiss/penguin`
 
 Still early beta, but I've already started using Penguin at work as well as to build Penguin!
 

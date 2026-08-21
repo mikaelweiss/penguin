@@ -1,9 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { standalone } from "../binary.ts";
 import { catalogsFile, home, projectHome } from "../paths.ts";
-import { starterDir } from "./starter.ts";
 
 export type CatalogScope = "project" | "home" | "starter" | "catalog";
 export type WritableCatalog = "project" | "home";
@@ -22,7 +20,6 @@ export function homeCatalog(): Catalog {
 }
 
 export function starterCatalog(): Catalog {
-  if (standalone()) return { dir: starterDir(), scope: "starter" };
   return { dir: fileURLToPath(new URL("../../examples", import.meta.url)), scope: "starter" };
 }
 

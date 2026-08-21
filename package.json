@@ -10,26 +10,19 @@
   },
   "type": "module",
   "workspaces": [
-    "packages/*",
-    "apps/*"
+    "packages/*"
   ],
   "engines": {
     "bun": ">=1.3.0"
   },
   "scripts": {
     "check": "tsc --noEmit && eslint .",
-    "test": "bun test --parallel --timeout 30000 test/",
-    "generate": "./scripts/generate-starter.ts",
-    "build": "./scripts/build.ts",
-    "publish": "./scripts/publish.ts",
-    "reinstall": "./scripts/reinstall.sh",
     "graph": "nx graph"
   },
   "devDependencies": {
     "@nx/eslint-plugin": "^22.4.0",
     "@types/bun": "^1.3.14",
     "@types/node": "^24.10.1",
-    "@types/react": "^19.2.18",
     "eslint": "^9.39.0",
     "nx": "^22.4.0",
     "typescript": "^5.9.3",

@@ -4,4 +4,4 @@
 
 **Why.** Listing and loading definitions is not executing a run. The project, the home, and enabled catalogs are one ordered scan, and earlier wins.
 
-`starter.ts` writes the catalog the binary carries to `~/.penguin/starter/`, and `starter.generated.ts` is that catalog, built from `examples/`.
+The starter catalog is the package's `examples/` directory, scanned last.
