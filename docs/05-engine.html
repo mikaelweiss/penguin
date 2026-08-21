@@ -104,10 +104,19 @@ return definition.run(ctx);</code></pre>
     <p>
       Each run appends JSON lines to a file under
       <code>~/.local/state/penguin/traces/</code>: the workflow and params, one line per adapter
-      call with its arguments and outcome, and the final result or error. Arguments are truncated
-      and handles are recorded as <code>"[handle]"</code>, so it stays a debugging record, not a
-      transcript. It is observability, never replay: resuming is still running the workflow again.
-      <code>trace: false</code> in the options skips it.
+      call with its arguments, outcome, and <code>elapsedMs</code>, and the final result or error.
+      Values are recorded whole. A call that returns a live object (an open stream, a turn) is
+      marked <code>handle: true</code> instead, since an object like that cannot be written down.
+      Sorting by <code>elapsedMs</code> names the slow steps.
+    </p>
+
+    <p>
+      The trace is also the resume journal. <code>run(file, params, { resume })</code> takes a
+      prior trace file: each call that matches the next recorded one hands back the recorded
+      outcome without calling out, and the run goes live at the first call the trace does not
+      hold, a mismatch, a throw, or a handle. From there every call runs for real.
+      <code>latestTrace()</code> names the newest file. <code>trace: false</code> skips the log,
+      except a resumed run always traces, so it can itself be resumed.
     </p>
 
     <h2>Catalogs</h2>

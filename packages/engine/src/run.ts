@@ -3,17 +3,20 @@ import { roots, type Catalog } from "./catalog/catalogs.ts";
 import { load } from "./catalog/loader.ts";
 import { PenguinError } from "./core/errors.ts";
 import { createHost } from "./host.ts";
-import { createTrace } from "./trace.ts";
+import { createTrace, openJournal } from "./trace.ts";
 
 export { createHost } from "./host.ts";
+export { latestTrace } from "./trace.ts";
 
 export type RunOptions = {
   /** The run's invoking folder. Defaults to the process's. */
   cwd?: string;
   /** The catalogs to draw adapters from. Defaults to roots(cwd). */
   catalogs?: Catalog[];
-  /** false skips the trace log. */
+  /** false skips the trace log. A resumed run always traces. */
   trace?: boolean;
+  /** A prior run's trace file. Recorded calls replay from it; the run goes live at the first call it does not hold. */
+  resume?: string;
 };
 
 /** Loads one workflow file, validates its params, wires the installed adapters onto ctx, and runs it. */
@@ -26,7 +29,10 @@ export async function run(
   const definition = await load(file);
   const parsed: unknown = definition.params.parse(params);
   const host = createHost(cwd);
-  const trace = options?.trace === false ? undefined : createTrace();
+  const journal =
+    options?.resume === undefined ? undefined : openJournal(options.resume, file, parsed);
+  const trace =
+    options?.trace === false && journal === undefined ? undefined : createTrace(journal);
   const found = await installedIn(options?.catalogs ?? roots(cwd));
   const ctx: Record<string, unknown> = { params: parsed };
   for (const role of new Set(found.map((entry) => entry.role))) {

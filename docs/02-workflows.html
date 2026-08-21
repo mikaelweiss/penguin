@@ -117,7 +117,7 @@ z.object({ title: z.string(), urgent: z.boolean() })  // a form</code></pre>
       on you is a fact about the code, not something you learn by scrolling.
     </p>
 
-    <pre><code>const answer = await view.ask(`Push ${head.branch} to origin? (yes/no)`, z.enum(["yes", "no"]));
+    <pre><code>const answer = await view.ask(`Push ${head.branch} to origin?`, z.enum(["yes", "no"]));
 if (answer === "no") return { ...done, pushed: false };</code></pre>
 
     <h2>Hearing from a person</h2>
@@ -258,7 +258,9 @@ if (!head.ok || head.detached) {
     <p>
       A journal has to be right about the outside world, and it never stays right. The commit that
       landed after the process died, the branch someone else pushed, the file a person edited by
-      hand: all of it invalidates a replay log and none of it bothers a workflow that asks first.
+      hand: all of it goes stale in a journal and none of it bothers a workflow that asks first.
+      Resume respects this: replay only hands back what the run already saw and acted on, and
+      everything after the first new call runs live, asking the world again.
     </p>
 
     <h2>Writing prompts</h2>

@@ -96,7 +96,7 @@
           </tr>
           <tr>
             <td><code>src/trace.ts</code></td>
-            <td><code>createTrace</code>, wrapping adapters so calls land in the log</td>
+            <td><code>createTrace</code>, <code>openJournal</code>, <code>latestTrace</code>: the log, and resume reading it back</td>
           </tr>
         </tbody>
       </table>
@@ -327,7 +327,11 @@ type ExecOptions = ShellOptions &amp; {
           </tr>
           <tr>
             <td><code>RunOptions</code></td>
-            <td><code>{ cwd?, catalogs?, trace? }</code></td>
+            <td><code>{ cwd?, catalogs?, trace?, resume? }</code></td>
+          </tr>
+          <tr>
+            <td><code>latestTrace()</code></td>
+            <td>The newest trace file, for <code>resume</code>.</td>
           </tr>
           <tr>
             <td><code>createHost(cwd)</code></td>

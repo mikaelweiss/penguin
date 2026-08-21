@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { messageOf } from "./core/errors.ts";
+import { messageOf, PenguinError } from "./core/errors.ts";
 import { tracesDir } from "./paths.ts";
 
 export type Trace = {
@@ -9,65 +9,127 @@ export type Trace = {
   wrap<A>(role: string, api: A): A;
 };
 
-const LIMIT = 200;
+type Entry = Record<string, unknown>;
 
-/** A JSON-safe copy: functions named, long strings cut, the unserializable admitted. */
+/** A JSON-safe copy: functions named, the unserializable admitted. Values stay whole, resume returns them. */
 function safe(value: unknown): unknown {
   try {
-    const text = JSON.stringify(value, (_key, item: unknown) => {
-      if (typeof item === "function") return "[function]";
-      if (typeof item === "string" && item.length > LIMIT) return `${item.slice(0, LIMIT)}...`;
-      return item;
-    });
+    const text = JSON.stringify(value, (_key, item: unknown) =>
+      typeof item === "function" ? "[function]" : item,
+    );
     return text === undefined ? undefined : (JSON.parse(text) as unknown);
   } catch {
     return "[unserializable]";
   }
 }
 
-export function createTrace(): Trace {
+/** The newest trace file, for run's resume option. */
+export function latestTrace(): string | undefined {
+  const dir = tracesDir();
+  if (!fs.existsSync(dir)) return undefined;
+  const last = fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".jsonl"))
+    .map((name) => path.join(dir, name))
+    .sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs)
+    .at(-1);
+  return last;
+}
+
+/** Reads a trace back as a journal of calls, refusing one from another workflow or params. */
+export function openJournal(file: string, workflow: string, params: unknown): Entry[] {
+  const entries = fs
+    .readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as Entry);
+  const head = entries.find((entry) => "workflow" in entry);
+  const same =
+    head !== undefined &&
+    head["workflow"] === workflow &&
+    JSON.stringify(head["params"]) === JSON.stringify(safe(params));
+  if (!same) throw new PenguinError(`${file} is not a trace of this workflow and params`);
+  return entries.filter((entry) => typeof entry["call"] === "string");
+}
+
+export function createTrace(journal?: Entry[]): Trace {
   fs.mkdirSync(tracesDir(), { recursive: true });
   const stamp = new Date().toISOString().replaceAll(":", "-");
-  const file = path.join(tracesDir(), `${stamp}-${process.pid}.jsonl`);
+  let file = path.join(tracesDir(), `${stamp}-${process.pid}.jsonl`);
+  for (let extra = 2; fs.existsSync(file); extra++) {
+    file = path.join(tracesDir(), `${stamp}-${process.pid}-${extra}.jsonl`);
+  }
+  const ahead = journal ?? [];
+  let index = 0;
+  let live = journal === undefined;
 
-  const append = (entry: Record<string, unknown>): void => {
+  const append = (entry: Entry): void => {
     fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
   };
 
-  const note = (entry: Record<string, unknown>): void => {
-    const cleaned: Record<string, unknown> = { at: new Date().toISOString() };
+  const note = (entry: Entry): void => {
+    const cleaned: Entry = { at: new Date().toISOString() };
     for (const [key, value] of Object.entries(entry)) cleaned[key] = safe(value);
     append(cleaned);
   };
 
+  /** The next journal entry, when it recorded this exact call completing with a plain value. */
+  function recorded(name: string, args: unknown): Entry | undefined {
+    const entry = ahead[index];
+    const match =
+      entry !== undefined &&
+      entry["call"] === name &&
+      JSON.stringify(entry["args"]) === JSON.stringify(args) &&
+      entry["threw"] === undefined &&
+      entry["handle"] === undefined;
+    if (!match) return undefined;
+    index++;
+    return entry;
+  }
+
   function wrapFunction(name: string, fn: (...args: unknown[]) => unknown, self: unknown) {
     return (...args: unknown[]): unknown => {
-      const called: Record<string, unknown> = {
-        at: new Date().toISOString(),
-        call: name,
-        args: safe(args),
-      };
+      const argsSafe = safe(args);
+      if (!live) {
+        const entry = recorded(name, argsSafe);
+        if (entry !== undefined) {
+          append({
+            at: new Date().toISOString(),
+            call: name,
+            args: argsSafe,
+            outcome: entry["outcome"],
+            sync: entry["sync"],
+            replayed: true,
+          });
+          return entry["sync"] === true ? entry["outcome"] : Promise.resolve(entry["outcome"]);
+        }
+        live = true;
+      }
+      const called: Entry = { at: new Date().toISOString(), call: name, args: argsSafe };
+      const startedMs = Date.now();
+      const elapsed = (): number => Date.now() - startedMs;
       let result: unknown;
       try {
         result = fn.apply(self, args);
       } catch (error) {
-        append({ ...called, threw: messageOf(error) });
+        append({ ...called, elapsedMs: elapsed(), threw: messageOf(error) });
         throw error;
       }
       if (result instanceof Promise) {
         return result.then(
           (value) => {
-            append({ ...called, outcome: safe(value) });
+            append({ ...called, elapsedMs: elapsed(), outcome: safe(value) });
             return value;
           },
           (error: unknown) => {
-            append({ ...called, threw: messageOf(error) });
+            append({ ...called, elapsedMs: elapsed(), threw: messageOf(error) });
             throw error;
           },
         );
       }
       const handle = typeof result === "object" && result !== null;
-      append({ ...called, outcome: handle ? "[handle]" : safe(result) });
+      if (handle) append({ ...called, elapsedMs: elapsed(), sync: true, handle: true });
+      else append({ ...called, elapsedMs: elapsed(), sync: true, outcome: safe(result) });
       return result;
     };
   }

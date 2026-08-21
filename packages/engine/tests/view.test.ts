@@ -66,6 +66,46 @@ test("a pending ask takes the line, listeners get the rest", async () => {
   await messages.return?.(undefined);
 });
 
+test("a boolean ask offers yes and no as choices", async () => {
+  const { view, input, text } = terminal();
+  const answer = view.ask("ship it?", z.boolean());
+  input.write("1\n");
+  expect(await answer).toBe(true);
+  expect(text()).toContain("1. yes");
+  expect(text()).toContain("2. no");
+});
+
+test("an enum ask lists its options and takes a pick by number or label", async () => {
+  const { view, input } = terminal();
+  const first = view.ask("worktree?", z.enum(["replace", "reuse", "stop"]));
+  input.write("3\n");
+  expect(await first).toBe("stop");
+  const second = view.ask("worktree?", z.enum(["replace", "reuse", "stop"]));
+  input.write("reuse\n");
+  expect(await second).toBe("reuse");
+});
+
+test("an options-only ask refuses free text", async () => {
+  const { view, input, text } = terminal();
+  const answer = view.ask("pick", z.enum(["a", "b"]));
+  input.write("something else\n");
+  input.write("1\n");
+  expect(await answer).toBe("a");
+  expect(text()).toContain("pick an option");
+});
+
+test("a union of options and text takes either", async () => {
+  const shape = z.union([z.enum(["approve"]), z.string()]);
+  const { view, input, text } = terminal();
+  const first = view.ask("review", shape);
+  input.write("make the button blue\n");
+  expect(await first).toBe("make the button blue");
+  const second = view.ask("review", shape);
+  input.write("1\n");
+  expect(await second).toBe("approve");
+  expect(text()).toContain("or type an answer");
+});
+
 test("scope prefixes shows and questions with the path", async () => {
   const { view, input, text } = terminal();
   await view.scope("a").scope("b").show("hi");
