@@ -7,7 +7,7 @@
   <body>
     <h1>The engine</h1>
 
-    <p>The engine does three things every time a workflow runs.</p>
+    <p>The engine does four things every time a workflow runs.</p>
 
     <div class="table-wrap">
       <table>
@@ -27,21 +27,21 @@
           <tr>
             <td>Ctx</td>
             <td>Validate params and wire installed adapter roles onto <code>ctx</code></td>
-            <td><code>src/core/workflow.ts</code></td>
+            <td><code>src/run.ts</code></td>
           </tr>
           <tr>
             <td>Process</td>
             <td>Own the run's working directory and the processes it spawns</td>
             <td><code>src/host.ts</code></td>
           </tr>
+          <tr>
+            <td>Trace</td>
+            <td>Append each adapter call and outcome to a log, for debugging</td>
+            <td><code>src/trace.ts</code></td>
+          </tr>
         </tbody>
       </table>
     </div>
-
-    <p>
-      A fourth job, appending each adapter call to a trace log for debugging, is described in
-      <code>src/core/README.md</code> and has no implementation in the package.
-    </p>
 
     <h2>What it refuses</h2>
 
@@ -68,27 +68,46 @@
 
     <h2>The whole runtime path</h2>
 
-    <p><code>packages/engine/examples/run.ts</code> is a frontend in thirty lines.</p>
+    <p>
+      <code>run(file, params, options)</code> in <code>src/run.ts</code> is the engine's one
+      wiring function, exported as <code>penguin/run</code>. Its whole body:
+    </p>
 
     <pre><code>const definition = await load(file);
-const params: unknown = definition.params.parse(json === undefined ? {} : JSON.parse(json));
-const host = createHost(process.cwd());
-const ctx: Record&lt;string, unknown&gt; = { params };
-for (const entry of await installedIn([starterCatalog()])) {
-  ctx[entry.role] ??= entry.definition.build(host);
+const parsed = definition.params.parse(params);
+const host = createHost(cwd);
+const found = await installedIn(options?.catalogs ?? roots(cwd));
+for (const role of new Set(found.map((entry) =&gt; entry.role))) {
+  const picked = pick(found, role);
+  if ("missing" in picked) throw new PenguinError(picked.missing);
+  if ("conflict" in picked) throw new PenguinError(picked.conflict);
+  ctx[role] = trace.wrap(role, picked.found.definition.build(host));
 }
-const result = await definition.run(ctx);</code></pre>
+return definition.run(ctx);</code></pre>
 
     <p>
-      Load a definition, parse its params, make a host, build each adapter onto <code>ctx</code> under
-      its role, await <code>run</code>. The <code>??=</code> is the earlier-wins rule: the first
-      adapter found for a role keeps it.
+      Load a definition, parse its params, make a host, resolve one implementation per role through
+      <code>pick</code>, build it onto <code>ctx</code>, await <code>run</code>. Ambiguity is
+      reported, never guessed: a role with two installed implementations and no recorded choice
+      refuses to run and names the file to edit. Each built adapter is wrapped by the trace on the
+      way in, so every call it receives lands in the log.
     </p>
 
     <p>
-      This runner uses only the starter catalog, so it never scans the project or home catalogs and
-      ignores the defaults file. A real frontend calls <code>installed(cwd)</code> and
-      <code>pick(...)</code> instead.
+      <code>examples/run.ts</code> is a frontend in twenty lines: parse argv, call
+      <code>run</code> with the starter catalog, print the result. Any other frontend, a daemon, a
+      UI server, calls the same function with different options.
+    </p>
+
+    <h2>The trace</h2>
+
+    <p>
+      Each run appends JSON lines to a file under
+      <code>~/.local/state/penguin/traces/</code>: the workflow and params, one line per adapter
+      call with its arguments and outcome, and the final result or error. Arguments are truncated
+      and handles are recorded as <code>"[handle]"</code>, so it stays a debugging record, not a
+      transcript. It is observability, never replay: resuming is still running the workflow again.
+      <code>trace: false</code> in the options skips it.
     </p>
 
     <h2>Catalogs</h2>

@@ -22,7 +22,10 @@
 │       │   ├── core/         what a workflow and an adapter are
 │       │   ├── catalog/      finding and loading definitions
 │       │   ├── host.ts       cwd, state, shell, exec
-│       │   └── paths.ts      where penguin's folders live
+│       │   ├── paths.ts      where penguin's folders live
+│       │   ├── run.ts        one workflow file, wired and run
+│       │   └── trace.ts      the run's log of adapter calls
+│       ├── tests/            the starter catalog's tests
 │       └── examples/         the starter catalog
 ├── nx.json
 ├── tsconfig.json
@@ -49,7 +52,11 @@
           </tr>
           <tr>
             <td><code>src/core/errors.ts</code></td>
-            <td><code>PenguinError</code>, <code>messageOf</code></td>
+            <td><code>PenguinError</code>, <code>messageOf</code>, <code>issuesOf</code></td>
+          </tr>
+          <tr>
+            <td><code>src/core/channel.ts</code></td>
+            <td><code>Channel</code>, the push stream adapters return</td>
           </tr>
           <tr>
             <td><code>src/core/index.ts</code></td>
@@ -77,11 +84,19 @@
           </tr>
           <tr>
             <td><code>src/host.ts</code></td>
-            <td><code>createHost</code>, <code>runCommand</code>, <code>runArgv</code></td>
+            <td><code>createHost</code></td>
           </tr>
           <tr>
             <td><code>src/paths.ts</code></td>
-            <td><code>home</code>, <code>stateRoot</code>, <code>projectHome</code>, <code>defaultsFile</code>, <code>catalogsFile</code></td>
+            <td><code>home</code>, <code>stateRoot</code>, <code>tracesDir</code>, <code>projectHome</code>, <code>defaultsFile</code>, <code>catalogsFile</code></td>
+          </tr>
+          <tr>
+            <td><code>src/run.ts</code></td>
+            <td><code>run</code>, the <code>penguin/run</code> entry point for frontends</td>
+          </tr>
+          <tr>
+            <td><code>src/trace.ts</code></td>
+            <td><code>createTrace</code>, wrapping adapters so calls land in the log</td>
           </tr>
         </tbody>
       </table>
@@ -100,7 +115,7 @@
         <tbody>
           <tr>
             <td><code>examples/run.ts</code></td>
-            <td>A frontend in thirty lines. Runs one workflow in the foreground.</td>
+            <td>A frontend in twenty lines. Runs one workflow in the foreground.</td>
           </tr>
           <tr>
             <td><code>examples/penguin-env.d.ts</code></td>
@@ -129,6 +144,10 @@
           <tr>
             <td><code>examples/workflows/ship.ts</code></td>
             <td><code>commit</code>, then push once a person says so.</td>
+          </tr>
+          <tr>
+            <td><code>examples/workflows/steer.ts</code></td>
+            <td>One agent turn that a user message can stop mid-flight.</td>
           </tr>
         </tbody>
       </table>
@@ -173,6 +192,16 @@
             <td><code>(error: unknown) =&gt; string</code></td>
             <td>The message of a caught value, whatever it turned out to be.</td>
           </tr>
+          <tr>
+            <td><code>issuesOf</code></td>
+            <td><code>(error: z.ZodError) =&gt; string</code></td>
+            <td>One line naming every issue, for a person to read.</td>
+          </tr>
+          <tr>
+            <td><code>Channel</code></td>
+            <td><code>class Channel&lt;T&gt; implements AsyncIterable&lt;T&gt;</code></td>
+            <td>A push stream: <code>push</code>, <code>end</code>, iterate.</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -198,7 +227,7 @@ type Host = {
   cwd: string;
   state: string;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
-  exec(argv: string[], options?: ExecOptions): Promise&lt;number&gt;;
+  exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
 };
 
 type CommandResult = { code: number; stdout: string; stderr: string };
@@ -207,6 +236,7 @@ type ShellOptions = { cwd?: string; stdin?: string };
 
 type ExecOptions = ShellOptions &amp; {
   onOutput?: (chunk: string, stream: "stdout" | "stderr") =&gt; void;
+  signal?: AbortSignal;
 };</code></pre>
 
     <p>
@@ -274,11 +304,38 @@ type ExecOptions = ShellOptions &amp; {
       </table>
     </div>
 
-    <p>
-      <code>createHost</code> is not exported by either entry point. <code>examples/run.ts</code>
-      imports it by path. A frontend outside this repository would need it exported, or its own
-      <code>Host</code>. The type is four members, so building one by hand is reasonable.
-    </p>
+    <h3>penguin/run</h3>
+
+    <p>The entry point a frontend calls to actually run something.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Export</th>
+            <th>Answers</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>run(file, params?, options?)</code></td>
+            <td>
+              Loads the workflow, validates params, wires one adapter per role through
+              <code>pick</code>, wraps them in the trace, and returns what the workflow returns.
+              Throws <code>PenguinError</code> on a missing or ambiguous role.
+            </td>
+          </tr>
+          <tr>
+            <td><code>RunOptions</code></td>
+            <td><code>{ cwd?, catalogs?, trace? }</code></td>
+          </tr>
+          <tr>
+            <td><code>createHost(cwd)</code></td>
+            <td>A <code>Host</code>, for a frontend wiring adapters by hand.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <h2>Workspace conventions</h2>
 
@@ -293,13 +350,19 @@ type ExecOptions = ShellOptions &amp; {
         <code>eslint.config.js</code>.
       </li>
       <li>
-        The root <code>tsconfig.json</code> maps <code>penguin</code> to
-        <code>packages/engine/src/core/index.ts</code>, so the starter definition files type-check in
-        place.
+        Inside the engine, lint holds the folder boundaries too: <code>core/</code> imports only
+        zod and itself, <code>catalog/</code> only core and paths, and only <code>run.ts</code>
+        orchestrates across them. An illegal import is a build failure, not a review comment.
       </li>
       <li>
-        <code>examples/</code> is excluded from lint, because those files import
-        <code>penguin</code> and <code>zod</code> as bare names that only exist at run time.
+        The root <code>tsconfig.json</code> maps <code>penguin</code> to
+        <code>packages/engine/src/core/index.ts</code>, so definition files, examples included,
+        type-check and lint in place.
+      </li>
+      <li>
+        <code>bun test</code> runs the suite: engine contracts next to their sources in
+        <code>src/</code>, starter adapter tests in <code>tests/</code>, git against a throwaway
+        repository and claude against recorded stream output.
       </li>
       <li><code>bun run check</code> is <code>tsc --noEmit</code> followed by <code>eslint .</code>.</li>
     </ul>

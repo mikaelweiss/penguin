@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Reading the types</title>
+  </head>
+  <body>
+    <h1>Reading the types</h1>
+
+    <p>
+      penguin uses a handful of TypeScript mechanisms that read strangely if TypeScript is not your
+      first language. Each one is listed here once, with the file that uses it. After these six,
+      nothing in the codebase should look like magic.
+    </p>
+
+    <h2>Types are shapes, not declarations</h2>
+
+    <p>
+      In most typed languages a value has a type because you declared the relationship, the way a
+      Swift type conforms to a protocol with <code>: Adapter</code>. TypeScript checks shape
+      instead: anything with the right fields <em>is</em> the type. That is why
+      <code>workflow()</code> in <code>src/core/workflow.ts</code> takes a plain object literal and
+      hands it back. No class, no conformance, no registration. The object has
+      <code>description</code>, <code>params</code>, and <code>run</code>, so it is a
+      <code>Workflow</code>. Half the codebase stops looking strange once this clicks.
+    </p>
+
+    <h2>Objects of closures instead of classes</h2>
+
+    <p>
+      Where another language reaches for a class with stored properties, TypeScript idiom returns
+      an object literal full of functions that close over what they need.
+      <code>examples/adapters/git.ts</code> is one <code>build(host)</code> returning an object of
+      async functions, each closing over <code>host</code>. Same capability as a class, less
+      ceremony, and nothing to instantiate.
+    </p>
+
+    <h2>zod exists because the types vanish at runtime</h2>
+
+    <p>
+      TypeScript types are erased when the code runs, so nothing checks that JSON from the outside
+      actually has the declared shape. Zod is the runtime half: <code>z.object({...})</code> is a
+      value that can validate, and <code>z.infer&lt;typeof Schema&gt;</code> derives the
+      compile-time type from it, so the shape is written once and both worlds agree. Every
+      <code>params</code> schema, every <code>ask</code> shape, and every agent result shape in
+      penguin is this one pattern.
+    </p>
+
+    <h2>Union types are enums with payloads</h2>
+
+    <p>
+      <code>Picked</code> in <code>src/catalog/adapters.ts</code> reads
+      <code>{ found } | { missing } | { conflict }</code>: a value is exactly one of the three, and
+      checking which one (<code>"found" in picked</code>) narrows the type. If you know Swift
+      enums with associated values, this is that. Reading <code>|</code> as "one of these cases"
+      makes most TypeScript signatures legible.
+    </p>
+
+    <h2>Declaration merging is how ctx gets its type</h2>
+
+    <p>
+      The core declares an empty <code>interface Adapters {}</code>. A catalog widens it from
+      outside, in <code>examples/penguin-env.d.ts</code>, by declaring the same interface inside
+      <code>declare module "penguin"</code>: TypeScript merges the two declarations, and
+      <code>ctx.vcs</code> is suddenly typed everywhere. SwiftUI does the identical thing when you
+      extend <code>EnvironmentValues</code> with your own keys. The
+      <code>ReturnType&lt;(typeof git)["build"]&gt;</code> in that file means "whatever build
+      actually returns", so the implementation is the contract and there is nothing to keep in
+      sync.
+    </p>
+
+    <h2>The one real piece of magic</h2>
+
+    <p>
+      Definition files import <code>penguin</code> and <code>zod</code> with no install of their
+      own. <code>src/catalog/loader.ts</code> registers a Bun plugin that serves both names from
+      penguin's own copies, which is ten lines and the only place in the codebase where something
+      happens that plain reading would not predict. Everything else is functions calling
+      functions.
+    </p>
+  </body>
+</html>

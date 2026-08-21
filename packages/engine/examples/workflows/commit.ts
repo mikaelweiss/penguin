@@ -36,7 +36,7 @@ export default workflow({
     }
     if (!state.dirty) {
       await view.show("nothing to commit");
-      return { ok: true, committed: false, message: "", reason: state.reason };
+      return { ok: true, committed: false, message: "", reason: "" };
     }
 
     const session = await agent.open({ cwd: params.dir });

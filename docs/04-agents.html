@@ -35,6 +35,10 @@ const commit = await turn.value;</code></pre>
         <code>z.infer&lt;Shape&gt;</code>. Without it, <code>value</code> resolves to
         <code>null</code>.
       </li>
+      <li>
+        <code>stop(session)</code> ends the running turn. The session survives, so the next turn
+        can correct course.
+      </li>
     </ul>
 
     <p>
@@ -98,6 +102,18 @@ const commit = await turn.value;</code></pre>
     <p>
       After two failures it throws <code>PenguinError</code>. That is the bridge admitting it could
       not do its job, which is what a throw is for.
+    </p>
+
+    <h2>Stopping a turn</h2>
+
+    <p>
+      A turn runs a child process until it finishes, and sometimes the workflow learns mid-flight
+      that it should not: a person sent a message, a PR closed, a watch stream fired.
+      <code>agent.stop(session)</code> kills the running process; the awaited
+      <code>turn.value</code> then rejects with "the turn was stopped", and the session stays open
+      for a corrective turn. <code>examples/workflows/steer.ts</code> races
+      <code>view.listen()</code> against <code>turn.value</code> and stops on the first message,
+      which is the whole pause-and-steer pattern in one file.
     </p>
 
     <h2>How the claude adapter drives the CLI</h2>

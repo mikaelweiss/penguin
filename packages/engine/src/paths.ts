@@ -17,6 +17,10 @@ export function projectHome(cwd: string): string {
   return path.join(cwd, ".penguin");
 }
 
+export function tracesDir(): string {
+  return path.join(stateRoot(), "traces");
+}
+
 export function defaultsFile(): string {
   return path.join(home(), "defaults");
 }

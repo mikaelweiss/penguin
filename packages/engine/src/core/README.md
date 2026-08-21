@@ -81,8 +81,10 @@ cannot reach another adapter. It bridges, and that is all.
 Two rules keep adapters honest:
 
 - **Functions carry plain data.** An adapter function takes and returns
-  JSON-serializable values, or an async stream of them. Never functions,
-  never objects with methods.
+  JSON-serializable values, streams of them, or handles composed of those,
+  the way `agent.turn` returns `{ output, value }`, a stream and a promise.
+  What flows through is always plain data. Arbitrary objects with methods
+  never cross the boundary.
 - **Expected outcomes are data, thrown errors mean the bridge broke.** A failed
   commit returns `{ ok: false, reason }` for the workflow to handle. A throw
   means the adapter itself could not do its job at all.
@@ -103,13 +105,26 @@ const branch = await view.ask("Which branch?", z.string());
 
 `show` sends something to whoever is watching. `ask` sends a question and
 resolves when a person answers, validated against the shape when one is given.
-Each call is its own request with its own response. There is no shared inbox,
-no queue, and no routing: an answer reaches its asker because the asker is the
-one awaiting it. Two parallel branches asking at once are two pending
-questions, each answer flowing back to its own caller.
+The shape is the whole input system: a bool, an enum, an array of enums, an
+object; a frontend renders whatever control fits it. Each call is its own
+request with its own response. There is no shared inbox, no queue, and no
+routing: an answer reaches its asker because the asker is the one awaiting it.
+Two parallel branches asking at once are two pending questions, each answer
+flowing back to its own caller.
+
+`listen()` is the other direction: an async stream of messages a person sends
+without being asked. Calling it is opting in, each stream is private to its
+caller, and a message reaches its listener because the listener holds the
+iterator. The same no-inbox law as `ask`, pointed the other way.
+
+`scope(name)` returns a view whose calls carry a path, so a parent workflow
+can give a child its own lane (`call({ ...ctx, view: view.scope(dir) }, ...)`).
+The tree a frontend shows is the narration the workflows chose, and the engine
+never learns it exists.
 
 How a view implementation talks to its frontend (a terminal, files, a socket,
-a web page) is that implementation's business, not the engine's.
+a web page), and whether it persists what it showed, is that implementation's
+business, not the engine's.
 
 ## Agents are adapters
 
@@ -128,6 +143,10 @@ const commit = await turn.value;
 The workflow decides whether agent output reaches the view, and how. The
 engine has no idea agents exist.
 
+`stop(session)` ends the running turn, and the session survives for the next
+one. A workflow that races `listen()` against `turn.value` can hear a person
+and stop the agent, which is the whole steering story.
+
 ## Resume
 
 Workflows are reconcilers. They inspect the world through adapters before
@@ -141,10 +160,10 @@ journal and no replay.
 The engine has four jobs, and any feature that needs a fifth is either a new
 adapter, a new workflow, or out of scope:
 
-1. **Catalog.** Find workflow and adapter files across catalog directories.
-2. **Ctx.** Validate params and wire installed adapter roles onto ctx.
-3. **Process.** Own the run's working directory and the processes it spawns.
-4. **Trace.** Append each adapter call and outcome to a log, for debugging.
+1. **Catalog.** Find workflow and adapter files across catalog directories (`src/catalog/`).
+2. **Ctx.** Validate params and wire installed adapter roles onto ctx (`src/run.ts`).
+3. **Process.** Own the run's working directory and the processes it spawns (`src/host.ts`).
+4. **Trace.** Append each adapter call and outcome to a log, for debugging (`src/trace.ts`).
 
 The engine does not route messages, hold state machines, retry agent turns,
 render anything, or know one adapter role from another.

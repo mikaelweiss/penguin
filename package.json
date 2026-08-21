@@ -22,12 +22,12 @@
     "graph": "nx graph"
   },
   "devDependencies": {
-    "@nx/eslint-plugin": "^22.4.0",
+    "@nx/eslint-plugin": "^23.1.1",
     "@types/bun": "^1.3.14",
     "@types/node": "^24.10.1",
     "eslint": "^9.39.0",
     "nx": "^22.4.0",
-    "typescript": "^7.0.2",
+    "typescript": "^5.9",
     "typescript-eslint": "^8.67.0"
   }
 }

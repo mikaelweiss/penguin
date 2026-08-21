@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 export default [
   ...nx.configs["flat/base"],
   {
-    ignores: ["**/node_modules/**", "packages/engine/examples/**"],
+    ignores: ["**/node_modules/**"],
   },
   ...tseslint.configs.recommended,
   {
@@ -18,11 +18,61 @@ export default [
         {
           enforceBuildableLibDependency: false,
           allowCircularSelfDependency: false,
-          allow: [],
+          allow: ["penguin"],
           depConstraints: [
             {
               sourceTag: "scope:engine",
               onlyDependOnLibsWithTags: ["scope:engine"],
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/engine/src/core/**/*.ts"],
+    ignores: ["**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["node:*", "**/host*", "**/catalog/**", "**/paths*", "**/run*", "**/trace*"],
+              message: "core imports only zod and itself",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/engine/src/catalog/**/*.ts"],
+    ignores: ["**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/host*", "**/run*", "**/trace*"],
+              message: "catalog depends only on core and paths",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/engine/src/host.ts", "packages/engine/src/paths.ts", "packages/engine/src/trace.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/catalog/**"],
+              message: "only run.ts orchestrates the catalog",
             },
           ],
         },

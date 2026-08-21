@@ -12,6 +12,10 @@
     "./catalog": {
       "types": "./src/catalog/index.ts",
       "default": "./src/catalog/index.ts"
+    },
+    "./run": {
+      "types": "./src/run.ts",
+      "default": "./src/run.ts"
     }
   },
   "files": ["src", "examples"],

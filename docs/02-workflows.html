@@ -84,6 +84,23 @@ const branch = await view.ask("Which branch?", z.string());</code></pre>
     </p>
 
     <p>
+      The shape is the whole input system. A frontend renders whatever control fits it, and the
+      workflow just gets a typed value:
+    </p>
+
+    <pre><code>z.string()                      // free text
+z.boolean()                     // yes or no
+z.enum(["ship", "hold"])        // pick one
+z.array(z.enum(["a", "b"]))     // pick many
+z.object({ title: z.string(), urgent: z.boolean() })  // a form</code></pre>
+
+    <p>
+      The terminal view parses a typed answer from the typed line, JSON included. A richer view
+      renders buttons, toggles, and multi-selects from the same shape. No workflow changes between
+      them.
+    </p>
+
+    <p>
       Each call is its own request with its own response. There is no inbox and no message router. An
       answer reaches its asker because the asker is the one awaiting it, so two parallel branches
       asking at once are two pending promises.
@@ -102,6 +119,39 @@ const branch = await view.ask("Which branch?", z.string());</code></pre>
 
     <pre><code>const answer = await view.ask(`Push ${head.branch} to origin? (yes/no)`, z.enum(["yes", "no"]));
 if (answer === "no") return { ...done, pushed: false };</code></pre>
+
+    <h2>Hearing from a person</h2>
+
+    <p>
+      <code>ask</code> is the workflow talking first. <code>view.listen()</code> is the other
+      direction: an async stream of messages a person sends without being asked. It is the same
+      shape as any other outside stream, a GitHub watch, a Slack thread, and the same rules apply:
+      calling <code>listen</code> is opting in, each stream is private to its caller, and a
+      workflow that never calls it accepts nothing. There is no inbox. A message reaches its
+      listener because the listener holds the iterator.
+    </p>
+
+    <p>
+      The usual use is steering: race the stream against a running agent turn, and act when a
+      message wins. <code>examples/workflows/steer.ts</code> is the whole pattern:
+    </p>
+
+    <pre><code>const messages = view.listen()[Symbol.asyncIterator]();
+const heard = await Promise.race([
+  turn.value.then(() => undefined, () => undefined),
+  messages.next().then((result) => (result.done === true ? undefined : result.value)),
+]);
+await messages.return?.(undefined);
+
+if (heard !== undefined) {
+  await agent.stop(session);
+  await view.show(`stopped: ${heard.text}`);
+}</code></pre>
+
+    <p>
+      Close the iterator when you stop caring, the <code>messages.return</code> line, so the view
+      can tell its frontend the workflow is no longer listening.
+    </p>
 
     <h2>Handle every adapter result</h2>
 
@@ -157,8 +207,20 @@ if (!state.dirty) {
     </p>
 
     <pre><code>const results = await Promise.all(
-  params.dirs.map(async (dir) =&gt; ({ dir, done: await call(ctx, commit, { dir }) })),
+  params.dirs.map(async (dir) =&gt; ({
+    dir,
+    done: await call({ ...ctx, view: ctx.view.scope(dir) }, commit, { dir }),
+  })),
 );</code></pre>
+
+    <p>
+      <code>view.scope(name)</code> gives a child its own lane in whatever frontend is watching:
+      the terminal prefixes its lines with <code>[name]</code>, a UI can render it as its own
+      panel. The parent decides which children deserve a lane, which is the narrator principle
+      again: the tree a person navigates is the story the workflow chose to tell, not the raw call
+      graph. A parent that does not scope gets merged narration, and for a child like
+      <code>ship</code> calling <code>commit</code>, merged is right.
+    </p>
 
     <h2>Resuming is running it again</h2>
 

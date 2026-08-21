@@ -50,9 +50,13 @@ export default adapter({
     <h3>Functions carry plain data</h3>
 
     <p>
-      An adapter function takes and returns JSON-serializable values, or an async stream of them.
-      Never functions, never objects with methods. A frontend on the other side of a socket has to
-      see the same values a terminal sees.
+      An adapter function takes and returns plain JSON-serializable values, streams of them, or
+      handles composed of those. A handle is a bundle you await and iterate rather than send
+      anywhere: <code>agent.turn</code> returns <code>{ output, value }</code>, a stream and a
+      promise. What flows <em>through</em> a stream or resolves <em>from</em> a promise is always
+      plain data, because a frontend on the other side of a socket has to see the same values a
+      terminal sees. What never crosses an adapter boundary is an arbitrary object with methods
+      doing the work.
     </p>
 
     <h3>Data for expected outcomes, a throw when the bridge broke</h3>
@@ -93,7 +97,7 @@ export default adapter({
   cwd: string;
   state: string;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
-  exec(argv: string[], options?: ExecOptions): Promise&lt;number&gt;;
+  exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
 };</code></pre>
 
     <p>
@@ -109,30 +113,30 @@ export default adapter({
         <thead>
           <tr>
             <th></th>
-            <th><code>shell(cmd)</code></th>
             <th><code>exec(argv)</code></th>
+            <th><code>shell(cmd)</code></th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>Input</td>
-            <td>One string, run through a real shell</td>
             <td>An argv array, spawned directly</td>
+            <td>One string, run through a real shell</td>
           </tr>
           <tr>
             <td>Returns</td>
             <td><code>{ code, stdout, stderr }</code> when the process closes</td>
-            <td>The exit code</td>
+            <td><code>{ code, stdout, stderr }</code> when the process closes</td>
           </tr>
           <tr>
-            <td>Output</td>
-            <td>Buffered whole</td>
-            <td>Streamed through <code>onOutput(chunk, stream)</code></td>
+            <td>Also</td>
+            <td>Streams through <code>onOutput(chunk, stream)</code>; an aborted <code>signal</code> kills the process</td>
+            <td></td>
           </tr>
           <tr>
             <td>Use for</td>
-            <td>Short commands whose output you read at the end</td>
-            <td>Long commands you want to watch, and untrusted arguments</td>
+            <td>Everything with an argument in it</td>
+            <td>Constant strings that need shell features</td>
           </tr>
         </tbody>
       </table>
@@ -146,30 +150,19 @@ export default adapter({
     </p>
 
     <p>
-      The git adapter is all <code>shell</code>: <code>git status --porcelain</code> returns quickly
-      and the caller wants the text. The claude adapter is all <code>exec</code>: the CLI runs for
-      minutes and the adapter parses stream-json line by line as it arrives.
+      <code>exec</code> is the default. Arguments in an argv array are never parsed by a shell, so
+      a commit message full of quotes, dollars, and backticks arrives intact and nothing can be
+      injected. The git adapter is one wrapper over it:
     </p>
 
-    <aside class="note">
-      <p>
-        <strong>Quote everything you interpolate.</strong> <code>host.shell</code> runs a real shell.
-        The git adapter wraps every interpolated value in its own <code>quoted()</code> helper, which
-        single-quotes and escapes embedded quotes. When the values come from a person or an agent,
-        prefer <code>host.exec</code> with an argv array. Nothing is parsed, so nothing can be
-        injected.
-      </p>
-      <pre><code>function quoted(text: string): string {
-  return `'${text.replaceAll("'", "'\\''")}'`;
-}
+    <pre><code>const git = (args: string[], cwd?: string) =&gt; host.exec(["git", ...args], { cwd });
 
-await host.shell(`git add -- ${files.map(quoted).join(" ")}`, { cwd: options?.cwd });</code></pre>
-    </aside>
+await git(["commit", "-m", message], options?.cwd);</code></pre>
 
     <p>
-      Chaining inside one shell call is fine. <code>vcs.pull</code> runs
-      <code>git fetch origin &lt;ref&gt; &amp;&amp; git reset --hard FETCH_HEAD</code> in a single
-      call, so there is one outcome and no half-done state to report.
+      Reach for <code>shell</code> only when the string is constant and needs the shell itself,
+      like <code>GIT_EDITOR=true git rebase --continue</code>. The moment a value is interpolated
+      into a shell string, it is in the wrong function.
     </p>
 
     <h2>Conventions worth copying</h2>
@@ -202,28 +195,32 @@ await host.shell(`git add -- ${files.map(quoted).join(" ")}`, { cwd: options?.cw
         <code>{ ok: false, exists: true }</code> when the target folder is already there, so the
         workflow chooses between reusing it and failing.
       </li>
+      <li>
+        A destructive function carries its danger in its name. <code>pull</code> fast-forwards and
+        answers <code>ok: false</code> on diverged histories, discarding nothing.
+        <code>resetHard</code> is the explicit discard, and a workflow that calls it said so in
+        writing.
+      </li>
     </ul>
 
     <h2>Streaming</h2>
 
     <p>
       When the outside thing keeps talking, return an <code>AsyncIterable</code>. There is no engine
-      support to opt into. The claude adapter's whole streaming machinery is one small class:
+      support to opt into. <code>penguin</code> exports <code>Channel</code>, a push stream, so an
+      adapter's whole streaming machinery is:
     </p>
 
-    <pre><code>class Channel&lt;T&gt; implements AsyncIterable&lt;T&gt; {
-  private items: T[] = [];
-  private waiters: ((result: IteratorResult&lt;T&gt;) =&gt; void)[] = [];
-  private done = false;
+    <pre><code>import { Channel } from "penguin";
 
-  push(item: T): void { /* hand to a waiter, or buffer */ }
-  end(): void { /* resolve every waiter as done */ }
-  [Symbol.asyncIterator](): AsyncIterator&lt;T&gt; { /* drain, then wait */ }
-}</code></pre>
+const output = new Channel&lt;Chunk&gt;();
+output.push(chunk);   // as things happen
+output.end();         // when they stop</code></pre>
 
     <p>
       End the channel in a <code>finally</code> so a consumer's <code>for await</code> cannot hang
-      when the work throws.
+      when the work throws. <code>issuesOf</code> is exported alongside it, one line naming every
+      issue in a zod error, since most adapters that validate need to report.
     </p>
 
     <h2>Register the types</h2>
@@ -247,10 +244,14 @@ await host.shell(`git add -- ${files.map(quoted).join(" ")}`, { cwd: options?.cw
     <h2>What lives in the implementation, not the model</h2>
 
     <p>
-      The terminal <code>view</code> in <code>examples/adapters/view.ts</code> solves two problems
-      that belong to terminals alone. stdin is a single resource, so it appends each question to a
-      promise chain and prompts one at a time. The workflow still sees two independent promises, and
-      a web view that can ask both at once would not need the code.
+      The terminal <code>view</code> in <code>examples/adapters/view.ts</code> solves problems that
+      belong to terminals alone. stdin is a single resource, so it queues questions and prompts one
+      at a time; the workflow still sees independent promises, and a web view that can ask in
+      parallel would not need the code. A typed line answers the pending question when there is
+      one, and otherwise goes to every open <code>listen</code> stream, because a terminal has no
+      way to aim a message at one listener; a frontend with navigation does, and that selection is
+      presentation, not routing. <code>scope</code> becomes a plain <code>[name]</code> prefix,
+      where a UI would make it a panel.
     </p>
 
     <p>

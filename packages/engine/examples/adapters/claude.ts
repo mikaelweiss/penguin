@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
-import { adapter, PenguinError } from "penguin";
+import { adapter, Channel, issuesOf, PenguinError } from "penguin";
 
 type OpenOptions = {
   cwd?: string;
@@ -69,49 +69,10 @@ function flatten(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function issues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const at = issue.path.join(".");
-      return at === "" ? issue.message : `${at}: ${issue.message}`;
-    })
-    .join(", ");
-}
-
 function jsonSchema(shape: z.ZodObject): Record<string, unknown> {
   const schema = z.toJSONSchema(shape) as Record<string, unknown>;
   delete schema["$schema"];
   return schema;
-}
-
-class Channel<T> implements AsyncIterable<T> {
-  private items: T[] = [];
-  private waiters: ((result: IteratorResult<T>) => void)[] = [];
-  private done = false;
-
-  push(item: T): void {
-    const waiter = this.waiters.shift();
-    if (waiter !== undefined) waiter({ value: item, done: false });
-    else this.items.push(item);
-  }
-
-  end(): void {
-    this.done = true;
-    for (const waiter of this.waiters.splice(0)) {
-      waiter({ value: undefined, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: (): Promise<IteratorResult<T>> => {
-        const item = this.items.shift();
-        if (item !== undefined) return Promise.resolve({ value: item, done: false });
-        if (this.done) return Promise.resolve({ value: undefined, done: true });
-        return new Promise((resolve) => this.waiters.push(resolve));
-      },
-    };
-  }
 }
 
 export default adapter({
@@ -122,6 +83,8 @@ export default adapter({
   build: (host) => {
     const sessions = new Map<string, OpenOptions>();
     const started = new Set<string>();
+    const running = new Map<string, AbortController>();
+    const stopped = new Set<string>();
 
     async function runOnce(
       session: string,
@@ -129,6 +92,7 @@ export default adapter({
       options: OpenOptions,
       prompt: string,
       schema: Record<string, unknown> | undefined,
+      signal: AbortSignal,
       emit: (chunk: Chunk) => void,
     ): Promise<Attempt> {
       const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
@@ -139,7 +103,6 @@ export default adapter({
       argv.push("--permission-mode", options.permission ?? "acceptEdits");
 
       let buffer = "";
-      let stderr = "";
       let value: unknown;
       let failed: string | undefined;
       const handle = (line: string): void => {
@@ -171,14 +134,12 @@ export default adapter({
         }
       };
 
-      const code = await host.exec(argv, {
+      const done = await host.exec(argv, {
         cwd: path.resolve(host.cwd, options.cwd ?? "."),
         stdin: prompt,
+        signal,
         onOutput: (chunk, stream) => {
-          if (stream === "stderr") {
-            stderr += chunk;
-            return;
-          }
+          if (stream !== "stdout") return;
           buffer += chunk;
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
@@ -187,12 +148,14 @@ export default adapter({
       });
       if (buffer.trim() !== "") handle(buffer);
 
-      if (code !== 0) {
-        const tail = stderr.trim().split("\n").at(-1) ?? "";
+      if (done.code !== 0) {
+        const tail = done.stderr.trim().split("\n").at(-1) ?? "";
         return {
           ok: false,
           error:
-            tail === "" ? `claude exited with code ${code}` : `claude exited with code ${code}: ${tail}`,
+            tail === ""
+              ? `claude exited with code ${done.code}`
+              : `claude exited with code ${done.code}: ${tail}`,
         };
       }
       if (failed !== undefined) return { ok: false, error: failed };
@@ -211,6 +174,7 @@ export default adapter({
       const schema = options?.result === undefined ? undefined : jsonSchema(options.result);
       const value = (async () => {
         try {
+          stopped.delete(session);
           let failure: string | undefined;
           for (let tries = 0; tries < 2; tries++) {
             const first = !started.has(session);
@@ -219,9 +183,20 @@ export default adapter({
               failure === undefined
                 ? prompt
                 : `${prompt}\n\n# Correction\n\nThe last attempt failed: ${failure}\nDo the turn again and fix that.`;
-            const attempt = await runOnce(session, first, opened, sent, schema, (chunk) =>
-              output.push(chunk),
-            );
+            const controller = new AbortController();
+            running.set(session, controller);
+            let attempt: Attempt;
+            try {
+              attempt = await runOnce(session, first, opened, sent, schema, controller.signal, (chunk) =>
+                output.push(chunk),
+              );
+            } finally {
+              running.delete(session);
+            }
+            if (stopped.has(session)) {
+              stopped.delete(session);
+              throw new PenguinError("the turn was stopped");
+            }
             if (!attempt.ok) {
               failure = attempt.error;
               continue;
@@ -229,7 +204,7 @@ export default adapter({
             if (options?.result === undefined) return null;
             const checked = options.result.safeParse(attempt.value);
             if (checked.success) return checked.data;
-            failure = issues(checked.error);
+            failure = issuesOf(checked.error);
           }
           throw new PenguinError(`the turn failed twice: ${failure}`);
         } finally {
@@ -247,6 +222,14 @@ export default adapter({
         return id;
       },
       turn,
+      /** Ends the running turn. The session stays open for the next one. */
+      async stop(session: string): Promise<void> {
+        if (!sessions.has(session)) {
+          throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
+        }
+        stopped.add(session);
+        running.get(session)?.abort();
+      },
     };
   },
 });

@@ -1,6 +1,7 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import type { CommandResult, ExecOptions, Host, ShellOptions } from "./core/adapter.ts";
+import type { CommandResult, ExecOptions, Host } from "./core/adapter.ts";
+import { PenguinError } from "./core/errors.ts";
 import { stateRoot } from "./paths.ts";
 
 export function createHost(cwd: string): Host {
@@ -8,61 +9,59 @@ export function createHost(cwd: string): Host {
   return {
     cwd,
     state: stateRoot(),
-    shell: (cmd, options) => runCommand(cmd, resolve(options?.cwd), { stdin: options?.stdin }),
-    exec: (argv, options) => runArgv(argv, resolve(options?.cwd), options),
+    shell: (cmd, options) => run(cmd, undefined, resolve(options?.cwd), options),
+    exec: (argv, options) => {
+      const [cmd, ...args] = argv;
+      if (cmd === undefined) throw new PenguinError("exec needs a command");
+      return run(cmd, args, resolve(options?.cwd), options);
+    },
   };
 }
 
-export function runCommand(
+function run(
   cmd: string,
+  args: string[] | undefined,
   cwd: string,
-  options?: Pick<ShellOptions, "stdin">,
+  options?: ExecOptions,
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, {
-      shell: true,
-      cwd,
-      stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-    });
+    const stdio: ("ignore" | "pipe")[] = [
+      options?.stdin === undefined ? "ignore" : "pipe",
+      "pipe",
+      "pipe",
+    ];
+    const child: ChildProcess =
+      args === undefined
+        ? spawn(cmd, { shell: true, cwd, stdio })
+        : spawn(cmd, args, { cwd, stdio });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      options?.onOutput?.(text, "stdout");
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      options?.onOutput?.(text, "stderr");
     });
     if (options?.stdin !== undefined) {
       child.stdin?.on("error", () => {});
       child.stdin?.end(options.stdin);
     }
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code ?? 1, stdout, stderr });
-    });
-  });
-}
-
-export function runArgv(argv: string[], cwd: string, options?: ExecOptions): Promise<number> {
-  const [cmd, ...args] = argv;
-  if (cmd === undefined) return Promise.resolve(1);
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      cwd,
-      stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-    });
-    const forward = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
-      options?.onOutput?.(chunk.toString(), stream);
+    const stop = (): void => {
+      child.kill();
     };
-    child.stdout?.on("data", forward("stdout"));
-    child.stderr?.on("data", forward("stderr"));
-    if (options?.stdin !== undefined) {
-      child.stdin?.on("error", () => {});
-      child.stdin?.end(options.stdin);
-    }
-    child.on("error", reject);
+    options?.signal?.addEventListener("abort", stop, { once: true });
+    if (options?.signal?.aborted === true) stop();
+    child.on("error", (error) => {
+      options?.signal?.removeEventListener("abort", stop);
+      reject(error);
+    });
     child.on("close", (code) => {
-      resolve(code ?? 1);
+      options?.signal?.removeEventListener("abort", stop);
+      resolve({ code: code ?? 1, stdout, stderr });
     });
   });
 }
