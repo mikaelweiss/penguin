@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Workflows</title>
+  </head>
+  <body>
+    <h1>Workflows</h1>
+
+    <p>
+      A workflow is a plain object with three fields: a one line description, a Zod schema for its
+      params, and <code>run(ctx)</code>. Put a <code>.ts</code> file in a catalog's
+      <code>workflows/</code> folder, default-export a <code>workflow(...)</code>, and it is
+      findable.
+    </p>
+
+    <pre><code>import { workflow } from "penguin";
+import { z } from "zod";
+
+export default workflow({
+  description: "what this does, one line",
+  params: z.object({ dir: z.string().optional() }),
+
+  async run({ params, vcs, view }) {
+    const state = await vcs.dirty({ cwd: params.dir });
+    await view.show(state.dirty ? "tree is dirty" : "tree is clean");
+    return { dirty: state.dirty };
+  },
+});</code></pre>
+
+    <p>
+      Destructure only the roles you use. That line is documentation: it says which parts of the
+      world this workflow can touch.
+    </p>
+
+    <p>
+      <code>workflow()</code> is an identity function with one check. It throws
+      <code>PenguinError</code> when the description is missing or blank, because the description is
+      what a person reads in a list of workflows.
+    </p>
+
+    <h2>ctx</h2>
+
+    <pre><code>export type Ctx&lt;Params&gt; = { params: Params } &amp; Adapters;</code></pre>
+
+    <p>
+      <code>ctx</code> is the validated params plus one entry per installed adapter role, and
+      nothing else. <code>Adapters</code> is an empty interface that a catalog widens by declaration
+      merging. In the starter catalog that happens in <code>examples/penguin-env.d.ts</code>, which
+      is maintained by hand:
+    </p>
+
+    <pre><code>declare module "penguin" {
+  interface Adapters {
+    agent: ReturnType&lt;(typeof claude)["build"]&gt;;
+    vcs: ReturnType&lt;(typeof git)["build"]&gt;;
+    view: ReturnType&lt;(typeof view)["build"]&gt;;
+  }
+}</code></pre>
+
+    <h2>What a workflow may not do</h2>
+
+    <ul role="list">
+      <li>Print. Output goes through <code>view.show</code>.</li>
+      <li>Parse argv or read environment variables. Input arrives as <code>params</code>.</li>
+      <li>Spawn a process or read a file. That is an adapter's job, through <code>host</code>.</li>
+      <li>Reach an adapter that is not on <code>ctx</code>.</li>
+    </ul>
+
+    <p>
+      Nothing enforces this at runtime. It is a discipline, and it is the payoff: a workflow that
+      touches the world only through <code>ctx</code> reads and tests as one function.
+    </p>
+
+    <h2>Talking to a person</h2>
+
+    <pre><code>await view.show("staged 3 files");
+const branch = await view.ask("Which branch?", z.string());</code></pre>
+
+    <p>
+      <code>show</code> sends something to whoever is watching. <code>ask</code> sends a question and
+      resolves when they answer, validated against the shape when you pass one. Without a shape you
+      get the raw string.
+    </p>
+
+    <p>
+      Each call is its own request with its own response. There is no inbox and no message router. An
+      answer reaches its asker because the asker is the one awaiting it, so two parallel branches
+      asking at once are two pending promises.
+    </p>
+
+    <p>
+      How a view talks to its frontend is that implementation's business. A terminal, a file, a
+      socket, a web page, a Slack thread: all of them satisfy the same two functions, and no workflow
+      changes when you swap one for another.
+    </p>
+
+    <p>
+      Awaiting <code>view.ask</code> is also how a workflow pauses. Whether a run is done or waiting
+      on you is a fact about the code, not something you learn by scrolling.
+    </p>
+
+    <pre><code>const answer = await view.ask(`Push ${head.branch} to origin? (yes/no)`, z.enum(["yes", "no"]));
+if (answer === "no") return { ...done, pushed: false };</code></pre>
+
+    <h2>Handle every adapter result</h2>
+
+    <p>
+      Adapter calls answer with data, not exceptions, so an unchecked <code>ok</code> is a bug you
+      find later. <code>examples/workflows/commit.ts</code> leaves early on every branch, and every
+      early return has the same shape as the successful one, so a caller can spread the result
+      without asking which path produced it:
+    </p>
+
+    <pre><code>const state = await vcs.dirty({ cwd: params.dir });
+if (!state.ok) {
+  await view.show(`commit failed: ${state.reason}`);
+  return { ok: false, committed: false, message: "", reason: state.reason };
+}
+if (!state.dirty) {
+  await view.show("nothing to commit");
+  return { ok: true, committed: false, message: "", reason: state.reason };
+}</code></pre>
+
+    <p>Keep return values JSON-serializable. A frontend other than a terminal has to show them.</p>
+
+    <h2>Compose instead of growing</h2>
+
+    <p>
+      When a workflow gets long, the fix is another workflow. <code>call</code> parses the child's
+      params and runs it with the same <code>ctx</code>:
+    </p>
+
+    <pre><code>export function call&lt;Schema extends z.ZodObject, R&gt;(
+  ctx: Ctx&lt;unknown&gt;,
+  child: Workflow&lt;Schema, R&gt;,
+  params: z.input&lt;Schema&gt;,
+): Promise&lt;R&gt; {
+  return child.run({ ...ctx, params: child.params.parse(params) });
+}</code></pre>
+
+    <p>
+      The child gets the parent's adapters and its own params. No nesting depth, no registry, no
+      engine involvement. <code>call</code> needs the whole <code>ctx</code>, so a workflow that
+      composes takes <code>ctx</code> as one argument and destructures inside:
+    </p>
+
+    <pre><code>async run(ctx) {
+  const { params, vcs, view } = ctx;
+  const done = await call(ctx, commit, { dir: params.dir });
+  if (!done.committed) return { ...done, pushed: false };
+}</code></pre>
+
+    <p>
+      Parallel children are <code>Promise.all</code> over <code>call</code>. That is the whole of
+      <code>examples/workflows/commit-all.ts</code>:
+    </p>
+
+    <pre><code>const results = await Promise.all(
+  params.dirs.map(async (dir) =&gt; ({ dir, done: await call(ctx, commit, { dir }) })),
+);</code></pre>
+
+    <h2>Resuming is running it again</h2>
+
+    <p>
+      Penguin has no journal, no replay, and no checkpoints. A workflow inspects the world through
+      adapters before acting, and acts only on what is missing. The world is the state store.
+    </p>
+
+    <p>
+      Kill <code>commit</code> anywhere and run it again. If the commit landed, the tree is clean and
+      the second run does nothing. If it did not, the tree is still dirty and the second run finishes
+      the job. No bookkeeping was needed to know which.
+    </p>
+
+    <p>Every step that changes something outside gets the same three parts.</p>
+
+    <ol role="list">
+      <li>Ask the adapter what is true now.</li>
+      <li>Return early, with a full result, when the work is already done.</li>
+      <li>Otherwise act, and report what the adapter answered.</li>
+    </ol>
+
+    <p>
+      <code>ship</code> does this across a composition boundary. It calls <code>commit</code>, which
+      reconciles itself, then checks <code>head</code> before pushing rather than trusting the branch
+      it saw earlier:
+    </p>
+
+    <pre><code>const head = await vcs.head({ cwd: params.dir });
+if (!head.ok || head.detached) {
+  await view.show(`not pushing: ${head.detached ? "detached HEAD" : head.reason}`);
+  return { ...done, pushed: false };
+}</code></pre>
+
+    <p>
+      A journal has to be right about the outside world, and it never stays right. The commit that
+      landed after the process died, the branch someone else pushed, the file a person edited by
+      hand: all of it invalidates a replay log and none of it bothers a workflow that asks first.
+    </p>
+
+    <h2>Writing prompts</h2>
+
+    <p>
+      Prompts are workflow code. Keep them in the workflow file as a module-level constant, next to
+      the schema they fill. <code>commit.ts</code>'s prompt is a numbered procedure that says what to
+      read, what to decide, and what not to do:
+    </p>
+
+    <blockquote>
+      <p>Do not stage the files. Do not commit. penguin does both after you answer.</p>
+    </blockquote>
+
+    <p>
+      The agent picks, the workflow acts. Letting the agent run <code>git commit</code> itself would
+      move a deterministic step back into prose.
+    </p>
+
+    <h2>Run it</h2>
+
+    <pre><code>bun packages/engine/examples/run.ts \
+  packages/engine/examples/workflows/ship.ts '{"dir":"."}'</code></pre>
+
+    <p>
+      The second argument is JSON, parsed and then validated against your <code>params</code> schema.
+      Leave it off and the schema is parsed against <code>{}</code>, which succeeds when every field
+      is optional.
+    </p>
+  </body>
+</html>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Overview</title>
+  </head>
+  <body>
+    <h1>Penguin</h1>
+
+    <p>
+      Penguin runs a workflow you wrote as a live process. The workflow is plain TypeScript.
+      Adapters give it a way to touch git, an agent CLI, and you. There is no third concept.
+    </p>
+
+    <h2>The two definitions</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>Workflow</th>
+            <th>Adapter</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Job</td>
+            <td>Decide what happens and what a person sees</td>
+            <td>Reach one outside thing</td>
+          </tr>
+          <tr>
+            <td>Sees</td>
+            <td><code>ctx</code>: validated params, one entry per installed role</td>
+            <td><code>host</code>: <code>cwd</code>, <code>state</code>, <code>shell</code>, <code>exec</code></td>
+          </tr>
+          <tr>
+            <td>Knows about</td>
+            <td>Roles, never implementations</td>
+            <td>One outside thing, never another adapter</td>
+          </tr>
+          <tr>
+            <td>Composes by</td>
+            <td>Calling another workflow</td>
+            <td>Nothing. Adapters do not compose.</td>
+          </tr>
+          <tr>
+            <td>Lives in</td>
+            <td><code>src/core/workflow.ts</code></td>
+            <td><code>src/core/adapter.ts</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Anything that looks like a third concept is one of these two wearing a hat. A message stream
+      is an adapter function that returns an <code>AsyncIterable</code>. The person watching the run
+      is an adapter with the role <code>view</code>. An agent CLI is an adapter with the role
+      <code>agent</code>. The engine has never heard of any of them.
+    </p>
+
+    <h2>How a run fits together</h2>
+
+    <pre><code>  ┌───────────────────────────────────────────────┐
+  │  workflow                                     │
+  │    validated params, calls ctx.&lt;role&gt;         │
+  └───────────────────────┬───────────────────────┘
+                          │  ctx
+  ┌───────────────────────┴───────────────────────┐
+  │  adapters      view   vcs   agent   github    │
+  └───────────────────────┬───────────────────────┘
+                          │  host: cwd, state, shell, exec
+  ┌───────────────────────┴───────────────────────┐
+  │  the outside   a terminal, git, claude, an API│
+  └───────────────────────────────────────────────┘</code></pre>
+
+    <p>
+      A workflow reaches the world only through <code>ctx</code>. It never prints, never parses
+      argv, never spawns a process. An adapter reaches the world only through <code>host</code>. It
+      cannot write to the view, cannot ask a question, and cannot call another adapter.
+    </p>
+
+    <p>
+      The workflow is the only orchestrator and the only narrator. To know what a run will print,
+      you read one file.
+    </p>
+
+    <h2>Roles and names</h2>
+
+    <p>
+      An adapter declares a <code>role</code>, which is what it is on <code>ctx</code>, and a
+      <code>name</code>, which is which implementation it is. A workflow calls
+      <code>ctx.vcs.commit(...)</code> and never learns whether git or jj answered.
+    </p>
+
+    <pre><code>role: "vcs"     name: "git"        →  ctx.vcs
+role: "agent"   name: "claude"     →  ctx.agent
+role: "view"    name: "terminal"   →  ctx.view</code></pre>
+
+    <p>
+      Install two implementations of one role and you pick a default. See
+      <a href="/engine">The engine</a>.
+    </p>
+
+    <h2>Run one</h2>
+
+    <pre><code>bun packages/engine/examples/run.ts \
+  packages/engine/examples/workflows/ship.ts '{"dir":"."}'</code></pre>
+
+    <p>
+      <code>examples/run.ts</code> is the smallest frontend there is. It loads one workflow file,
+      parses its params, builds the starter adapters against a host, and awaits
+      <code>run(ctx)</code>. Almost everything Penguin does happens in the workflow file, not in the
+      runner.
+    </p>
+
+    <h2>Where to go next</h2>
+
+    <ul role="list">
+      <li><a href="/workflows">Workflows</a>, when you want to build something today.</li>
+      <li><a href="/adapters">Adapters</a>, when you need to reach something new.</li>
+      <li><a href="/agents">Agents</a>, for the agent API a workflow drives.</li>
+      <li><a href="/engine">The engine</a>, for the catalog, the loader, and what the engine refuses to do.</li>
+      <li><a href="/reference">Reference</a>, for the repo map and every export.</li>
+    </ul>
+  </body>
+</html>

@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Adapters</title>
+  </head>
+  <body>
+    <h1>Adapters</h1>
+
+    <p>
+      An adapter connects workflows to exactly one outside thing. It is a role, a name, a
+      description, and a <code>build(host)</code> that returns the functions a workflow calls through
+      <code>ctx.&lt;role&gt;</code>. Put a <code>.ts</code> file in a catalog's
+      <code>adapters/</code> folder, default-export an <code>adapter(...)</code>, and every workflow
+      can reach it.
+    </p>
+
+    <pre><code>import { adapter } from "penguin";
+
+export default adapter({
+  role: "vcs",
+  name: "git",
+  description: "git working copies",
+  build: (host) =&gt; ({
+    async commit(message: string, options?: { cwd?: string }) {
+      const done = await host.shell(`git commit -m ${quoted(message)}`, { cwd: options?.cwd });
+      return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
+    },
+  }),
+});</code></pre>
+
+    <p>
+      <code>adapter()</code> checks that role, name, and description are non-blank strings and that
+      <code>build</code> is a function, then hands the object back untouched. <code>build</code> runs
+      once per run. Anything the adapter remembers for the length of a run is a closure variable,
+      which is how the claude adapter keeps its session map.
+    </p>
+
+    <h2>Pick the role first</h2>
+
+    <p>
+      The role is the contract every workflow codes against, so choose it before the API. Reuse an
+      existing role when your thing plays the same part: a jj adapter is <code>role: "vcs"</code>, and
+      it inherits every workflow written for git. Invent a role only for a genuinely new outside
+      thing.
+    </p>
+
+    <h2>The two rules</h2>
+
+    <h3>Functions carry plain data</h3>
+
+    <p>
+      An adapter function takes and returns JSON-serializable values, or an async stream of them.
+      Never functions, never objects with methods. A frontend on the other side of a socket has to
+      see the same values a terminal sees.
+    </p>
+
+    <h3>Data for expected outcomes, a throw when the bridge broke</h3>
+
+    <p>
+      A failed commit is a normal thing that happens, so it comes back as
+      <code>{ ok: false, reason }</code> for the workflow to handle. A throw means the adapter could
+      not do its job at all. The claude adapter throws when you pass a session id it never opened,
+      because there is no sensible <code>{ ok: false }</code> for a caller mistake:
+    </p>
+
+    <pre><code>if (opened === undefined) {
+  throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
+}</code></pre>
+
+    <p>Include the fix in the message. A person reads it.</p>
+
+    <h2>What an adapter cannot do</h2>
+
+    <ul role="list">
+      <li>Write to the view. It has no <code>view</code>.</li>
+      <li>Ask a person anything.</li>
+      <li>Call another adapter.</li>
+      <li>Touch anything outside <code>host</code>.</li>
+    </ul>
+
+    <p>
+      An adapter that wants to narrate returns the words and lets the workflow decide. The
+      <code>claude</code> adapter returns a stream of chunks. Whether any of it reaches a screen is
+      the workflow's call.
+    </p>
+
+    <h2>The host</h2>
+
+    <p><code>host</code> is everything an adapter is allowed to touch. Four members, no way past them.</p>
+
+    <pre><code>export type Host = {
+  cwd: string;
+  state: string;
+  shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
+  exec(argv: string[], options?: ExecOptions): Promise&lt;number&gt;;
+};</code></pre>
+
+    <p>
+      <code>cwd</code> is the folder the run was invoked from, and relative <code>cwd</code> options
+      on adapter calls resolve against it. <code>state</code> is where an adapter puts what it keeps
+      between runs, which is why git worktrees land at
+      <code>&lt;state&gt;/worktrees/&lt;project&gt;/&lt;name&gt;</code> instead of inside the
+      repository. Without <code>state</code>, every adapter would invent its own hidden folder.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th><code>shell(cmd)</code></th>
+            <th><code>exec(argv)</code></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Input</td>
+            <td>One string, run through a real shell</td>
+            <td>An argv array, spawned directly</td>
+          </tr>
+          <tr>
+            <td>Returns</td>
+            <td><code>{ code, stdout, stderr }</code> when the process closes</td>
+            <td>The exit code</td>
+          </tr>
+          <tr>
+            <td>Output</td>
+            <td>Buffered whole</td>
+            <td>Streamed through <code>onOutput(chunk, stream)</code></td>
+          </tr>
+          <tr>
+            <td>Use for</td>
+            <td>Short commands whose output you read at the end</td>
+            <td>Long commands you want to watch, and untrusted arguments</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Both accept <code>cwd</code> and <code>stdin</code>. When <code>stdin</code> is undefined the
+      child's stdin is ignored; when it is a string, the string is written and the pipe closed.
+      Errors on that pipe are swallowed, because a process that exits before reading its input is
+      normal, not a crash.
+    </p>
+
+    <p>
+      The git adapter is all <code>shell</code>: <code>git status --porcelain</code> returns quickly
+      and the caller wants the text. The claude adapter is all <code>exec</code>: the CLI runs for
+      minutes and the adapter parses stream-json line by line as it arrives.
+    </p>
+
+    <aside class="note">
+      <p>
+        <strong>Quote everything you interpolate.</strong> <code>host.shell</code> runs a real shell.
+        The git adapter wraps every interpolated value in its own <code>quoted()</code> helper, which
+        single-quotes and escapes embedded quotes. When the values come from a person or an agent,
+        prefer <code>host.exec</code> with an argv array. Nothing is parsed, so nothing can be
+        injected.
+      </p>
+      <pre><code>function quoted(text: string): string {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+await host.shell(`git add -- ${files.map(quoted).join(" ")}`, { cwd: options?.cwd });</code></pre>
+    </aside>
+
+    <p>
+      Chaining inside one shell call is fine. <code>vcs.pull</code> runs
+      <code>git fetch origin &lt;ref&gt; &amp;&amp; git reset --hard FETCH_HEAD</code> in a single
+      call, so there is one outcome and no half-done state to report.
+    </p>
+
+    <h2>Conventions worth copying</h2>
+
+    <p>Nothing in the engine requires these. The starter catalog is consistent about them.</p>
+
+    <ul role="list">
+      <li>
+        Every result carries <code>ok</code> and <code>reason</code>, so a failure always has
+        something to show.
+      </li>
+      <li>
+        Extra facts ride alongside rather than replacing them: <code>dirty</code> returns
+        <code>{ ok, dirty, reason }</code>, <code>head</code> returns
+        <code>{ ok, branch, sha, detached, reason }</code>.
+      </li>
+      <li>
+        <code>cwd</code> is an option on each call, not state on the adapter, so one adapter serves
+        many folders in one run. An adapter that stored a folder at build time could not run
+        <code>commit-all</code>.
+      </li>
+      <li>
+        Related calls nest under a plain object: <code>vcs.branch.create</code>,
+        <code>vcs.rebase.onto</code>, <code>vcs.worktree.add</code>. Still plain data in and out.
+      </li>
+      <li>
+        Ambiguity is reported, not guessed. <code>defaultBranch</code> reads
+        <code>refs/remotes/origin/HEAD</code> and answers <code>ok: false</code> when it is unset,
+        rather than assuming <code>main</code>. <code>worktree.add</code> answers
+        <code>{ ok: false, exists: true }</code> when the target folder is already there, so the
+        workflow chooses between reusing it and failing.
+      </li>
+    </ul>
+
+    <h2>Streaming</h2>
+
+    <p>
+      When the outside thing keeps talking, return an <code>AsyncIterable</code>. There is no engine
+      support to opt into. The claude adapter's whole streaming machinery is one small class:
+    </p>
+
+    <pre><code>class Channel&lt;T&gt; implements AsyncIterable&lt;T&gt; {
+  private items: T[] = [];
+  private waiters: ((result: IteratorResult&lt;T&gt;) =&gt; void)[] = [];
+  private done = false;
+
+  push(item: T): void { /* hand to a waiter, or buffer */ }
+  end(): void { /* resolve every waiter as done */ }
+  [Symbol.asyncIterator](): AsyncIterator&lt;T&gt; { /* drain, then wait */ }
+}</code></pre>
+
+    <p>
+      End the channel in a <code>finally</code> so a consumer's <code>for await</code> cannot hang
+      when the work throws.
+    </p>
+
+    <h2>Register the types</h2>
+
+    <p>
+      Add the role to the <code>Adapters</code> interface so workflows type-check. In the starter
+      catalog that is <code>examples/penguin-env.d.ts</code>, maintained by hand:
+    </p>
+
+    <pre><code>declare module "penguin" {
+  interface Adapters {
+    vcs: ReturnType&lt;(typeof git)["build"]&gt;;
+  }
+}</code></pre>
+
+    <p>
+      <code>ReturnType&lt;typeof build&gt;</code> rather than a hand-written interface. The
+      implementation is the contract, and there is nothing to keep in sync.
+    </p>
+
+    <h2>What lives in the implementation, not the model</h2>
+
+    <p>
+      The terminal <code>view</code> in <code>examples/adapters/view.ts</code> solves two problems
+      that belong to terminals alone. stdin is a single resource, so it appends each question to a
+      promise chain and prompts one at a time. The workflow still sees two independent promises, and
+      a web view that can ask both at once would not need the code.
+    </p>
+
+    <p>
+      A person answering also types a line, so when the shape wants a number, a list, or an object,
+      the adapter tries the raw text and its <code>JSON.parse</code> before giving up. A bad answer
+      is not an error: it prints what did not fit and asks again until the answer parses.
+    </p>
+
+    <h2>Two implementations of one role</h2>
+
+    <p>
+      Ship a second <code>name</code> under the same <code>role</code> and both are installed.
+      Penguin will not choose between them. It reports the conflict and names the file to edit. See
+      <a href="/engine">The engine</a>.
+    </p>
+  </body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Agents</title>
+  </head>
+  <body>
+    <h1>Agents</h1>
+
+    <p>
+      An agent CLI is one more outside thing, so it is one more adapter, role <code>agent</code>. The
+      engine has no idea agents exist. No part of it retries a turn, parses a model's output, or
+      holds a conversation.
+    </p>
+
+    <h2>The API</h2>
+
+    <pre><code>const session = await agent.open({ cwd: params.dir });
+const turn = agent.turn(session, PROMPT, { result: Commit });
+for await (const chunk of turn.output) await view.show(chunk.text);
+const commit = await turn.value;</code></pre>
+
+    <ul role="list">
+      <li>
+        <code>open(options)</code> returns a session id. A session is one conversation: the first turn
+        opens it, later turns resume it.
+      </li>
+      <li>
+        <code>turn(session, prompt)</code> returns a handle with two halves. <code>output</code> is an
+        <code>AsyncIterable</code> of what the agent is doing. <code>value</code> is a promise of the
+        result.
+      </li>
+      <li>
+        Pass <code>{ result: Shape }</code> and <code>value</code> is typed as
+        <code>z.infer&lt;Shape&gt;</code>. Without it, <code>value</code> resolves to
+        <code>null</code>.
+      </li>
+    </ul>
+
+    <p>
+      Splitting <code>output</code> from <code>value</code> is the design. The stream is what
+      happened, the value is what it produced, and the workflow decides whether the stream reaches a
+      person.
+    </p>
+
+    <h2>Chunks</h2>
+
+    <pre><code>type Chunk = { kind: "text" | "thinking" | "tool"; text: string; detail?: string };</code></pre>
+
+    <p>
+      For a tool call, <code>text</code> is the tool name and <code>detail</code> is the one value
+      that says what it acts on. The <code>claude</code> adapter picks that value by looking for a
+      known field, in order: <code>command</code>, <code>file_path</code>, <code>path</code>,
+      <code>pattern</code>, <code>query</code>, <code>url</code>, <code>skill</code>,
+      <code>description</code>, <code>prompt</code>, then the first non-empty string in the input.
+      Only the adapter knows a particular CLI's tool shapes, and that knowledge stays there.
+    </p>
+
+    <p>The workflow chooses what to show, and formats it here rather than in the adapter:</p>
+
+    <pre><code>for await (const chunk of turn.output) {
+  if (chunk.kind === "text") await view.show(chunk.text);
+  if (chunk.kind === "tool") await view.show(`  ${chunk.text}: ${chunk.detail ?? ""}`);
+}</code></pre>
+
+    <p>Thinking is dropped here. Another workflow could show it.</p>
+
+    <h2>Typed results</h2>
+
+    <p>
+      Give the turn a Zod object and the adapter converts it to JSON Schema, hands it to the CLI as
+      <code>--json-schema</code>, and validates what comes back. A turn that ends in a typed value is
+      what makes "the agent is done" a fact rather than a guess.
+    </p>
+
+    <pre><code>const Commit = z.object({
+  files: z.array(z.string()).describe("the paths to commit, as git status prints them"),
+  message: z.string().describe("the commit message, the title on the first line"),
+});</code></pre>
+
+    <p>
+      The <code>.describe()</code> calls survive into the JSON Schema, so they are prompt text the
+      model sees at the point it fills each field.
+    </p>
+
+    <h2>Retry lives in the adapter</h2>
+
+    <p>
+      A turn runs at most twice. When the first attempt fails, whether the CLI exited non-zero,
+      reported an error, returned no structured output, or returned something the schema rejected, the
+      adapter reruns the prompt with a correction appended:
+    </p>
+
+    <pre><code>const sent = failure === undefined
+  ? prompt
+  : `${prompt}\n\n# Correction\n\nThe last attempt failed: ${failure}\nDo the turn again and fix that.`;</code></pre>
+
+    <p>
+      After two failures it throws <code>PenguinError</code>. That is the bridge admitting it could
+      not do its job, which is what a throw is for.
+    </p>
+
+    <h2>How the claude adapter drives the CLI</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Flag</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--output-format stream-json --verbose</code></td>
+            <td>Line-delimited events, so <code>output</code> can emit while the turn runs.</td>
+          </tr>
+          <tr>
+            <td><code>--session-id</code> then <code>--resume</code></td>
+            <td>The adapter tracks which sessions have started and picks the right one.</td>
+          </tr>
+          <tr>
+            <td><code>--json-schema</code></td>
+            <td>Only when the turn asked for a typed result.</td>
+          </tr>
+          <tr>
+            <td><code>--permission-mode acceptEdits</code></td>
+            <td>
+              A run has no one to ask, so a denied edit costs the turn. The <code>permission</code>
+              option overrides it.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The prompt goes in on stdin. Output is buffered by line, parsed, and pushed into a Channel.</p>
+
+    <h2>Swapping the agent</h2>
+
+    <p>
+      Codex, Gemini, or your own harness is another adapter with role <code>agent</code> and a
+      different <code>name</code>. As long as it answers <code>open</code> and <code>turn</code>, no
+      workflow changes.
+    </p>
+  </body>
+</html>

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>The engine</title>
+  </head>
+  <body>
+    <h1>The engine</h1>
+
+    <p>The engine does three things every time a workflow runs.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Means</th>
+            <th>Code</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Catalog</td>
+            <td>Find workflow and adapter files across catalog directories</td>
+            <td><code>src/catalog/</code></td>
+          </tr>
+          <tr>
+            <td>Ctx</td>
+            <td>Validate params and wire installed adapter roles onto <code>ctx</code></td>
+            <td><code>src/core/workflow.ts</code></td>
+          </tr>
+          <tr>
+            <td>Process</td>
+            <td>Own the run's working directory and the processes it spawns</td>
+            <td><code>src/host.ts</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      A fourth job, appending each adapter call to a trace log for debugging, is described in
+      <code>src/core/README.md</code> and has no implementation in the package.
+    </p>
+
+    <h2>What it refuses</h2>
+
+    <ul role="list">
+      <li>It does not route messages. A promise already goes back to its caller.</li>
+      <li>It does not hold state machines. A workflow is TypeScript control flow.</li>
+      <li>It does not retry agent turns. The agent adapter does, because retry is CLI-shaped.</li>
+      <li>It does not render anything. The view adapter does.</li>
+      <li>
+        It does not know one adapter role from another. <code>vcs</code>, <code>agent</code>, and
+        <code>view</code> are strings to it. It builds every installed adapter against the same host
+        and puts the result on <code>ctx</code> under its role, with no idea that <code>view</code>
+        is special.
+      </li>
+    </ul>
+
+    <aside class="note">
+      <p>
+        <strong>The test for a new feature.</strong> If a proposal needs a fourth engine job, a new
+        base class, or a new lifecycle hook, it is in the wrong place. It is either a new adapter, a
+        new workflow, or out of scope.
+      </p>
+    </aside>
+
+    <h2>The whole runtime path</h2>
+
+    <p><code>packages/engine/examples/run.ts</code> is a frontend in thirty lines.</p>
+
+    <pre><code>const definition = await load(file);
+const params: unknown = definition.params.parse(json === undefined ? {} : JSON.parse(json));
+const host = createHost(process.cwd());
+const ctx: Record&lt;string, unknown&gt; = { params };
+for (const entry of await installedIn([starterCatalog()])) {
+  ctx[entry.role] ??= entry.definition.build(host);
+}
+const result = await definition.run(ctx);</code></pre>
+
+    <p>
+      Load a definition, parse its params, make a host, build each adapter onto <code>ctx</code> under
+      its role, await <code>run</code>. The <code>??=</code> is the earlier-wins rule: the first
+      adapter found for a role keeps it.
+    </p>
+
+    <p>
+      This runner uses only the starter catalog, so it never scans the project or home catalogs and
+      ignores the defaults file. A real frontend calls <code>installed(cwd)</code> and
+      <code>pick(...)</code> instead.
+    </p>
+
+    <h2>Catalogs</h2>
+
+    <p>
+      A catalog is a folder with <code>workflows/</code> and <code>adapters/</code> inside it.
+      <code>roots(cwd)</code> returns the ones to scan, in order, and earlier wins.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Scope</th>
+            <th>Folder</th>
+            <th>For</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>project</code></td>
+            <td><code>&lt;cwd&gt;/.penguin</code></td>
+            <td>Definitions that belong to this repository</td>
+          </tr>
+          <tr>
+            <td><code>home</code></td>
+            <td><code>~/.penguin</code></td>
+            <td>Yours, everywhere</td>
+          </tr>
+          <tr>
+            <td><code>catalog</code></td>
+            <td>Each line of <code>~/.penguin/catalogs</code>, resolved against <code>~/.penguin</code></td>
+            <td>Shared or vendored sets</td>
+          </tr>
+          <tr>
+            <td><code>starter</code></td>
+            <td>The engine package's <code>examples/</code></td>
+            <td>The line <code>starter</code> in the catalogs file</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The catalogs file is one path per line. Blank lines and <code>#</code> comments are skipped, and
+      a line pointing at a folder that does not exist is skipped rather than reported. The word
+      <code>starter</code> is special: it resolves to the engine's own <code>examples/</code>
+      directory, wherever the package is installed.
+    </p>
+
+    <p>
+      <code>installed(cwd)</code> scans <code>adapters/</code> in every root, imports each
+      <code>.ts</code> file that is not a <code>.d.ts</code>, and drops duplicates by
+      <code>role</code> plus <code>name</code>, so a project <code>vcs/git</code> shadows a home one.
+      The scan is eager because role and name live in the module, not the filename.
+    </p>
+
+    <p>
+      Workflows are cheaper. <code>found(cwd)</code> lists the <code>.ts</code> files in every
+      <code>workflows/</code> folder without importing anything, and the name is the filename minus
+      the extension. <code>locate(name, cwd)</code> returns the first match.
+      <code>searchedWorkflows(cwd)</code> and <code>searchedAdapters(cwd)</code> return the folders
+      that were scanned, so a frontend can say where it looked when it found nothing.
+    </p>
+
+    <h3>Picking an implementation</h3>
+
+    <p>
+      <code>pick(list, role, name?)</code> resolves one implementation and answers with a tagged
+      result rather than throwing:
+    </p>
+
+    <pre><code>export type Picked = { found: AdapterFound } | { missing: string } | { conflict: string };</code></pre>
+
+    <p>It tries an explicit <code>name</code>, then the role's line in <code>~/.penguin/defaults</code>, then the only implementation when there is exactly one. With more than one and no choice recorded, it names them and says how to fix it:</p>
+
+    <pre><code>2 vcs adapters are installed (git, jj).
+Write "vcs jj" to /Users/you/.penguin/defaults to choose one.</code></pre>
+
+    <p>
+      The defaults file is one <code>role name</code> pair per line, with the same blank-and-comment
+      handling as the catalogs file.
+    </p>
+
+    <h3>Where the folders come from</h3>
+
+    <p><code>packages/engine/src/paths.ts</code> is the only place that answers this.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Function</th>
+            <th>Default</th>
+            <th>Override</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>home()</code></td>
+            <td><code>~/.penguin</code></td>
+            <td><code>PENGUIN_HOME</code></td>
+          </tr>
+          <tr>
+            <td><code>stateRoot()</code></td>
+            <td><code>~/.local/state/penguin</code></td>
+            <td><code>XDG_STATE_HOME</code></td>
+          </tr>
+          <tr>
+            <td><code>projectHome(cwd)</code></td>
+            <td><code>&lt;cwd&gt;/.penguin</code></td>
+            <td>none</td>
+          </tr>
+          <tr>
+            <td><code>defaultsFile()</code></td>
+            <td><code>~/.penguin/defaults</code></td>
+            <td>follows <code>home()</code></td>
+          </tr>
+          <tr>
+            <td><code>catalogsFile()</code></td>
+            <td><code>~/.penguin/catalogs</code></td>
+            <td>follows <code>home()</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Both environment overrides are ignored when empty, and both resolve to absolute paths.</p>
+
+    <h2>Loading a definition file</h2>
+
+    <p>
+      A workflow file imports <code>penguin</code> and <code>zod</code> as bare specifiers, and there
+      is no <code>node_modules</code> next to it. Asking a person to run <code>bun install</code> in
+      every folder that holds a definition is a chore, so <code>src/catalog/loader.ts</code> registers
+      one Bun plugin, once per process, that serves both names from Penguin's own copies:
+    </p>
+
+    <pre><code>Bun.plugin({
+  name: "penguin-definitions",
+  setup(build) {
+    build.module("penguin", async () =&gt; ({
+      exports: { ...(await import("../core/index.ts")) },
+      loader: "object",
+    }));
+    build.module("zod", () =&gt; ({ exports: { ...zod }, loader: "object" }));
+  },
+});</code></pre>
+
+    <ul role="list">
+      <li>
+        A definition file gets exactly the <code>zod</code> Penguin is using, so a schema built in a
+        workflow and parsed by the engine come from the same library.
+      </li>
+      <li>
+        It works inside a compiled binary, where neither module exists on disk. That is why the plugin
+        serves objects rather than file paths.
+      </li>
+      <li>
+        <code>zod</code> is imported statically at the top of the loader. A dynamic
+        <code>import("zod")</code> would resolve back through this same plugin and hang.
+      </li>
+    </ul>
+
+    <p>
+      <code>importDefault</code> resolves the path to absolute and converts it to a
+      <code>file://</code> URL, because a bare relative path in a dynamic import resolves against the
+      importing module rather than the process. <code>load(file)</code> and
+      <code>loadAdapter(file)</code> then duck-type what came back and throw <code>PenguinError</code>
+      naming the file when it does not fit:
+    </p>
+
+    <pre><code>throw new PenguinError(`${file} does not default-export a workflow`);
+throw new PenguinError(`${file} has no description`);</code></pre>
+
+    <p>
+      The checks are duck-typed, not <code>instanceof</code>. The file was imported through a plugin
+      into a fresh module graph, so identity checks would be the wrong tool.
+    </p>
+
+    <h2>Errors</h2>
+
+    <pre><code>export class PenguinError extends Error {}
+
+export function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}</code></pre>
+
+    <p>
+      <code>PenguinError</code> means Penguin itself is refusing: a workflow with no description, an
+      adapter missing a field, a file that does not default-export what it claims.
+      <code>messageOf</code> lets a frontend print a caught <code>unknown</code> without a type dance.
+    </p>
+  </body>
+</html>

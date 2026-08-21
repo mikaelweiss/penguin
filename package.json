@@ -10,6 +10,7 @@
   },
   "type": "module",
   "workspaces": [
+    "apps/*",
     "packages/*"
   ],
   "engines": {
@@ -17,6 +18,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit && eslint .",
+    "docs": "nx serve docs",
     "graph": "nx graph"
   },
   "devDependencies": {

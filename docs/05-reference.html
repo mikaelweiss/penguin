@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Reference</title>
+  </head>
+  <body>
+    <h1>Reference</h1>
+
+    <p>
+      An Nx workspace with two projects. <code>packages/engine</code> is the whole of Penguin, and
+      <code>apps/docs</code> serves the pages you are reading.
+    </p>
+
+    <pre><code>penguin/
+├── apps/
+│   └── docs/                 this site: reads docs/ and serves it
+├── docs/                     the html pages
+├── packages/
+│   └── engine/
+│       ├── src/
+│       │   ├── core/         what a workflow and an adapter are
+│       │   ├── catalog/      finding and loading definitions
+│       │   ├── host.ts       cwd, state, shell, exec
+│       │   └── paths.ts      where penguin's folders live
+│       └── examples/         the starter catalog
+├── nx.json
+├── tsconfig.json
+└── package.json              bun workspaces: apps/*, packages/*</code></pre>
+
+    <h2>The engine, file by file</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Holds</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>src/core/workflow.ts</code></td>
+            <td><code>Workflow</code>, <code>Ctx</code>, <code>Adapters</code>, <code>workflow()</code>, <code>call()</code></td>
+          </tr>
+          <tr>
+            <td><code>src/core/adapter.ts</code></td>
+            <td><code>Adapter</code>, <code>Host</code>, <code>CommandResult</code>, <code>adapter()</code></td>
+          </tr>
+          <tr>
+            <td><code>src/core/errors.ts</code></td>
+            <td><code>PenguinError</code>, <code>messageOf</code></td>
+          </tr>
+          <tr>
+            <td><code>src/core/index.ts</code></td>
+            <td>The <code>penguin</code> entry point. Definition files import from here.</td>
+          </tr>
+          <tr>
+            <td><code>src/catalog/catalogs.ts</code></td>
+            <td>Scan order, scopes, the <code>catalogs</code> file</td>
+          </tr>
+          <tr>
+            <td><code>src/catalog/adapters.ts</code></td>
+            <td>Scanning, deduping, <code>defaults</code>, <code>pick</code></td>
+          </tr>
+          <tr>
+            <td><code>src/catalog/workflows.ts</code></td>
+            <td>Listing and locating workflow files</td>
+          </tr>
+          <tr>
+            <td><code>src/catalog/loader.ts</code></td>
+            <td>The Bun plugin, <code>importDefault</code>, <code>load</code></td>
+          </tr>
+          <tr>
+            <td><code>src/catalog/index.ts</code></td>
+            <td>The <code>penguin/catalog</code> entry point, for frontends</td>
+          </tr>
+          <tr>
+            <td><code>src/host.ts</code></td>
+            <td><code>createHost</code>, <code>runCommand</code>, <code>runArgv</code></td>
+          </tr>
+          <tr>
+            <td><code>src/paths.ts</code></td>
+            <td><code>home</code>, <code>stateRoot</code>, <code>projectHome</code>, <code>defaultsFile</code>, <code>catalogsFile</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>The starter catalog</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Is</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>examples/run.ts</code></td>
+            <td>A frontend in thirty lines. Runs one workflow in the foreground.</td>
+          </tr>
+          <tr>
+            <td><code>examples/penguin-env.d.ts</code></td>
+            <td>Maps installed roles onto <code>ctx</code> for the type checker.</td>
+          </tr>
+          <tr>
+            <td><code>examples/adapters/view.ts</code></td>
+            <td>role <code>view</code>, name <code>terminal</code></td>
+          </tr>
+          <tr>
+            <td><code>examples/adapters/git.ts</code></td>
+            <td>role <code>vcs</code>, name <code>git</code></td>
+          </tr>
+          <tr>
+            <td><code>examples/adapters/claude.ts</code></td>
+            <td>role <code>agent</code>, name <code>claude</code></td>
+          </tr>
+          <tr>
+            <td><code>examples/workflows/commit.ts</code></td>
+            <td>The agent picks files and writes the message; the workflow stages and commits.</td>
+          </tr>
+          <tr>
+            <td><code>examples/workflows/commit-all.ts</code></td>
+            <td><code>commit</code> across many folders, in parallel.</td>
+          </tr>
+          <tr>
+            <td><code>examples/workflows/ship.ts</code></td>
+            <td><code>commit</code>, then push once a person says so.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>What penguin exports</h2>
+
+    <p>Definition files import <code>penguin</code>. A frontend imports <code>penguin/catalog</code>.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Signature</th>
+            <th>Does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>workflow</code></td>
+            <td><code>(definition) =&gt; definition</code></td>
+            <td>Checks the description is non-blank, then returns the object.</td>
+          </tr>
+          <tr>
+            <td><code>adapter</code></td>
+            <td><code>(definition) =&gt; definition</code></td>
+            <td>Checks role, name, description, and <code>build</code>.</td>
+          </tr>
+          <tr>
+            <td><code>call</code></td>
+            <td><code>(ctx, child, params) =&gt; Promise&lt;R&gt;</code></td>
+            <td>Parses the child's params and runs it with the same adapters.</td>
+          </tr>
+          <tr>
+            <td><code>PenguinError</code></td>
+            <td><code>class extends Error</code></td>
+            <td>Penguin refusing. Nothing else subclasses it.</td>
+          </tr>
+          <tr>
+            <td><code>messageOf</code></td>
+            <td><code>(error: unknown) =&gt; string</code></td>
+            <td>The message of a caught value, whatever it turned out to be.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <pre><code>interface Adapters {}
+
+type Ctx&lt;Params&gt; = { params: Params } &amp; Adapters;
+
+type Workflow&lt;Schema extends z.ZodObject = z.ZodObject, R = unknown&gt; = {
+  description: string;
+  params: Schema;
+  run(ctx: Ctx&lt;z.infer&lt;Schema&gt;&gt;): Promise&lt;R&gt;;
+};
+
+type Adapter&lt;A = unknown&gt; = {
+  role: string;
+  name: string;
+  description: string;
+  build(host: Host): A;
+};
+
+type Host = {
+  cwd: string;
+  state: string;
+  shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
+  exec(argv: string[], options?: ExecOptions): Promise&lt;number&gt;;
+};
+
+type CommandResult = { code: number; stdout: string; stderr: string };
+
+type ShellOptions = { cwd?: string; stdin?: string };
+
+type ExecOptions = ShellOptions &amp; {
+  onOutput?: (chunk: string, stream: "stdout" | "stderr") =&gt; void;
+};</code></pre>
+
+    <p>
+      <code>Adapters</code> is empty on purpose. A catalog widens it by declaration merging, which is
+      the only way <code>ctx.vcs</code> gets a type.
+    </p>
+
+    <h3>penguin/catalog</h3>
+
+    <p>Re-exports the errors and the path helpers, plus everything below.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Export</th>
+            <th>Answers</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>roots(cwd)</code></td>
+            <td>The catalogs to scan, in order.</td>
+          </tr>
+          <tr>
+            <td><code>projectCatalog</code>, <code>homeCatalog</code>, <code>starterCatalog</code></td>
+            <td>One catalog each.</td>
+          </tr>
+          <tr>
+            <td><code>workflowsDir</code>, <code>adaptersDir</code></td>
+            <td>The two subfolders of a catalog.</td>
+          </tr>
+          <tr>
+            <td><code>installed(cwd)</code>, <code>installedIn(list)</code></td>
+            <td>Every adapter found, deduped by role and name.</td>
+          </tr>
+          <tr>
+            <td><code>pick(list, role, name?)</code></td>
+            <td><code>{ found } | { missing } | { conflict }</code></td>
+          </tr>
+          <tr>
+            <td><code>defaults()</code></td>
+            <td>The role-to-name map from <code>~/.penguin/defaults</code>.</td>
+          </tr>
+          <tr>
+            <td><code>found(cwd)</code>, <code>locate(name, cwd)</code></td>
+            <td>Workflow files, all of them or the first by name.</td>
+          </tr>
+          <tr>
+            <td><code>searchedWorkflows</code>, <code>searchedAdapters</code></td>
+            <td>Which folders were looked in, for an error message.</td>
+          </tr>
+          <tr>
+            <td><code>load(file)</code>, <code>loadAdapter(file)</code></td>
+            <td>A validated definition, or <code>PenguinError</code>.</td>
+          </tr>
+          <tr>
+            <td>
+              <code>Catalog</code>, <code>CatalogScope</code>, <code>AdapterFound</code>,
+              <code>WorkflowFound</code>, <code>Picked</code>
+            </td>
+            <td>The shapes the above return.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <code>createHost</code> is not exported by either entry point. <code>examples/run.ts</code>
+      imports it by path. A frontend outside this repository would need it exported, or its own
+      <code>Host</code>. The type is four members, so building one by hand is reasonable.
+    </p>
+
+    <h2>Workspace conventions</h2>
+
+    <ul role="list">
+      <li>
+        Bun workspaces cover <code>apps/*</code> and <code>packages/*</code>. A folder becomes a
+        project by having a <code>package.json</code>.
+      </li>
+      <li>
+        Nx tags declare boundaries. The engine is <code>scope:engine</code> and may only depend on
+        <code>scope:engine</code>, enforced by <code>@nx/enforce-module-boundaries</code> in
+        <code>eslint.config.js</code>.
+      </li>
+      <li>
+        The root <code>tsconfig.json</code> maps <code>penguin</code> to
+        <code>packages/engine/src/core/index.ts</code>, so the starter definition files type-check in
+        place.
+      </li>
+      <li>
+        <code>examples/</code> is excluded from lint, because those files import
+        <code>penguin</code> and <code>zod</code> as bare names that only exist at run time.
+      </li>
+      <li><code>bun run check</code> is <code>tsc --noEmit</code> followed by <code>eslint .</code>.</li>
+    </ul>
+
+    <h2>Running this site</h2>
+
+    <pre><code>bun run docs         # nx serve docs, on http://localhost:4200</code></pre>
+
+    <p>
+      <code>apps/docs</code> reads the <code>docs/</code> folder on every request, so an edit shows up
+      on reload. Point it somewhere else with <code>PENGUIN_DOCS_DIR</code>, and change the port with
+      <code>PORT</code>. A leading number on a file orders it in the sidebar and never appears in the
+      URL or the title.
+    </p>
+  </body>
+</html>

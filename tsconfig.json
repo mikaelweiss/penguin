@@ -17,5 +17,5 @@
       "penguin": ["./packages/engine/src/core/index.ts"]
     }
   },
-  "include": ["packages"]
+  "include": ["apps", "packages"]
 }

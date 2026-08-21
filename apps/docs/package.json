@@ -1,0 +1,31 @@
+{
+  "name": "@mikaelweiss/penguin-docs",
+  "private": true,
+  "description": "reads the html docs folder and serves it with a sidebar",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.16"
+  },
+  "nx": {
+    "name": "docs",
+    "tags": ["scope:docs"],
+    "targets": {
+      "css": {
+        "command": "bunx @tailwindcss/cli -i src/styles.css -o public/styles.css --minify",
+        "options": { "cwd": "{projectRoot}" },
+        "cache": true,
+        "inputs": ["{projectRoot}/src/**/*", "{workspaceRoot}/docs/**/*.html"],
+        "outputs": ["{projectRoot}/public/styles.css"]
+      },
+      "serve": {
+        "command": "bun src/server.ts",
+        "options": { "cwd": "{projectRoot}" },
+        "dependsOn": ["css"]
+      }
+    }
+  }
+}
