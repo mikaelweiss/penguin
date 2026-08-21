@@ -7,7 +7,7 @@ const root = path.resolve(
   process.env["PENGUIN_DOCS_DIR"] ?? path.join(import.meta.dir, "../../../docs"),
 );
 const assets = path.join(import.meta.dir, "../public");
-const port = Number(process.env["PORT"] ?? 4200);
+const port = Number(process.env["PORT"] ?? 5656);
 
 if (!fs.existsSync(root)) {
   process.stderr.write(`penguin-docs: no docs folder at ${root}\n`);
