@@ -1,19 +1,3 @@
 # penguin
 
-Read `.specs/` before any work. It is the source of truth:
-
-- `.specs/00-product.md`: what penguin is, principles, glossary.
-- `.specs/10-workflow-model.md`: params, the ctx API, sessions, messages, composition.
-- `.specs/20-architecture.md`: components, storage, run lifecycle, commands, invariants.
-- `.specs/30-defaults.md`: the example catalog.
-
-The specs describe the present system, and only the present system. They contain no milestones, phases, build order, history, rejected alternatives, or notes about what changed. When a decision changes, rewrite the spec text as if the new form was always the design. Past decisions live in git history.
-
-## Conventions
-
-- Every engine invariant in `20-architecture.md` is pinned by a test. A change that touches one updates its test.
-- Spec and code move together: a behavior change lands with its spec edit in the same commit.
-- Quality gates for every change, both commands exactly as written: `bun run check` and `bun run test`. `bun run test` carries the flags the suite needs, so a bare `bun test` is the wrong command. It runs one file per worker process, because node:test aborts a file it loads while another file's test is running. Run each gate once, send its output to a file, and read the file. Never run a gate twice to see the same output a second way.
-- The binary carries the starter catalog, so `packages/engine/src/catalog/starter.generated.ts` is checked in. A build regenerates it, so `bun run build` and `bun run publish` always ship the current one. Run `bun run generate` after editing `packages/engine/examples/` or the version in the root `package.json`, because a test fails when the checked-in file is stale.
-- `bun run publish` builds every platform and publishes the launchers with them. The version is the one in the root `package.json`, and `npm version patch` bumps it.
-- Personal workflow ideas go in `WORKFLOWS.md`, not in the specs.
+You got this
