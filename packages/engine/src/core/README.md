@@ -160,10 +160,10 @@ journal and no replay.
 The engine has four jobs, and any feature that needs a fifth is either a new
 adapter, a new workflow, or out of scope:
 
-1. **Catalog.** Find workflow and adapter files across catalog directories (`src/catalog/`).
-2. **Ctx.** Validate params and wire installed adapter roles onto ctx (`src/run.ts`).
-3. **Process.** Own the run's working directory and the processes it spawns (`src/host.ts`).
-4. **Trace.** Append each adapter call and outcome to a log, for debugging (`src/trace.ts`).
+1. **Catalog.** Find workflow and adapter files across catalog directories.
+2. **Ctx.** Validate params and wire installed adapter roles onto ctx.
+3. **Process.** Own the run's working directory and the processes it spawns.
+4. **Trace.** Append each adapter call and outcome to a log, for debugging.
 
 The engine does not route messages, hold state machines, retry agent turns,
 render anything, or know one adapter role from another.

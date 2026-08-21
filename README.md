@@ -4,12 +4,7 @@ There are many factories, but this one is _yours_
 
 ## Getting started
 
-There are two concepts you need to know:
-
-1. Workflows - what's run. Plain TypeScript functions. You call adapters, run agents, and decide what the human sees, all from here. Workflows are composable: workflows call workflows.
-2. Adapters - a workflow's bridge to the outside world. Git, GitHub, Slack, Linear, Jira, Claude, Codex, whatever. Plain functions over plain data. You can easily build your own.
-
-The human is one more outside thing, so talking to them is one more adapter: `view.show(...)` to tell them something, `view.ask(...)` to wait on their answer. And when something outside keeps talking back, that's not a new concept either: an adapter function just returns an async stream, and the workflow reads it.
+There are two concepts you need to know: workflows (what's run, plain TypeScript functions) and adapters (a workflow's bridge to one outside thing: git, GitHub, Slack, an agent, you). The full model lives in [the engine docs](packages/engine/src/core/README.md).
 
 With these two things you can build incredibly complex workflows, including, but not limited to, software factories.
 
