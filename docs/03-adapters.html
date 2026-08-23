@@ -95,17 +95,23 @@ export default adapter({
 
     <pre><code>export type Host = {
   cwd: string;
+  home: string;
   state: string;
+  run: { id: string; dir: string };
+  config(key: string): string | undefined;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
   exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
 };</code></pre>
 
     <p>
       <code>cwd</code> is the folder the run was invoked from, and relative <code>cwd</code> options
-      on adapter calls resolve against it. <code>state</code> is where an adapter puts what it keeps
-      between runs, which is why git worktrees land at
-      <code>&lt;state&gt;/worktrees/&lt;project&gt;/&lt;name&gt;</code> instead of inside the
-      repository. Without <code>state</code>, every adapter would invent its own hidden folder.
+      on adapter calls resolve against it. <code>home</code> is <code>~/.penguin</code> and
+      <code>state</code> is where an adapter puts what it keeps between runs. <code>run</code> is
+      this run's id and folder, which is how the builtin view finds the run's inbox.
+      <code>config(key)</code> reads one line of <code>~/.penguin/config</code>: the git adapter
+      puts worktrees at the configured <code>worktrees</code> path, falling back to
+      <code>~/.penguin/worktrees/&lt;project&gt;/&lt;name&gt;</code>. Without these, every adapter
+      would invent its own hidden folder.
     </p>
 
     <div class="table-wrap">
@@ -244,31 +250,33 @@ output.end();         // when they stop</code></pre>
     <h2>What lives in the implementation, not the model</h2>
 
     <p>
-      The terminal <code>view</code> in <code>examples/adapters/view.ts</code> solves problems that
-      belong to terminals alone. stdin is a single resource, so it queues questions and prompts one
-      at a time; the workflow still sees independent promises, and a web view that can ask in
-      parallel would not need the code. A typed line answers the pending question when there is
-      one, and otherwise goes to every open <code>listen</code> stream, because a terminal has no
-      way to aim a message at one listener; a frontend with navigation does, and that selection is
-      presentation, not routing. <code>scope</code> becomes a plain <code>[name]</code> prefix,
-      where a UI would make it a panel.
+      The builtin <code>view</code>, <code>files</code> in
+      <code>src/adapters/files-view.ts</code>, has no screen of its own. A <code>show</code> is
+      already recorded by the run file, so the adapter does nothing; an <code>ask</code> waits on
+      the run's <code>inbox.jsonl</code> for an <code>{"answer": ...}</code> line, and
+      <code>listen</code> yields each <code>{"message": "..."}</code> line. Answers settle the
+      oldest pending ask, the same order any frontend presents them in, and an answer that does not
+      fit the shape appends a <code>rejected</code> line to the run file so the frontend can say so
+      and ask again. The workflow sees independent promises either way.
     </p>
 
     <p>
-      The shape says how to ask. A boolean, an enum, or a union of those becomes a menu: arrow
-      keys and enter on a real terminal, a numbered list on a pipe, so an option is picked, never
-      typed. A union that also admits <code>z.string()</code> adds an <em>other</em> row that opens
-      free text. Any other shape is a question with a text answer: the adapter tries the raw text
-      and its <code>JSON.parse</code> before giving up, and a bad answer is not an error: it prints
-      what did not fit and asks again until the answer parses.
+      The shape says how to ask, and <code>menuOf</code> in the engine is the one mapping every
+      frontend shares. A boolean, an enum, or a union of those becomes a menu, so an option is
+      picked, never typed. An array of options becomes a multi-select whose answer is a list. A
+      union that also admits <code>z.string()</code> adds an <em>other</em> row that opens free
+      text. Any other shape is a question with a text answer: the adapter tries the raw text and
+      its <code>JSON.parse</code> before giving up, and a bad answer is not an error: it is
+      rejected in the run file and asked again until the answer parses.
     </p>
 
     <h2>Two implementations of one role</h2>
 
     <p>
       Ship a second <code>name</code> under the same <code>role</code> and both are installed.
-      Penguin will not choose between them. It reports the conflict and names the file to edit. See
-      <a href="/engine">The engine</a>.
+      Penguin will not choose between them. It reports the conflict and names the file to edit,
+      except a builtin, which any single installed implementation shadows without a config line.
+      See <a href="/engine">The engine</a>.
     </p>
   </body>
 </html>

@@ -19,9 +19,10 @@
     <h2>1. The frontend hands over</h2>
 
     <p>
-      <code>examples/run.ts</code> reads two argv entries, parses the JSON, and calls the engine's
-      <code>run(file, params, options)</code> from <code>src/run.ts</code>. That is the whole
-      frontend. Everything after this line is the same for a terminal, a UI, or a daemon.
+      <code>examples/run.ts</code> reads two argv entries, parses the JSON, claims a run id, and
+      calls the engine's <code>run(file, params, options)</code> from <code>src/run.ts</code>.
+      From here on it is a frontend like any other: it tails the run's files and writes its inbox.
+      Everything after this line is the same for a terminal, a UI, or a daemon.
     </p>
 
     <h2>2. The engine loads the workflow</h2>
@@ -45,22 +46,26 @@
     <h2>4. A host is made, adapters are built onto ctx</h2>
 
     <p>
-      <code>createHost(cwd)</code> in <code>src/host.ts</code> is the only place processes come
-      from: <code>shell</code> and <code>exec</code>, plus the <code>cwd</code> and
-      <code>state</code> folders. Then <code>run</code> scans the catalogs for adapters, and for
-      each role calls <code>pick</code>: one implementation wins, a missing or ambiguous role
-      throws with the fix in the message. Each winner's <code>build(host)</code> makes the API that
-      lands on <code>ctx</code> under its role: <code>ctx.vcs</code>, <code>ctx.agent</code>,
+      <code>createHost(cwd, run)</code> in <code>src/host.ts</code> is the only place processes
+      come from: <code>shell</code> and <code>exec</code>, plus the <code>cwd</code>,
+      <code>home</code>, and <code>state</code> folders, the run's own id and folder, and
+      <code>config(key)</code> for <code>~/.penguin/config</code>. Then <code>run</code> scans the
+      catalogs for adapters, and for each role calls <code>pick</code>: one implementation wins, a
+      builtin yields to anything installed over it, and a missing or ambiguous role throws with the
+      fix in the message. Each winner's <code>build(host)</code> makes the API that lands on
+      <code>ctx</code> under its role: <code>ctx.vcs</code>, <code>ctx.agent</code>,
       <code>ctx.view</code>.
     </p>
 
-    <h2>5. The trace starts</h2>
+    <h2>5. The run file starts</h2>
 
     <p>
-      Before the workflow sees them, each adapter is wrapped by <code>src/trace.ts</code>: every
-      call and its outcome appends one JSON line to a file under
-      <code>~/.local/state/penguin/traces/</code>. The workflow never knows. When a run surprises
-      you, this file is the answer to "what did it actually do".
+      Before the workflow sees them, each adapter is wrapped by <code>src/trace.ts</code>: a head
+      line with the run's id, pid, workflow, params, and parent opens
+      <code>~/.local/state/penguin/runs/&lt;id&gt;/run.jsonl</code>, then every call appends a
+      pending line when it starts and an outcome line when it settles. The workflow never knows.
+      This file is the run's whole story: frontends render it live, and when a run surprises you it
+      is the answer to "what did it actually do".
     </p>
 
     <h2>6. The workflow runs</h2>
@@ -78,14 +83,14 @@
     <h2>7. The result comes back out</h2>
 
     <p>
-      <code>run</code> notes the outcome in the trace and returns the workflow's return value to
-      the frontend, which prints it as JSON and exits. The commit is in git, the story of the run
-      is in the trace file, and whatever a person saw went through <code>view</code>.
+      <code>run</code> notes the outcome in the run file and returns the workflow's return value
+      to the frontend, which prints it as JSON and exits. The commit is in git, the story of the
+      run is in its file, and whatever a person saw went through <code>view</code>.
     </p>
 
     <p>
-      That is the entire machine. Two definitions, one wiring function, one process boundary, one
-      log.
+      That is the entire machine. Two definitions, one wiring function, one process per run, one
+      file per run.
     </p>
   </body>
 </html>

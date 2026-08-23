@@ -7,7 +7,7 @@
   <body>
     <h1>The engine</h1>
 
-    <p>The engine does four things every time a workflow runs.</p>
+    <p>The engine does five things every time a workflow runs.</p>
 
     <div class="table-wrap">
       <table>
@@ -35,9 +35,14 @@
             <td><code>src/host.ts</code></td>
           </tr>
           <tr>
-            <td>Trace</td>
-            <td>Append each adapter call and outcome to a log, for debugging</td>
+            <td>Run file</td>
+            <td>Append the run's whole story to its file, the state every frontend reads</td>
             <td><code>src/trace.ts</code></td>
+          </tr>
+          <tr>
+            <td>Sub-runs</td>
+            <td>Spawn each <code>call</code> as its own process with its own run file</td>
+            <td><code>src/run.ts</code>, <code>src/child.ts</code></td>
           </tr>
         </tbody>
       </table>
@@ -75,8 +80,9 @@
 
     <pre><code>const definition = await load(file);
 const parsed = definition.params.parse(params);
-const host = createHost(cwd);
-const found = await installedIn(options?.catalogs ?? roots(cwd));
+const trace = createTrace({ id, workflow: file, params: parsed, cwd, parent });
+const host = createHost(cwd, { id, dir: trace.dir });
+const found = await installedIn(list);
 for (const role of new Set(found.map((entry) =&gt; entry.role))) {
   const picked = pick(found, role);
   if ("missing" in picked) throw new PenguinError(picked.missing);
@@ -86,37 +92,56 @@ for (const role of new Set(found.map((entry) =&gt; entry.role))) {
 return definition.run(ctx);</code></pre>
 
     <p>
-      Load a definition, parse its params, make a host, resolve one implementation per role through
-      <code>pick</code>, build it onto <code>ctx</code>, await <code>run</code>. Ambiguity is
-      reported, never guessed: a role with two installed implementations and no recorded choice
-      refuses to run and names the file to edit. Each built adapter is wrapped by the trace on the
-      way in, so every call it receives lands in the log.
+      Load a definition, parse its params, open the run file, make a host, resolve one
+      implementation per role through <code>pick</code>, build it onto <code>ctx</code>, await
+      <code>run</code>. Ambiguity is reported, never guessed: a role with two installed
+      implementations and no recorded choice refuses to run and names the file to edit, except a
+      builtin, which any single installed implementation shadows. Each built adapter is wrapped by
+      the run file on the way in, so every call it receives lands there.
     </p>
 
     <p>
-      <code>examples/run.ts</code> is a frontend in twenty lines: parse argv, call
-      <code>run</code> with the starter catalog, print the result. Any other frontend, a daemon, a
-      UI server, calls the same function with different options.
-    </p>
-
-    <h2>The trace</h2>
-
-    <p>
-      Each run appends JSON lines to a file under
-      <code>~/.local/state/penguin/traces/</code>: the workflow and params, one line per adapter
-      call with its arguments, outcome, and <code>elapsedMs</code>, and the final result or error.
-      Values are recorded whole. A call that returns a live object (an open stream, a turn) is
-      marked <code>handle: true</code> instead, since an object like that cannot be written down.
-      Sorting by <code>elapsedMs</code> names the slow steps.
+      <code>run</code> also puts one hook on <code>ctx</code> for <code>call</code>: spawning a
+      child workflow as its own process, <code>bun src/child.ts</code>, with its own id, its own
+      run folder, and this run recorded as its parent. The parent's file notes the child's id, and
+      the child's outcome, throw, or stop comes back to the awaiting <code>call</code> from the
+      child's own file. Stopping a run is killing its process group; the pid is in the head line.
     </p>
 
     <p>
-      The trace is also the resume journal. <code>run(file, params, { resume })</code> takes a
-      prior trace file: each call that matches the next recorded one hands back the recorded
-      outcome without calling out, and the run goes live at the first call the trace does not
+      <code>examples/run.ts</code> is a frontend the way every frontend is one: it claims a run id,
+      calls <code>run</code>, then tails the run folders, prints shows, presents asks, and appends
+      answers and messages to inboxes. A daemon or a UI does the same with different rendering.
+    </p>
+
+    <h2>The run file</h2>
+
+    <p>
+      Each run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>, holding two files.
+      <code>run.jsonl</code> is written by the run alone: a head line with the run's id, pid,
+      workflow, params, cwd, and parent; a <code>pending</code> line when a call starts and a line
+      with its <code>outcome</code> and <code>elapsedMs</code> when it settles, the two sharing an
+      id; a note per spawned child; and the final result, error, or stop. Values are recorded
+      whole, with a zod shape written as its JSON Schema so a frontend can render the control an
+      ask needs. A call that returns a live object (an open stream, a turn) is marked
+      <code>handle: true</code> instead, since an object like that cannot be written down.
+    </p>
+
+    <p>
+      <code>inbox.jsonl</code> is the run's one way in, appended by frontends:
+      <code>{"answer": ...}</code> settles the oldest pending ask, <code>{"message": "..."}</code>
+      reaches every listener. Everything else about a run is derived by reading:
+      running is a live pid, blocked is a pending ask with no outcome, done, failed, and stopped
+      are the closing note, and crashed is a dead pid with no closing note. No state lives anywhere
+      else, which is why any frontend can quit at any time and nothing changes.
+    </p>
+
+    <p>
+      The run file is also the resume journal. <code>run(file, params, { resume })</code> takes a
+      prior run file: each call that matches the next recorded one hands back the recorded
+      outcome without calling out, and the run goes live at the first call the file does not
       hold, a mismatch, a throw, or a handle. From there every call runs for real.
-      <code>latestTrace()</code> names the newest file. <code>trace: false</code> skips the log,
-      except a resumed run always traces, so it can itself be resumed.
+      <code>latestRun()</code> names the newest file.
     </p>
 
     <h2>Catalogs</h2>
@@ -156,6 +181,11 @@ return definition.run(ctx);</code></pre>
             <td>The engine package's <code>examples/</code></td>
             <td>The line <code>starter</code> in the catalogs file</td>
           </tr>
+          <tr>
+            <td><code>builtin</code></td>
+            <td>The engine package's <code>src/adapters/</code></td>
+            <td>Always last: the <code>files</code> view, shadowed by anything installed</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -191,14 +221,15 @@ return definition.run(ctx);</code></pre>
 
     <pre><code>export type Picked = { found: AdapterFound } | { missing: string } | { conflict: string };</code></pre>
 
-    <p>It tries an explicit <code>name</code>, then the role's line in <code>~/.penguin/defaults</code>, then the only implementation when there is exactly one. With more than one and no choice recorded, it names them and says how to fix it:</p>
+    <p>It tries an explicit <code>name</code>, then the role's line in <code>~/.penguin/config</code>, then the only installed implementation, a builtin counting only when nothing shadows it. With more than one and no choice recorded, it names them and says how to fix it:</p>
 
     <pre><code>2 vcs adapters are installed (git, jj).
-Write "vcs jj" to /Users/you/.penguin/defaults to choose one.</code></pre>
+Write "vcs jj" to /Users/you/.penguin/config to choose one.</code></pre>
 
     <p>
-      The defaults file is one <code>role name</code> pair per line, with the same blank-and-comment
-      handling as the catalogs file.
+      The config file is one <code>key value</code> pair per line, with the same blank-and-comment
+      handling as the catalogs file. A role line picks an adapter; other keys are settings, like
+      <code>worktrees</code> for where the git adapter puts them.
     </p>
 
     <h3>Where the folders come from</h3>
@@ -231,8 +262,13 @@ Write "vcs jj" to /Users/you/.penguin/defaults to choose one.</code></pre>
             <td>none</td>
           </tr>
           <tr>
-            <td><code>defaultsFile()</code></td>
-            <td><code>~/.penguin/defaults</code></td>
+            <td><code>runsDir()</code></td>
+            <td><code>~/.local/state/penguin/runs</code></td>
+            <td>follows <code>stateRoot()</code></td>
+          </tr>
+          <tr>
+            <td><code>configFile()</code></td>
+            <td><code>~/.penguin/config</code></td>
             <td>follows <code>home()</code></td>
           </tr>
           <tr>
@@ -300,6 +336,8 @@ throw new PenguinError(`${file} has no description`);</code></pre>
     <h2>Errors</h2>
 
     <pre><code>export class PenguinError extends Error {}
+export class RunStopped extends PenguinError {}
+export class RunCrashed extends PenguinError {}
 
 export function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -309,7 +347,10 @@ export function messageOf(error: unknown): string {
     <p>
       <code>PenguinError</code> means Penguin itself is refusing: a workflow with no description, an
       adapter missing a field, a file that does not default-export what it claims.
-      <code>messageOf</code> lets a frontend print a caught <code>unknown</code> without a type dance.
+      <code>RunStopped</code> and <code>RunCrashed</code> are how a parent's <code>call</code>
+      rejects when a child was stopped or died without recording an outcome, so a workflow can
+      catch exactly those. <code>messageOf</code> lets a frontend print a caught
+      <code>unknown</code> without a type dance.
     </p>
   </body>
 </html>

@@ -21,10 +21,13 @@
 │       ├── src/
 │       │   ├── core/         what a workflow and an adapter are
 │       │   ├── catalog/      finding and loading definitions
-│       │   ├── host.ts       cwd, state, shell, exec
+│       │   ├── adapters/     the builtin files view
+│       │   ├── host.ts       cwd, home, state, config, shell, exec
 │       │   ├── paths.ts      where penguin's folders live
+│       │   ├── config.ts     reading ~/.penguin/config
 │       │   ├── run.ts        one workflow file, wired and run
-│       │   └── trace.ts      the run's log of adapter calls
+│       │   ├── child.ts      the sub-run entrypoint call spawns
+│       │   └── trace.ts      the run file: head, calls, outcome
 │       ├── tests/            the starter catalog's tests
 │       └── examples/         the starter catalog
 ├── nx.json
@@ -48,11 +51,15 @@
           </tr>
           <tr>
             <td><code>src/core/adapter.ts</code></td>
-            <td><code>Adapter</code>, <code>Host</code>, <code>CommandResult</code>, <code>adapter()</code></td>
+            <td><code>Adapter</code>, <code>Host</code>, <code>RunLocation</code>, <code>CommandResult</code>, <code>adapter()</code></td>
+          </tr>
+          <tr>
+            <td><code>src/core/view.ts</code></td>
+            <td><code>View</code>, <code>Menu</code>, <code>menuOf</code>, <code>menuOfSchema</code>, <code>candidates</code></td>
           </tr>
           <tr>
             <td><code>src/core/errors.ts</code></td>
-            <td><code>PenguinError</code>, <code>messageOf</code>, <code>issuesOf</code></td>
+            <td><code>PenguinError</code>, <code>RunStopped</code>, <code>RunCrashed</code>, <code>messageOf</code>, <code>issuesOf</code></td>
           </tr>
           <tr>
             <td><code>src/core/channel.ts</code></td>
@@ -68,7 +75,7 @@
           </tr>
           <tr>
             <td><code>src/catalog/adapters.ts</code></td>
-            <td>Scanning, deduping, <code>defaults</code>, <code>pick</code></td>
+            <td>Scanning, deduping, <code>pick</code></td>
           </tr>
           <tr>
             <td><code>src/catalog/workflows.ts</code></td>
@@ -83,20 +90,32 @@
             <td>The <code>penguin/catalog</code> entry point, for frontends</td>
           </tr>
           <tr>
+            <td><code>src/adapters/files-view.ts</code></td>
+            <td>role <code>view</code>, name <code>files</code>: the builtin view over the run's files</td>
+          </tr>
+          <tr>
             <td><code>src/host.ts</code></td>
             <td><code>createHost</code></td>
           </tr>
           <tr>
             <td><code>src/paths.ts</code></td>
-            <td><code>home</code>, <code>stateRoot</code>, <code>tracesDir</code>, <code>projectHome</code>, <code>defaultsFile</code>, <code>catalogsFile</code></td>
+            <td><code>home</code>, <code>stateRoot</code>, <code>runsDir</code>, <code>runDir</code>, <code>projectHome</code>, <code>configFile</code>, <code>catalogsFile</code></td>
+          </tr>
+          <tr>
+            <td><code>src/config.ts</code></td>
+            <td><code>readConfig</code>: the <code>~/.penguin/config</code> key-value map</td>
           </tr>
           <tr>
             <td><code>src/run.ts</code></td>
-            <td><code>run</code>, the <code>penguin/run</code> entry point for frontends</td>
+            <td><code>run</code>, the <code>penguin/run</code> entry point for frontends, and the sub-run spawner</td>
+          </tr>
+          <tr>
+            <td><code>src/child.ts</code></td>
+            <td>The entrypoint a sub-run process starts from</td>
           </tr>
           <tr>
             <td><code>src/trace.ts</code></td>
-            <td><code>createTrace</code>, <code>openJournal</code>, <code>latestTrace</code>: the log, and resume reading it back</td>
+            <td><code>createTrace</code>, <code>openJournal</code>, <code>latestRun</code>, <code>runId</code>: the run file, and resume reading it back</td>
           </tr>
         </tbody>
       </table>
@@ -115,15 +134,11 @@
         <tbody>
           <tr>
             <td><code>examples/run.ts</code></td>
-            <td>A frontend in twenty lines. Runs one workflow in the foreground.</td>
+            <td>A frontend: runs one workflow and presents its run tree from the run files.</td>
           </tr>
           <tr>
             <td><code>examples/penguin-env.d.ts</code></td>
             <td>Maps installed roles onto <code>ctx</code> for the type checker.</td>
-          </tr>
-          <tr>
-            <td><code>examples/adapters/view.ts</code></td>
-            <td>role <code>view</code>, name <code>terminal</code></td>
           </tr>
           <tr>
             <td><code>examples/adapters/git.ts</code></td>
@@ -180,12 +195,22 @@
           <tr>
             <td><code>call</code></td>
             <td><code>(ctx, child, params) =&gt; Promise&lt;R&gt;</code></td>
-            <td>Parses the child's params and runs it with the same adapters.</td>
+            <td>Parses the child's params and spawns it as its own run.</td>
           </tr>
           <tr>
             <td><code>PenguinError</code></td>
             <td><code>class extends Error</code></td>
-            <td>Penguin refusing. Nothing else subclasses it.</td>
+            <td>Penguin refusing.</td>
+          </tr>
+          <tr>
+            <td><code>RunStopped</code>, <code>RunCrashed</code></td>
+            <td><code>class extends PenguinError</code></td>
+            <td>How <code>call</code> rejects when a child was stopped, or died silently.</td>
+          </tr>
+          <tr>
+            <td><code>menuOf</code>, <code>menuOfSchema</code></td>
+            <td><code>(shape | schema) =&gt; Menu | undefined</code></td>
+            <td>The choices a shape names, for any frontend rendering an ask.</td>
           </tr>
           <tr>
             <td><code>messageOf</code></td>
@@ -214,7 +239,16 @@ type Workflow&lt;Schema extends z.ZodObject = z.ZodObject, R = unknown&gt; = {
   description: string;
   params: Schema;
   run(ctx: Ctx&lt;z.infer&lt;Schema&gt;&gt;): Promise&lt;R&gt;;
+  file?: string; // workflow() fills it in, so call can spawn it
 };
+
+type View = {
+  show(text: string, options?: { kind?: "tool" }): Promise&lt;void&gt;;
+  ask: Ask;
+  listen(): AsyncIterable&lt;{ text: string }&gt;;
+};
+
+type Menu = { choices: { label: string; value: unknown }[]; other: boolean; many: boolean };
 
 type Adapter&lt;A = unknown&gt; = {
   role: string;
@@ -225,7 +259,10 @@ type Adapter&lt;A = unknown&gt; = {
 
 type Host = {
   cwd: string;
+  home: string;
   state: string;
+  run: { id: string; dir: string };
+  config(key: string): string | undefined;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
   exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
 };
@@ -262,7 +299,7 @@ type ExecOptions = ShellOptions &amp; {
             <td>The catalogs to scan, in order.</td>
           </tr>
           <tr>
-            <td><code>projectCatalog</code>, <code>homeCatalog</code>, <code>starterCatalog</code></td>
+            <td><code>projectCatalog</code>, <code>homeCatalog</code>, <code>starterCatalog</code>, <code>builtinCatalog</code></td>
             <td>One catalog each.</td>
           </tr>
           <tr>
@@ -278,8 +315,8 @@ type ExecOptions = ShellOptions &amp; {
             <td><code>{ found } | { missing } | { conflict }</code></td>
           </tr>
           <tr>
-            <td><code>defaults()</code></td>
-            <td>The role-to-name map from <code>~/.penguin/defaults</code>.</td>
+            <td><code>readConfig()</code></td>
+            <td>The key-value map from <code>~/.penguin/config</code>.</td>
           </tr>
           <tr>
             <td><code>found(cwd)</code>, <code>locate(name, cwd)</code></td>
@@ -327,14 +364,18 @@ type ExecOptions = ShellOptions &amp; {
           </tr>
           <tr>
             <td><code>RunOptions</code></td>
-            <td><code>{ cwd?, catalogs?, trace?, resume? }</code></td>
+            <td><code>{ cwd?, catalogs?, id?, parent?, resume? }</code></td>
           </tr>
           <tr>
-            <td><code>latestTrace()</code></td>
-            <td>The newest trace file, for <code>resume</code>.</td>
+            <td><code>runId()</code></td>
+            <td>A fresh run id with its folder claimed, so a frontend knows the folder before starting.</td>
           </tr>
           <tr>
-            <td><code>createHost(cwd)</code></td>
+            <td><code>latestRun()</code></td>
+            <td>The newest run file, for <code>resume</code>.</td>
+          </tr>
+          <tr>
+            <td><code>createHost(cwd, run)</code></td>
             <td>A <code>Host</code>, for a frontend wiring adapters by hand.</td>
           </tr>
         </tbody>
@@ -355,8 +396,9 @@ type ExecOptions = ShellOptions &amp; {
       </li>
       <li>
         Inside the engine, lint holds the folder boundaries too: <code>core/</code> imports only
-        zod and itself, <code>catalog/</code> only core and paths, and only <code>run.ts</code>
-        orchestrates across them. An illegal import is a build failure, not a review comment.
+        zod and itself, <code>catalog/</code> only core, config, and paths, builtin
+        <code>adapters/</code> only core, and only <code>run.ts</code> orchestrates across them. An
+        illegal import is a build failure, not a review comment.
       </li>
       <li>
         The root <code>tsconfig.json</code> maps <code>penguin</code> to

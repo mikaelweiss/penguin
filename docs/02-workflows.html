@@ -95,9 +95,9 @@ z.array(z.enum(["a", "b"]))     // pick many
 z.object({ title: z.string(), urgent: z.boolean() })  // a form</code></pre>
 
     <p>
-      The terminal view parses a typed answer from the typed line, JSON included. A richer view
-      renders buttons, toggles, and multi-selects from the same shape. No workflow changes between
-      them.
+      The terminal frontend parses a typed answer from the typed line, JSON included. A richer
+      frontend renders buttons, toggles, and multi-selects from the same shape, which the run file
+      records as JSON Schema. No workflow changes between them.
     </p>
 
     <p>
@@ -178,20 +178,20 @@ if (!state.dirty) {
 
     <p>
       When a workflow gets long, the fix is another workflow. <code>call</code> parses the child's
-      params and runs it with the same <code>ctx</code>:
+      params and runs it as a run of its own: a new process, a new run folder, its own line in any
+      frontend's tree.
     </p>
 
-    <pre><code>export function call&lt;Schema extends z.ZodObject, R&gt;(
-  ctx: Ctx&lt;unknown&gt;,
-  child: Workflow&lt;Schema, R&gt;,
-  params: z.input&lt;Schema&gt;,
-): Promise&lt;R&gt; {
-  return child.run({ ...ctx, params: child.params.parse(params) });
-}</code></pre>
+    <pre><code>const done = await call(ctx, commit, { dir: params.dir });</code></pre>
 
     <p>
-      The child gets the parent's adapters and its own params. No nesting depth, no registry, no
-      engine involvement. <code>call</code> needs the whole <code>ctx</code>, so a workflow that
+      The child builds its own adapters and gets its own params. Because it is a process, it can be
+      stopped without touching its parent, and it can die without taking the parent down. The
+      parent sees each of those as a typed rejection: <code>RunStopped</code> when a person or a
+      parent stopped it, <code>RunCrashed</code> when the process died without recording an
+      outcome, and a plain error carrying the child's message when the child threw. A parent that
+      wants to survive wraps the call in try/catch; one that does not care rejects too, which is the
+      right default. <code>call</code> needs the whole <code>ctx</code>, so a workflow that
       composes takes <code>ctx</code> as one argument and destructures inside:
     </p>
 
@@ -209,17 +209,16 @@ if (!state.dirty) {
     <pre><code>const results = await Promise.all(
   params.dirs.map(async (dir) =&gt; ({
     dir,
-    done: await call({ ...ctx, view: ctx.view.scope(dir) }, commit, { dir }),
+    done: await call(ctx, commit, { dir }),
   })),
 );</code></pre>
 
     <p>
-      <code>view.scope(name)</code> gives a child its own lane in whatever frontend is watching:
-      the terminal prefixes its lines with <code>[name]</code>, a UI can render it as its own
-      panel. The parent decides which children deserve a lane, which is the narrator principle
-      again: the tree a person navigates is the story the workflow chose to tell, not the raw call
-      graph. A parent that does not scope gets merged narration, and for a child like
-      <code>ship</code> calling <code>commit</code>, merged is right.
+      Every child is its own lane for free. The parent's run file records which children it
+      started, each child's file records its own story, and the tree a frontend draws is that
+      parent chain. Nothing is announced to a UI and no scoping is threaded through
+      <code>ctx</code>: the structure a person navigates is the file system's, and it is the same
+      tree for the terminal, the desktop app, and anything else that reads the run folders.
     </p>
 
     <h2>Resuming is running it again</h2>

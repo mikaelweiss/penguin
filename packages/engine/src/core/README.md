@@ -117,14 +117,14 @@ without being asked. Calling it is opting in, each stream is private to its
 caller, and a message reaches its listener because the listener holds the
 iterator. The same no-inbox law as `ask`, pointed the other way.
 
-`scope(name)` returns a view whose calls carry a path, so a parent workflow
-can give a child its own lane (`call({ ...ctx, view: view.scope(dir) }, ...)`).
-The tree a frontend shows is the narration the workflows chose, and the engine
-never learns it exists.
+A child workflow needs no lane of its own: `call` runs it as its own run,
+with its own run file, and the tree a frontend shows is the parent chain those
+files record.
 
-How a view implementation talks to its frontend (a terminal, files, a socket,
-a web page), and whether it persists what it showed, is that implementation's
-business, not the engine's.
+The builtin implementation is `files`: shows land in the run's file, answers
+and messages arrive through the run's inbox, and every frontend reads and
+writes those files. A different view implementation shadows it just by being
+installed.
 
 ## Agents are adapters
 
