@@ -1,0 +1,1507 @@
+<!doctype html>
+<html lang="en" class="h-full antialiased scheme-light dark:scheme-dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="penguin-docs" content="standalone" />
+    <title>penguin mock</title>
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+      @custom-variant dark (&:where(.dark, .dark *));
+      @theme {
+        --font-sans: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
+        --font-sans--font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+      }
+      @keyframes pop-in {
+        from {
+          opacity: 0;
+          transform: scale(0.98) translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @keyframes grow-in {
+        from {
+          opacity: 0.4;
+          transform: scale(0.985);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @utility pop-in {
+        animation: pop-in 0.15s ease-out;
+      }
+      @utility grow-in {
+        animation: grow-in 0.2s ease-out;
+      }
+    </style>
+    <script>
+      if (
+        localStorage.penguinTheme === "dark" ||
+        (!localStorage.penguinTheme && matchMedia("(prefers-color-scheme: dark)").matches)
+      ) {
+        document.documentElement.classList.add("dark");
+      }
+    </script>
+  </head>
+  <body class="h-full overflow-hidden bg-white font-sans text-zinc-950 dark:bg-zinc-950 dark:text-white">
+    <div id="root" class="isolate h-full"></div>
+
+    <script>
+      const ICONS = {
+        plus: '<path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"/>',
+        cog: '<path fill-rule="evenodd" d="M6.455 1.45A.5.5 0 0 1 6.952 1h2.096a.5.5 0 0 1 .497.45l.186 1.858a4.996 4.996 0 0 1 1.466.848l1.703-.769a.5.5 0 0 1 .639.206l1.047 1.814a.5.5 0 0 1-.14.656l-1.517 1.09a5.026 5.026 0 0 1 0 1.694l1.516 1.09a.5.5 0 0 1 .141.656l-1.047 1.814a.5.5 0 0 1-.639.206l-1.703-.768c-.433.36-.928.649-1.466.847l-.186 1.858a.5.5 0 0 1-.497.45H6.952a.5.5 0 0 1-.497-.45l-.186-1.858a4.993 4.993 0 0 1-1.466-.848l-1.703.769a.5.5 0 0 1-.639-.206l-1.047-1.814a.5.5 0 0 1 .14-.656l1.517-1.09a5.033 5.033 0 0 1 0-1.694l-1.516-1.09a.5.5 0 0 1-.141-.656L2.46 3.593a.5.5 0 0 1 .639-.206l1.703.769c.433-.36.928-.65 1.466-.848l.186-1.858Zm-.177 7.567-.022-.037a2 2 0 0 1 3.466-1.997l.022.037a2 2 0 0 1-3.466 1.997Z" clip-rule="evenodd"/>',
+        funnel:
+          '<path d="M14 2a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v2.172a2 2 0 0 0 .586 1.414l2.828 2.828A2 2 0 0 1 6 9.828v4.363a.5.5 0 0 0 .724.447l2.17-1.085A2 2 0 0 0 10 11.763V9.829a2 2 0 0 1 .586-1.414l2.828-2.828A2 2 0 0 0 14 4.172V2Z"/>',
+        chevron:
+          '<path fill-rule="evenodd" d="M6.22 4.22a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.75.75 0 0 1-1.06-1.06L8.94 8 6.22 5.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/>',
+        terminal:
+          '<path fill-rule="evenodd" d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm2.22 1.97a.75.75 0 0 0 0 1.06l.97.97-.97.97a.75.75 0 1 0 1.06 1.06l1.5-1.5a.75.75 0 0 0 0-1.06l-1.5-1.5a.75.75 0 0 0-1.06 0ZM8.75 8.5a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z" clip-rule="evenodd"/>',
+        globe:
+          '<path fill-rule="evenodd" d="M3.757 4.5c.18.217.376.42.586.608.153-.61.354-1.175.596-1.678A5.53 5.53 0 0 0 3.757 4.5ZM8 1a6.994 6.994 0 0 0-7 7 7 7 0 1 0 7-7Zm0 1.5c-.476 0-1.091.386-1.633 1.427-.293.564-.531 1.267-.683 2.063A5.48 5.48 0 0 0 8 6.5a5.48 5.48 0 0 0 2.316-.51c-.152-.796-.39-1.499-.683-2.063C9.09 2.886 8.476 2.5 8 2.5Zm3.657 2.608a8.823 8.823 0 0 0-.596-1.678c.444.298.842.659 1.182 1.07-.18.217-.376.42-.586.608Zm-1.166 2.436A6.983 6.983 0 0 1 8 8a6.983 6.983 0 0 1-2.49-.456 10.703 10.703 0 0 0 .202 2.6c.72.231 1.49.356 2.288.356.798 0 1.568-.125 2.29-.356a10.705 10.705 0 0 0 .2-2.6Zm1.433 1.85a12.652 12.652 0 0 0 .018-2.609c.405-.276.78-.594 1.117-.947a5.48 5.48 0 0 1 .44 2.262 7.536 7.536 0 0 1-1.575 1.293Zm-2.172 2.435a9.046 9.046 0 0 1-3.504 0c.039.084.078.166.12.244C6.907 13.114 7.523 13.5 8 13.5s1.091-.386 1.633-1.427c.04-.078.08-.16.12-.244Zm1.31.74a8.5 8.5 0 0 0 .492-1.298c.457-.197.893-.43 1.307-.696a5.526 5.526 0 0 1-1.8 1.995Zm-6.123 0a8.507 8.507 0 0 1-.493-1.298 8.985 8.985 0 0 1-1.307-.696 5.526 5.526 0 0 0 1.8 1.995ZM2.5 8.1c.463.5.993.935 1.575 1.293a12.652 12.652 0 0 1-.018-2.608 7.037 7.037 0 0 1-1.117-.947 5.48 5.48 0 0 0-.44 2.262Z" clip-rule="evenodd"/>',
+        diff: '<path fill-rule="evenodd" d="M10.47 2.22a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 1 1-1.06-1.06l.97-.97H5.75a.75.75 0 0 1 0-1.5h5.69l-.97-.97a.75.75 0 0 1 0-1.06Zm-4.94 6a.75.75 0 0 1 0 1.06l-.97.97h5.69a.75.75 0 0 1 0 1.5H4.56l.97.97a.75.75 0 1 1-1.06 1.06l-2.25-2.25a.75.75 0 0 1 0-1.06l2.25-2.25a.75.75 0 0 1 1.06 0Z" clip-rule="evenodd"/>',
+        search:
+          '<path fill-rule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clip-rule="evenodd"/>',
+        sun: '<path d="M8 1a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 1ZM10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0ZM12.95 4.11a.75.75 0 1 0-1.06-1.06l-1.062 1.06a.75.75 0 0 0 1.061 1.062l1.06-1.061ZM15 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 15 8ZM11.89 12.95a.75.75 0 0 0 1.06-1.06l-1.06-1.062a.75.75 0 0 0-1.062 1.061l1.061 1.06ZM8 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 12ZM5.172 11.89a.75.75 0 0 0-1.061-1.062L3.05 11.89a.75.75 0 1 0 1.06 1.06l1.06-1.06ZM4 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 4 8ZM4.11 5.172A.75.75 0 0 0 5.173 4.11L4.11 3.05a.75.75 0 1 0-1.06 1.06l1.06 1.06Z"/>',
+        moon: '<path d="M14.438 10.148c.19-.425-.321-.787-.748-.601A5.5 5.5 0 0 1 6.453 2.31c.186-.427-.176-.938-.6-.748a6.501 6.501 0 1 0 8.585 8.586Z"/>',
+        x: '<path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z"/>',
+        bars: '<path fill-rule="evenodd" d="M2 3.75A.75.75 0 0 1 2.75 3h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 3.75ZM2 8a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8Zm0 4.25a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/>',
+        expand:
+          '<path fill-rule="evenodd" d="M2.75 9a.75.75 0 0 1 .75.75v1.69l2.22-2.22a.75.75 0 0 1 1.06 1.06L4.56 12.5h1.69a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75v-3.5A.75.75 0 0 1 2.75 9ZM2.75 7a.75.75 0 0 0 .75-.75V4.56l2.22 2.22a.75.75 0 0 0 1.06-1.06L4.56 3.5h1.69a.75.75 0 0 0 0-1.5h-3.5a.75.75 0 0 0-.75.75v3.5c0 .414.336.75.75.75ZM13.25 9a.75.75 0 0 0-.75.75v1.69l-2.22-2.22a.75.75 0 1 0-1.06 1.06l2.22 2.22H9.75a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 .75-.75v-3.5a.75.75 0 0 0-.75-.75ZM13.25 7a.75.75 0 0 1-.75-.75V4.56l-2.22 2.22a.75.75 0 1 1-1.06-1.06l2.22-2.22H9.75a.75.75 0 0 1 0-1.5h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75Z" clip-rule="evenodd"/>',
+        shrink:
+          '<path fill-rule="evenodd" d="M2.22 2.22a.75.75 0 0 1 1.06 0L5.5 4.44V2.75a.75.75 0 0 1 1.5 0v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1 0-1.5h1.69L2.22 3.28a.75.75 0 0 1 0-1.06Zm10.5 0a.75.75 0 1 1 1.06 1.06L11.56 5.5h1.69a.75.75 0 0 1 0 1.5h-3.5A.75.75 0 0 1 9 6.25v-3.5a.75.75 0 0 1 1.5 0v1.69l2.22-2.22ZM2.75 9h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-1.69l-2.22 2.22a.75.75 0 0 1-1.06-1.06l2.22-2.22H2.75a.75.75 0 0 1 0-1.5ZM9 9.75A.75.75 0 0 1 9.75 9h3.5a.75.75 0 0 1 0 1.5h-1.69l2.22 2.22a.75.75 0 1 1-1.06 1.06l-2.22-2.22v1.69a.75.75 0 0 1-1.5 0v-3.5Z" clip-rule="evenodd"/>',
+        sparkles:
+          '<path fill-rule="evenodd" d="M5 4a.75.75 0 0 1 .738.616l.252 1.388A1.25 1.25 0 0 0 6.996 7.01l1.388.252a.75.75 0 0 1 0 1.476l-1.388.252A1.25 1.25 0 0 0 5.99 9.996l-.252 1.388a.75.75 0 0 1-1.476 0L4.01 9.996A1.25 1.25 0 0 0 3.004 8.99l-1.388-.252a.75.75 0 0 1 0-1.476l1.388-.252A1.25 1.25 0 0 0 4.01 6.004l.252-1.388A.75.75 0 0 1 5 4ZM12 1a.75.75 0 0 1 .721.544l.195.682c.118.415.443.74.858.858l.682.195a.75.75 0 0 1 0 1.442l-.682.195a1.25 1.25 0 0 0-.858.858l-.195.682a.75.75 0 0 1-1.442 0l-.195-.682a1.25 1.25 0 0 0-.858-.858l-.682-.195a.75.75 0 0 1 0-1.442l.682-.195a1.25 1.25 0 0 0 .858-.858l.195-.682A.75.75 0 0 1 12 1ZM10 11a.75.75 0 0 1 .728.568.968.968 0 0 0 .704.704.75.75 0 0 1 0 1.456.968.968 0 0 0-.704.704.75.75 0 0 1-1.456 0 .968.968 0 0 0-.704-.704.75.75 0 0 1 0-1.456.968.968 0 0 0 .704-.704A.75.75 0 0 1 10 11Z" clip-rule="evenodd"/>',
+        trash:
+          '<path fill-rule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5a.75.75 0 0 1 .786-.711Z" clip-rule="evenodd"/>',
+        send: '<path d="M2.87 2.298a.75.75 0 0 0-.812 1.021L3.39 6.624a1 1 0 0 0 .928.626H8.25a.75.75 0 0 1 0 1.5H4.318a1 1 0 0 0-.927.626l-1.333 3.305a.75.75 0 0 0 .811 1.022 24.89 24.89 0 0 0 11.668-5.115.75.75 0 0 0 0-1.175A24.89 24.89 0 0 0 2.869 2.298Z"/>',
+        folder:
+          '<path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h2.879a1.5 1.5 0 0 1 1.06.44l1.122 1.12A1.5 1.5 0 0 0 9.62 4H12.5A1.5 1.5 0 0 1 14 5.5v1.401a2.986 2.986 0 0 0-1.5-.401h-9c-.546 0-1.059.146-1.5.401V3.5ZM2 9.5v3A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-3A1.5 1.5 0 0 0 12.5 8h-9A1.5 1.5 0 0 0 2 9.5Z"/>',
+        check:
+          '<path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd"/>',
+        stop: '<rect width="10" height="10" x="3" y="3" rx="1.5"/>',
+        pencil:
+          '<path fill-rule="evenodd" d="M11.013 2.513a1.75 1.75 0 0 1 2.475 2.474L6.226 12.25a2.751 2.751 0 0 1-.892.596l-2.047.848a.75.75 0 0 1-.98-.98l.848-2.047a2.75 2.75 0 0 1 .596-.892l7.262-7.261Z" clip-rule="evenodd"/>',
+        clipboard:
+          '<path fill-rule="evenodd" d="M10.986 3H12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h1.014A2.25 2.25 0 0 1 7.25 1h1.5a2.25 2.25 0 0 1 2.236 2ZM9.5 4v-.75a.75.75 0 0 0-.75-.75h-1.5a.75.75 0 0 0-.75.75V4h3Z" clip-rule="evenodd"/>',
+      };
+      const icon = (name, cls = "size-4") =>
+        `<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" class="shrink-0 ${cls}">${ICONS[name]}</svg>`;
+      const touch = `<span class="absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden" aria-hidden="true"></span>`;
+      const dot = (cls) => `<span class="size-1.5 shrink-0 rounded-full ${cls}"></span>`;
+
+      const CATALOG = [
+        { id: "w-release", name: "release", desc: "Tag, changelog, publish.", scope: "project", project: "penguin", fields: ["dir"] },
+        { id: "w-fixci", name: "fix-ci", desc: "Rerun and repair the failing check.", scope: "project", project: "penguin", fields: ["dir"] },
+        { id: "w-logbook", name: "logbook-sync", desc: "Pull the month's flights into the logbook.", scope: "project", project: "skyward", fields: ["dir"] },
+        { id: "w-overnight", name: "overnight", desc: "Work the queue while you sleep.", scope: "home", fields: ["dir", "prompt"] },
+        { id: "w-commit", name: "commit", desc: "Commit the tree with a generated message.", scope: "starter", fields: ["dir"] },
+        { id: "w-commitall", name: "commit-all", desc: "Commit every dirty package.", scope: "starter", fields: ["dir"] },
+        { id: "w-ship", name: "ship", desc: "Commit the tree, then push when the user says so.", scope: "starter", fields: ["dir"] },
+        { id: "w-steer", name: "steer", desc: "Run one agent turn that a user message can stop mid-flight.", scope: "starter", fields: ["dir", "prompt"] },
+      ];
+
+      const SKILLS = [
+        { name: "conventional-commits", desc: "Commit titles the repo's way.", scope: "project", project: "penguin" },
+        { name: "engine-docs", desc: "How the docs pages are written.", scope: "project", project: "penguin" },
+        { name: "unslop", desc: "Cut AI tells from prose.", scope: "home" },
+      ];
+
+      const ADAPTERS = [
+        { name: "git", role: "vcs", desc: "Git working copies.", scope: "starter" },
+        { name: "claude", role: "agent", desc: "Claude Code sessions.", scope: "starter" },
+        { name: "terminal", role: "view", desc: "Stdout, stdin, and menus.", scope: "starter" },
+        { name: "linear", role: "tracker", desc: "Issues in and out of Linear.", scope: "home" },
+      ];
+
+      const state = {
+        sidebarOpen: window.innerWidth >= 1024,
+        cmdHeld: false,
+        selected: "r-commit",
+        panels: { term: false, web: false, diff: false },
+        fullscreen: null,
+        sizes: { rightW: 420, termH: 224, webFrac: 0.5 },
+        ctxMenu: null,
+        sheet: null,
+        rename: null,
+        projSettings: null,
+        appSettings: null,
+        palette: null,
+        activityOpen: false,
+        worktreesDir: "~/.penguin/worktrees/<project>/<run>",
+        defaultAgent: "claude",
+        globalDreaming: true,
+        globalDreamsUnread: true,
+        globalDreams: [
+          { text: "steer follows commit in three projects this week. Chain them into one workflow." },
+        ],
+        projects: [
+          {
+            id: "penguin",
+            name: "penguin",
+            dir: "~/code/penguin",
+            dreaming: true,
+            dreamsUnread: true,
+            showDone: false,
+            dreams: [
+              { text: "release and ship both end by asking to push. Extract one push workflow and call it from both." },
+              { text: "You answered yes to commit's ask in 14 straight runs. Add an auto param and skip the ask." },
+            ],
+            runs: [
+              {
+                id: "r-release",
+                name: "release",
+                status: "running",
+                dir: "~/code/penguin",
+                collapsed: false,
+                listening: false,
+                ask: null,
+                output: [
+                  { t: "show", text: "changelog drafted from 12 commits" },
+                  { t: "show", text: "waiting on ship" },
+                ],
+                children: [
+                  {
+                    id: "r-ship",
+                    name: "ship",
+                    status: "running",
+                    dir: "~/.penguin/worktrees/penguin/ship",
+                    collapsed: false,
+                    listening: false,
+                    ask: null,
+                    output: [
+                      { t: "show", text: "tree is dirty" },
+                      { t: "show", text: "handing off to commit" },
+                    ],
+                    children: [
+                      {
+                        id: "r-commit",
+                        name: "commit",
+                        status: "running",
+                        dir: "~/.penguin/worktrees/penguin/ship",
+                        collapsed: false,
+                        listening: false,
+                        ask: { prompt: "Commit 3 files in packages/engine?", choices: ["yes", "no"] },
+                        output: [
+                          { t: "show", text: "staged 3 files" },
+                          { t: "tool", text: "packages/engine/src/run.ts" },
+                          { t: "tool", text: "packages/engine/src/trace.ts" },
+                          { t: "tool", text: "docs/ui.html" },
+                        ],
+                        children: [],
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "r-steer",
+                name: "steer",
+                status: "running",
+                dir: "~/code/penguin",
+                collapsed: false,
+                listening: true,
+                ask: null,
+                started: Date.now() - 3 * 60_000,
+                activity: ["Read packages/engine/src/host.ts", "Edit src/host.ts"],
+                tick: 2,
+                output: [
+                  { t: "show", text: "reading packages/engine/src/host.ts" },
+                  { t: "tool", text: "Edit: src/host.ts" },
+                  { t: "show", text: "the host resolves cwd before spawn now" },
+                  { t: "tool", text: "Bash: bun test host" },
+                  { t: "show", text: "12 tests pass" },
+                ],
+                children: [],
+              },
+              {
+                id: "r-commitall",
+                name: "commit-all",
+                status: "done",
+                dir: "~/code/penguin",
+                collapsed: false,
+                listening: false,
+                ask: null,
+                output: [
+                  { t: "show", text: "nothing to commit, tree is clean" },
+                  { t: "tool", text: "returned { committed: false }" },
+                ],
+                children: [],
+              },
+              {
+                id: "r-fixci",
+                name: "fix-ci",
+                status: "failed",
+                dir: "~/code/penguin",
+                collapsed: false,
+                listening: false,
+                ask: null,
+                output: [
+                  { t: "show", text: "rerunning the failing check" },
+                  { t: "tool", text: "Bash: bun test engine" },
+                  { t: "show", text: "threw: the fix did not hold after two tries" },
+                ],
+                children: [],
+              },
+            ],
+          },
+          {
+            id: "skyward",
+            name: "skyward",
+            dir: "~/code/skyward",
+            dreaming: false,
+            dreamsUnread: false,
+            showDone: false,
+            dreams: [],
+            runs: [
+              {
+                id: "r-sky-commit",
+                name: "commit",
+                status: "running",
+                dir: "~/code/skyward",
+                collapsed: false,
+                listening: false,
+                ask: null,
+                started: Date.now() - 40_000,
+                activity: ["Bash git diff --staged"],
+                tick: 1,
+                output: [
+                  { t: "show", text: "staged 1 file" },
+                  { t: "tool", text: "Sources/Logbook.swift" },
+                  { t: "show", text: "writing commit message" },
+                ],
+                children: [],
+              },
+              {
+                id: "r-sky-notes",
+                name: "release-notes",
+                status: "running",
+                dir: "~/code/skyward",
+                collapsed: false,
+                listening: false,
+                ask: {
+                  prompt: "Which sections go in the notes?",
+                  choices: ["features", "fixes", "docs"],
+                  many: true,
+                  other: true,
+                  picked: [],
+                },
+                output: [
+                  { t: "show", text: "34 commits since 1.4" },
+                  { t: "show", text: "grouping by change type" },
+                ],
+                children: [],
+              },
+              {
+                id: "r-sky-review",
+                name: "review",
+                status: "done",
+                dir: "~/code/skyward",
+                collapsed: false,
+                listening: false,
+                ask: null,
+                output: [
+                  { t: "show", text: "2 findings, both nits" },
+                  { t: "tool", text: "returned { findings: 2 }" },
+                ],
+                children: [],
+              },
+            ],
+          },
+        ],
+      };
+
+      function allRuns(project) {
+        const out = [];
+        const walk = (runs, depth, parent) => {
+          for (const run of runs) {
+            out.push({ run, depth, parent, project });
+            walk(run.children, depth + 1, run);
+          }
+        };
+        walk(project.runs, 0, null);
+        return out;
+      }
+
+      function visibleRuns(project) {
+        const out = [];
+        const walk = (runs, depth, parent) => {
+          for (const run of runs) {
+            if (run.status !== "running" && !project.showDone) continue;
+            out.push({ run, depth, parent, project });
+            if (!run.collapsed) walk(run.children, depth + 1, run);
+          }
+        };
+        walk(project.runs, 0, null);
+        return out;
+      }
+
+      function findRun(id) {
+        for (const project of state.projects) {
+          for (const entry of allRuns(project)) if (entry.run.id === id) return entry;
+        }
+        return null;
+      }
+
+      function subtreeAsks(run) {
+        if (run.ask) return true;
+        return run.children.some(subtreeAsks);
+      }
+
+      function pathToAsk(run) {
+        if (run.ask) return [run];
+        for (const child of run.children) {
+          const inner = pathToAsk(child);
+          if (inner) return [run, ...inner];
+        }
+        return null;
+      }
+
+      function sidebarOrder() {
+        return state.projects.flatMap((project) => visibleRuns(project));
+      }
+
+      // ---------- sidebar ----------
+
+      function projectRow(project) {
+        const filterOn = project.showDone;
+        return `
+          <div class="group relative mt-4 flex h-8 items-center gap-1.5 rounded-md px-2 first:mt-0" data-ctx="${project.id}">
+            <span class="text-zinc-400 dark:text-zinc-500">${icon("folder", "size-4")}</span>
+            <span class="min-w-0 truncate text-sm font-medium sm:text-[0.8125rem]">${project.name}</span>
+            <span class="flex-1"></span>
+            ${project.dreamsUnread ? `<span class="size-1.5 rounded-full bg-sky-500 group-hover:hidden"></span>` : ""}
+            <span class="hidden items-center gap-0.5 group-hover:flex has-focus-visible:flex">
+              <button type="button" data-action="filter" data-project="${project.id}" aria-label="${filterOn ? "Hide" : "Show"} finished runs in ${project.name}" class="relative rounded-sm p-1 ${filterOn ? "text-sky-600 dark:text-sky-400" : "text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500">${touch}${icon("funnel", "size-3.5")}</button>
+              <button type="button" data-action="new-run" data-project="${project.id}" aria-label="New workflow in ${project.name}" class="relative rounded-sm p-1 text-zinc-400 hover:text-zinc-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-500 dark:hover:text-zinc-300">${touch}${icon("plus", "size-3.5")}</button>
+              <button type="button" data-action="proj-settings" data-project="${project.id}" aria-label="Settings for ${project.name}" class="relative rounded-sm p-1 text-zinc-400 hover:text-zinc-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-500 dark:hover:text-zinc-300">${touch}${icon("cog", "size-3.5")}${project.dreamsUnread ? `<span class="absolute top-0 right-0 size-1.5 rounded-full bg-sky-500"></span>` : ""}</button>
+            </span>
+          </div>`;
+      }
+
+      function runRow(entry, chipIndex) {
+        const { run, depth } = entry;
+        const selected = state.selected === run.id;
+        const bubbled = !run.ask && run.collapsed && subtreeAsks(run);
+        const badge = run.ask
+          ? `<span class="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[0.6875rem]/none font-medium text-amber-600 dark:text-amber-400">needs you</span>`
+          : bubbled
+            ? `<span data-action="reveal-ask" data-run="${run.id}" role="button" aria-label="Expand to the blocked run"
+                class="flex items-center gap-0.5 rounded-full bg-amber-400/15 py-0.5 pr-1 pl-1.5 text-[0.6875rem]/none font-medium text-amber-600 hover:bg-amber-400/25 dark:text-amber-400">
+                needs you
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" class="size-3 shrink-0 rotate-90 not-group-hover/run:hidden">${ICONS.chevron}</svg>
+              </span>`
+            : "";
+        const statusDot =
+          run.status === "done"
+            ? dot("bg-zinc-300 dark:bg-zinc-600")
+            : run.status === "stopped" || run.status === "failed"
+              ? dot("bg-red-500")
+              : run.ask
+                ? dot("bg-amber-500")
+                : dot("bg-emerald-500 animate-pulse");
+        const chevron = run.children.length
+          ? `<span data-action="toggle" data-run="${run.id}" class="rounded-sm p-0.5 text-zinc-400 dark:text-zinc-500"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" class="size-3.5 shrink-0 transition-transform ${run.collapsed ? "" : "rotate-90"}">${ICONS.chevron}</svg></span>`
+          : `<span class="w-2.5 shrink-0"></span>`;
+        return `
+          <button type="button" data-action="select" data-run="${run.id}" data-ctx-run="${run.id}"
+            class="group/run relative flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-sm sm:text-[0.8125rem] ${selected ? "bg-zinc-950/5 text-zinc-950 dark:bg-white/5 dark:text-white" : "text-zinc-600 hover:bg-zinc-950/2.5 dark:text-zinc-400 dark:hover:bg-white/2.5"} focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500"
+            style="padding-left: ${26 + depth * 16}px">
+            ${
+              state.cmdHeld && chipIndex <= 9
+                ? `<kbd class="absolute top-1/2 left-2 w-4 -translate-y-1/2 rounded-sm bg-zinc-950/5 py-0.5 text-center font-sans text-[0.6875rem]/none text-zinc-500 dark:bg-white/10 dark:text-zinc-400">${chipIndex}</kbd>`
+                : `<span class="absolute top-1/2 left-2 flex w-4 -translate-y-1/2 justify-center">${statusDot}</span>`
+            }
+            ${chevron}
+            <span class="min-w-0 truncate">${run.name}</span>
+            <span class="flex-1"></span>
+            ${badge}
+          </button>`;
+      }
+
+      function sidebar() {
+        if (!state.sidebarOpen) return "";
+        let chip = 0;
+        const projects = state.projects
+          .map(
+            (project) =>
+              projectRow(project) +
+              visibleRuns(project)
+                .map((entry) => runRow(entry, ++chip))
+                .join(""),
+          )
+          .join("");
+        return `
+          <aside class="flex w-72 shrink-0 flex-col border-r border-zinc-950/5 bg-zinc-50 max-lg:absolute max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:shadow-xl dark:border-white/10 dark:bg-zinc-950 dark:max-lg:shadow-none">
+            <div class="flex h-12 shrink-0 items-center gap-2 px-4">
+              <span class="text-sm font-semibold">penguin</span>
+              <span class="flex-1"></span>
+              <button type="button" data-action="toggle-sidebar" aria-label="Hide sidebar" class="relative rounded-md p-1.5 text-zinc-500 hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-400 dark:hover:bg-white/5">${touch}${icon("bars", "size-4")}</button>
+            </div>
+            <nav class="min-h-0 flex-1 overflow-y-auto px-2 pb-4" id="sidebar-scroll">${projects}</nav>
+            <div class="flex items-center gap-1 border-t border-zinc-950/5 p-2 dark:border-white/10">
+              <button type="button" data-action="app-settings" class="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-sm text-zinc-600 hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:text-zinc-400 dark:hover:bg-white/5">
+                <span class="relative">${icon("cog", "size-4")}${state.globalDreamsUnread ? `<span class="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-sky-500"></span>` : ""}</span>
+                Settings
+              </button>
+              <button type="button" data-action="palette" aria-label="Open command palette" class="relative h-8 shrink-0 rounded-md px-2 font-mono text-[0.6875rem] text-zinc-500 hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-400 dark:hover:bg-white/5">${touch}CMD K</button>
+            </div>
+          </aside>`;
+      }
+
+      // ---------- main ----------
+
+      function breadcrumb(entry) {
+        const chain = [];
+        let cursor = entry;
+        while (cursor) {
+          chain.unshift(cursor.run.name);
+          cursor = cursor.parent ? findRun(cursor.parent.id) : null;
+        }
+        const sep = `<span class="text-zinc-300 dark:text-zinc-600">/</span>`;
+        return `<span class="text-zinc-500 dark:text-zinc-400">${entry.project.name}</span> ${sep} ${chain
+          .map((name, i) => (i === chain.length - 1 ? `<span class="font-medium">${name}</span>` : `<span class="text-zinc-500 dark:text-zinc-400">${name}</span>`))
+          .join(` ${sep} `)}`;
+      }
+
+      function panelButton(kind, name, label) {
+        const on = state.panels[kind];
+        return `<button type="button" data-action="panel" data-panel="${kind}" aria-label="${label}" aria-pressed="${on}"
+          class="relative rounded-md p-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 ${on ? "bg-sky-500/10 text-sky-600 dark:text-sky-400" : "text-zinc-500 hover:bg-zinc-950/5 dark:text-zinc-400 dark:hover:bg-white/5"}">${touch}${icon(name, "size-4")}</button>`;
+      }
+
+      function header(entry) {
+        return `
+          <header class="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-950/5 px-3 dark:border-white/10">
+            ${
+              state.sidebarOpen
+                ? ""
+                : `<button type="button" data-action="toggle-sidebar" aria-label="Show sidebar" class="relative rounded-md p-1.5 text-zinc-500 hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-400 dark:hover:bg-white/5">${touch}${icon("bars", "size-4")}</button>`
+            }
+            <div class="min-w-0 truncate text-sm sm:text-[0.8125rem]">${entry ? breadcrumb(entry) : `<span class="text-zinc-500">No run selected</span>`}</div>
+            ${entry ? `<span class="hidden truncate font-mono text-[0.6875rem] text-zinc-400 md:inline dark:text-zinc-500">${entry.run.dir}</span>` : ""}
+            <span class="flex-1"></span>
+            ${panelButton("term", "terminal", "Toggle terminal")}
+            ${panelButton("web", "globe", "Toggle web view")}
+            ${panelButton("diff", "diff", "Toggle diff view")}
+          </header>`;
+      }
+
+      function outputLine(line) {
+        if (line.t === "tool") return `<div class="text-zinc-400 dark:text-zinc-500">&nbsp;&nbsp;${line.text}</div>`;
+        if (line.t === "ask") return `<div class="text-sky-600 dark:text-sky-400">? ${line.text}</div>`;
+        if (line.t === "answer") return `<div class="text-zinc-400 dark:text-zinc-500">&gt; ${line.text}</div>`;
+        if (line.t === "me") return `<div class="text-sky-600 dark:text-sky-400">you: ${line.text}</div>`;
+        return `<div>${line.text}</div>`;
+      }
+
+      function inputArea(run) {
+        if (run.ask) {
+          return `
+            <div class="shrink-0 border-t border-zinc-950/5 p-3 dark:border-white/10">
+              <div class="rounded-xl bg-zinc-50 p-4 dark:bg-white/5 dark:inset-ring dark:inset-ring-white/5">
+                <div class="flex items-start gap-2">
+                  <span class="mt-1 size-1.5 shrink-0 rounded-full bg-amber-500"></span>
+                  <p class="text-base/6 font-medium sm:text-sm/6">${run.ask.prompt}</p>
+                </div>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  ${run.ask.choices
+                    .map((choice) => {
+                      if (run.ask.many) {
+                        const on = (run.ask.picked ?? []).includes(choice);
+                        return `<button type="button" data-action="ask-toggle" data-run="${run.id}" data-choice="${choice}" aria-pressed="${on}" class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] ${on ? "bg-sky-600 text-white hover:bg-sky-500 dark:bg-sky-500 dark:hover:bg-sky-400" : "bg-zinc-950/5 hover:bg-zinc-950/10 dark:bg-white/10 dark:hover:bg-white/15"}">${on ? icon("check", "size-3.5") : ""}${choice}</button>`;
+                      }
+                      return `<button type="button" data-action="answer" data-run="${run.id}" data-choice="${choice}" class="rounded-lg bg-zinc-950/5 px-3 py-1.5 text-sm font-medium hover:bg-zinc-950/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:bg-white/10 dark:hover:bg-white/15">${choice}</button>`;
+                    })
+                    .join("")}
+                  ${
+                    run.ask.many
+                      ? `<button type="button" data-action="ask-send" data-run="${run.id}" ${(run.ask.picked ?? []).length === 0 ? "disabled" : ""} class="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 disabled:opacity-40 sm:text-[0.8125rem] dark:bg-sky-500 dark:hover:bg-sky-400">Send</button>`
+                      : ""
+                  }
+                </div>
+                ${
+                  run.ask.other
+                    ? `<form data-form="other-answer" data-run="${run.id}" class="relative mt-2">
+                        <input type="text" name="other" aria-label="Or type an answer" placeholder="or type an answer"
+                          class="w-full rounded-lg bg-white py-2 pr-10 pl-3 text-base ring-1 ring-zinc-950/10 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-sky-500 sm:text-sm dark:bg-white/5 dark:ring-white/10 dark:placeholder:text-zinc-500" />
+                        <button type="submit" aria-label="Send answer" class="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md p-1 text-zinc-400 hover:text-zinc-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-500 dark:hover:text-zinc-300">${icon("send", "size-4")}</button>
+                      </form>`
+                    : ""
+                }
+              </div>
+            </div>`;
+        }
+        if (run.listening) {
+          return `
+            <div class="shrink-0 border-t border-zinc-950/5 p-3 dark:border-white/10">
+              <form data-form="message" data-run="${run.id}" class="relative">
+                <input type="text" name="message" aria-label="Message the run" placeholder="Say something, the workflow is listening" value="${(run.draft ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;")}"
+                  class="w-full rounded-xl bg-white py-2.5 pr-11 pl-3.5 text-base ring-1 ring-zinc-950/10 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-sky-500 sm:py-2 sm:text-sm dark:bg-white/5 dark:ring-white/10 dark:placeholder:text-zinc-500" />
+                <button type="submit" aria-label="Send" class="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-lg bg-sky-600 p-1.5 text-white hover:bg-sky-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:bg-sky-500 dark:hover:bg-sky-400">${icon("send", "size-4")}</button>
+              </form>
+            </div>`;
+        }
+        return "";
+      }
+
+      function elapsedOf(run) {
+        const seconds = Math.max(0, Math.floor((Date.now() - run.started) / 1000));
+        const minutes = Math.floor(seconds / 60);
+        return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+      }
+
+      function activityLine(run) {
+        if (run.status !== "running" || !run.activity?.length) return "";
+        const latest = run.activity.at(-1);
+        const stream = state.activityOpen
+          ? `<div class="max-h-40 space-y-1 overflow-y-auto border-t border-zinc-950/5 px-4 py-2 font-mono text-xs/5 text-zinc-400 dark:border-white/10 dark:text-zinc-500">
+              ${run.activity
+                .slice(-20)
+                .map((line) => `<div class="truncate">${line}</div>`)
+                .join("")}
+            </div>`
+          : "";
+        return `
+          <button type="button" data-action="activity-toggle" aria-expanded="${state.activityOpen}"
+            class="flex w-full shrink-0 items-center gap-2 border-t border-zinc-950/5 px-4 py-2 text-left font-mono text-xs text-zinc-500 hover:bg-zinc-950/2.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 dark:border-white/10 dark:text-zinc-400 dark:hover:bg-white/2.5">
+            <span class="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"></span>
+            <span class="min-w-0 truncate">${latest}</span>
+            <span class="flex-1"></span>
+            <span class="shrink-0 tabular-nums">${elapsedOf(run)}</span>
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" class="size-3 shrink-0 transition-transform ${state.activityOpen ? "-rotate-90" : "rotate-90"}">${ICONS.chevron}</svg>
+          </button>
+          ${stream}`;
+      }
+
+      function outputSection(entry) {
+        if (!entry) {
+          return `<section class="flex min-w-0 flex-1 items-center justify-center text-sm text-zinc-400 dark:text-zinc-500">Select a run.</section>`;
+        }
+        const { run } = entry;
+        return `
+          <section class="flex min-w-0 flex-1 flex-col">
+            <div id="transcript" class="min-h-0 flex-1 space-y-1 overflow-y-auto p-4 font-mono text-sm/6 sm:text-[0.8125rem]/6">
+              ${run.output.map(outputLine).join("")}
+              ${run.status !== "running" ? `<div class="pt-2 text-zinc-400 dark:text-zinc-500">run ${run.status === "done" ? "finished" : run.status}</div>` : ""}
+            </div>
+            ${activityLine(run)}
+            ${inputArea(run)}
+          </section>`;
+      }
+
+      function panelChrome(kind, title, body, headExtra = "") {
+        const full = state.fullscreen === kind;
+        return `
+          <section class="${full ? "absolute inset-0 z-20 grow-in" : "relative"} flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-zinc-950">
+            <div class="flex h-9 shrink-0 items-center gap-2 border-y border-zinc-950/5 bg-zinc-50 px-3 dark:border-white/10 dark:bg-zinc-900">
+              <span class="truncate text-[0.6875rem] font-medium text-zinc-500 dark:text-zinc-400">${title}</span>
+              ${headExtra}
+              <span class="flex-1"></span>
+              <button type="button" data-action="fullscreen" data-panel="${kind}" aria-label="${full ? "Leave full screen" : "Full screen"}" class="relative rounded-sm p-1 text-zinc-400 hover:text-zinc-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-500 dark:hover:text-zinc-300">${touch}${icon(full ? "shrink" : "expand", "size-3.5")}</button>
+              <button type="button" data-action="panel" data-panel="${kind}" aria-label="Close panel" class="relative rounded-sm p-1 text-zinc-400 hover:text-zinc-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-500 dark:hover:text-zinc-300">${touch}${icon("x", "size-3.5")}</button>
+            </div>
+            <div class="min-h-0 flex-1 overflow-auto">${body}</div>
+          </section>`;
+      }
+
+      function terminalPanel(entry) {
+        const dir = entry ? entry.run.dir : "~";
+        const lines =
+          entry && entry.project.id === "skyward"
+            ? [`<span class="text-zinc-500">${dir} %</span> swift build`, `Build complete! (2.41s)`]
+            : [
+                `<span class="text-zinc-500">${dir} %</span> git status -sb`,
+                `## simplification...origin/simplification`,
+                ` M packages/engine/src/run.ts`,
+              ];
+        const body = `
+          <div class="h-full space-y-0.5 bg-zinc-950 p-3 font-mono text-sm/6 text-zinc-200 sm:text-[0.8125rem]/6">
+            ${lines.map((line) => `<div>${line}</div>`).join("")}
+            <div><span class="text-zinc-500">${dir} %</span> <span class="inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse bg-zinc-400"></span></div>
+          </div>`;
+        return panelChrome("term", `Terminal · ${dir}`, body);
+      }
+
+      function webPanel() {
+        const body = `
+          <div class="flex h-full flex-col bg-white dark:bg-zinc-950">
+            <div class="mx-auto w-full max-w-md p-6">
+              <p class="text-lg font-semibold tracking-tight text-balance">penguin</p>
+              <p class="mt-1 text-base/6 text-pretty text-zinc-500 sm:text-sm/6 dark:text-zinc-400">There are many factories, but this one is yours.</p>
+              <div class="mt-6 space-y-2" aria-hidden="true">
+                <div class="h-2 w-full rounded-full bg-zinc-950/5 dark:bg-white/10"></div>
+                <div class="h-2 w-5/6 rounded-full bg-zinc-950/5 dark:bg-white/10"></div>
+                <div class="h-2 w-2/3 rounded-full bg-zinc-950/5 dark:bg-white/10"></div>
+              </div>
+              <div class="mt-6 grid grid-cols-2 gap-2" aria-hidden="true">
+                <div class="h-16 rounded-xl bg-zinc-950/5 dark:bg-white/10"></div>
+                <div class="h-16 rounded-xl bg-zinc-950/5 dark:bg-white/10"></div>
+              </div>
+            </div>
+          </div>`;
+        const url = `<span class="rounded-full bg-zinc-950/5 px-2 py-0.5 font-mono text-[0.6875rem] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">localhost:5173</span>`;
+        return panelChrome("web", "Web", body, url);
+      }
+
+      function diffPanel(entry) {
+        const sky = entry && entry.project.id === "skyward";
+        const file = sky ? "Sources/Logbook.swift" : "packages/engine/src/run.ts";
+        const rows = sky
+          ? [
+              ["ctx", "    let hours = legs.map(\\.duration)"],
+              ["del", "-   let total = hours.reduce(0, +)"],
+              ["add", "+   let total = hours.reduce(Duration.zero, +)"],
+              ["add", "+   entry.night = legs.contains { $0.night }"],
+              ["ctx", "    logbook.append(entry)"],
+            ]
+          : [
+              ["ctx", "  const host = createHost(cwd);"],
+              ["del", "-  const trace = createTrace();"],
+              ["add", "+  const journal = options?.resume === undefined"],
+              ["add", "+    ? undefined : openJournal(options.resume, file, parsed);"],
+              ["add", "+  const trace = createTrace(journal);"],
+              ["ctx", "  const found = await installedIn(roots(cwd));"],
+            ];
+        const rowClass = {
+          ctx: "text-zinc-500 dark:text-zinc-400",
+          add: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+          del: "bg-red-500/10 text-red-700 dark:text-red-400",
+        };
+        const body = `
+          <div class="p-3">
+            <p class="font-mono text-[0.6875rem] text-zinc-500 dark:text-zinc-400">${file}</p>
+            <div class="mt-2 overflow-x-auto rounded-lg bg-zinc-50 py-2 font-mono text-sm/6 whitespace-pre sm:text-[0.75rem]/6 dark:bg-white/5">
+              ${rows.map(([kind, text]) => `<div class="px-3 ${rowClass[kind]}">${text}</div>`).join("")}
+            </div>
+          </div>`;
+        return panelChrome("diff", `Diff · ${sky ? "1 file" : "1 file, +3 -1"}`, body);
+      }
+
+      function workArea(entry) {
+        const { term, web, diff } = state.panels;
+        const right = web || diff;
+        const rightStack = right
+          ? `
+            <div data-drag="rightW" class="w-1 shrink-0 cursor-col-resize hover:bg-sky-500/40"></div>
+            <div class="flex shrink-0 flex-col" style="width: ${state.sizes.rightW}px">
+              ${web ? `<div class="flex min-h-0 flex-col" style="${diff ? `height: ${state.sizes.webFrac * 100}%` : "flex: 1 1 0"}">${webPanel()}</div>` : ""}
+              ${web && diff ? `<div data-drag="webFrac" class="h-1 shrink-0 cursor-row-resize hover:bg-sky-500/40"></div>` : ""}
+              ${diff ? `<div class="flex min-h-0 min-w-0 flex-1 flex-col">${diffPanel(entry)}</div>` : ""}
+            </div>`
+          : "";
+        return `
+          <div class="relative flex min-h-0 flex-1 flex-col">
+            <div class="flex min-h-0 flex-1">
+              ${outputSection(entry)}
+              ${rightStack}
+            </div>
+            ${term ? `<div data-drag="termH" class="h-1 shrink-0 cursor-row-resize hover:bg-sky-500/40"></div><div class="flex shrink-0 flex-col" style="height: ${state.sizes.termH}px">${terminalPanel(entry)}</div>` : ""}
+          </div>`;
+      }
+
+      // ---------- overlays ----------
+
+      function scopeBadge(scope) {
+        const styles = {
+          project: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+          home: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+          starter: "bg-zinc-950/5 text-zinc-500 dark:bg-white/10 dark:text-zinc-400",
+        };
+        return `<span class="rounded-full px-1.5 py-0.5 text-[0.6875rem]/none font-medium ${styles[scope]}">${scope}</span>`;
+      }
+
+      function ctxMenu() {
+        if (!state.ctxMenu) return "";
+        const item = (action, name, label, data, extra = "") => `
+          <button type="button" data-action="${action}" ${data} class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:hover:bg-white/5">
+            <span class="text-zinc-400 dark:text-zinc-500">${icon(name, "size-4")}</span>${label}<span class="flex-1"></span>${extra}
+          </button>`;
+        let items = "";
+        if (state.ctxMenu.runId) {
+          const { run } = findRun(state.ctxMenu.runId);
+          const data = `data-run="${run.id}"`;
+          items = `
+            ${run.status === "running" ? item("run-stop", "stop", "Stop run", data) : ""}
+            ${item("run-rename", "pencil", "Rename", data)}
+            ${item("run-copy", "clipboard", "Copy directory", data)}`;
+        } else {
+          const project = state.projects.find((p) => p.id === state.ctxMenu.projectId);
+          const data = `data-project="${project.id}"`;
+          items = `
+            ${item("new-run", "plus", "New workflow", data)}
+            ${item("filter", "funnel", project.showDone ? "Hide finished runs" : "Show finished runs", data, project.showDone ? `<span class="text-sky-600 dark:text-sky-400">${icon("check", "size-3.5")}</span>` : "")}
+            ${item("proj-settings", "cog", "Project settings", data, project.dreamsUnread ? `<span class="size-1.5 rounded-full bg-sky-500"></span>` : "")}`;
+        }
+        return `
+          <div class="fixed z-50 w-56 rounded-xl bg-white p-1 shadow-lg ring-1 ring-black/5 pop-in dark:bg-zinc-900 dark:shadow-none dark:ring-white/10" style="left: ${state.ctxMenu.x}px; top: ${state.ctxMenu.y}px">${items}</div>`;
+      }
+
+      function toggleControl(name, checked, action, extra = "") {
+        return `
+          <div class="group relative inline-flex w-9 shrink-0 rounded-full bg-zinc-200 p-0.5 inset-ring inset-ring-zinc-900/5 outline-sky-600 outline-offset-2 transition-colors duration-200 ease-in-out has-checked:bg-sky-600 has-focus-visible:outline-2 dark:bg-white/5 dark:inset-ring-white/10 dark:outline-sky-500 dark:has-checked:bg-sky-500">
+            <span class="aspect-square w-1/2 rounded-full bg-white shadow-xs ring-1 ring-zinc-900/5 transition-transform duration-200 ease-in-out group-has-checked:translate-x-full"></span>
+            <input type="checkbox" name="${name}" aria-label="${name}" ${checked ? "checked" : ""} data-toggle="${action}" ${extra} class="absolute inset-0 size-full appearance-none focus:outline-hidden" />
+          </div>`;
+      }
+
+      function settingRow(title, desc, control) {
+        return `
+          <div class="flex items-start justify-between gap-6 py-4 first:pt-0">
+            <div>
+              <p class="text-base/6 font-medium sm:text-sm/6">${title}</p>
+              <p class="mt-0.5 text-base/6 text-pretty text-zinc-500 sm:text-sm/6 dark:text-zinc-400">${desc}</p>
+            </div>
+            ${control}
+          </div>`;
+      }
+
+      function dreamList(dreams) {
+        if (!dreams.length) {
+          return `<p class="text-base/6 text-zinc-500 sm:text-sm/6 dark:text-zinc-400">Nothing yet. Dreams show up here while dreaming is on.</p>`;
+        }
+        return dreams
+          .map(
+            (dream) => `
+              <div class="mb-3 rounded-xl bg-zinc-50 p-4 dark:bg-white/5 dark:inset-ring dark:inset-ring-white/5">
+                <div class="flex items-start gap-2.5">
+                  <span class="mt-1 text-sky-600 dark:text-sky-400">${icon("sparkles", "size-4")}</span>
+                  <p class="text-base/6 text-pretty sm:text-sm/6">${dream.text}</p>
+                </div>
+                <div class="mt-3 flex gap-2 pl-6.5">
+                  <button type="button" class="rounded-lg bg-zinc-950/5 px-2.5 py-1 text-sm font-medium hover:bg-zinc-950/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:bg-white/10 dark:hover:bg-white/15">Build it</button>
+                  <button type="button" class="rounded-lg px-2.5 py-1 text-sm font-medium text-zinc-500 hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:text-zinc-400 dark:hover:bg-white/5">Dismiss</button>
+                </div>
+              </div>`,
+          )
+          .join("");
+      }
+
+      function definitionList(items, withRole = false) {
+        if (!items.length) {
+          return `<p class="text-base/6 text-zinc-500 sm:text-sm/6 dark:text-zinc-400">None installed for this project.</p>`;
+        }
+        return `<ul role="list" class="divide-y divide-zinc-950/5 dark:divide-white/10">${items
+          .map(
+            (item) => `
+              <li class="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-base/6 font-medium sm:text-sm/6">${item.name}${withRole ? ` <span class="font-normal text-zinc-400 dark:text-zinc-500">${item.role}</span>` : ""}</p>
+                  <p class="truncate text-base/6 text-zinc-500 sm:text-sm/6 dark:text-zinc-400">${item.desc}</p>
+                </div>
+                ${scopeBadge(item.scope)}
+              </li>`,
+          )
+          .join("")}</ul>`;
+      }
+
+      function modalShell(nav, content, closeAction) {
+        return `
+          <div class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/50 p-4" data-action="${closeAction}">
+            <div class="flex h-120 w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl pop-in dark:bg-zinc-900 dark:shadow-none dark:inset-ring dark:inset-ring-white/10" data-stop>
+              <div class="flex w-44 shrink-0 flex-col gap-0.5 border-r border-zinc-950/5 bg-zinc-50 p-2 dark:border-white/10 dark:bg-white/2.5">${nav}</div>
+              <div class="min-w-0 flex-1 overflow-y-auto p-6">${content}</div>
+            </div>
+          </div>`;
+      }
+
+      function modalNavItem(label, active, action, extra, hasDot) {
+        return `
+          <button type="button" data-action="${action}" data-tab="${label}" class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm ${active ? "bg-zinc-950/5 dark:bg-white/5" : "text-zinc-600 hover:bg-zinc-950/2.5 dark:text-zinc-400 dark:hover:bg-white/2.5"} focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem]" ${extra}>
+            ${label}<span class="flex-1"></span>${hasDot ? `<span class="size-1.5 rounded-full bg-sky-500"></span>` : ""}
+          </button>`;
+      }
+
+      function projSettingsModal() {
+        if (!state.projSettings) return "";
+        const project = state.projects.find((p) => p.id === state.projSettings.projectId);
+        const tab = state.projSettings.tab;
+        const tabs = ["Settings", "Dreams", "Workflows", "Skills", "Adapters"];
+        const nav =
+          `<p class="truncate px-2.5 pt-1 pb-2 text-[0.6875rem] font-medium text-zinc-400 dark:text-zinc-500">${project.dir}</p>` +
+          tabs.map((t) => modalNavItem(t, t === tab, "proj-tab", "", t === "Dreams" && project.dreamsUnread)).join("");
+        let content = "";
+        if (tab === "Settings") {
+          content =
+            `<div class="divide-y divide-zinc-950/5 dark:divide-white/10">` +
+            settingRow("Dreaming", "Look for workflow improvements in the background.", toggleControl("project-dreaming", project.dreaming, "proj-dreaming")) +
+            settingRow(
+              "Directory",
+              project.dir,
+              `<button type="button" class="flex items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-1.5 text-sm font-medium text-red-600 hover:bg-red-500/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:text-red-400 dark:hover:bg-red-400/5">${icon("trash", "size-4")}Remove</button>`,
+            ) +
+            `</div>`;
+        } else if (tab === "Dreams") {
+          content = dreamList(project.dreams);
+        } else if (tab === "Workflows") {
+          content = definitionList(CATALOG.filter((w) => w.scope !== "project" || w.project === project.id));
+        } else if (tab === "Skills") {
+          content = definitionList(SKILLS.filter((s) => s.scope !== "project" || s.project === project.id));
+        } else {
+          content = definitionList(ADAPTERS, true);
+        }
+        return modalShell(nav, `<h2 class="mb-4 text-sm font-semibold">${project.name} · ${tab.toLowerCase()}</h2>${content}`, "close-proj-settings");
+      }
+
+      function appSettingsModal() {
+        if (!state.appSettings) return "";
+        const section = state.appSettings.section;
+        const nav = ["General", "Dreams", "Directories"]
+          .map((s) => modalNavItem(s, s === section, "app-tab", "", s === "Dreams" && state.globalDreamsUnread))
+          .join("");
+        let content = "";
+        if (section === "General") {
+          content =
+            `<div class="divide-y divide-zinc-950/5 dark:divide-white/10">` +
+            settingRow("Dark mode", "The whole app, both ways.", toggleControl("dark-mode", document.documentElement.classList.contains("dark"), "theme")) +
+            settingRow("Dreaming", "The global switch. Projects can opt out on their own.", toggleControl("global-dreaming", state.globalDreaming, "global-dreaming")) +
+            `<div class="flex items-center justify-between gap-4 py-4">
+              <div>
+                <p class="text-base/6 font-medium sm:text-sm/6">Default agent</p>
+                <p class="mt-0.5 text-base/6 text-zinc-500 sm:text-sm/6 dark:text-zinc-400">The agent adapter a new run uses.</p>
+              </div>
+              <select id="default-agent" aria-label="Default agent" class="rounded-lg bg-white px-2.5 py-1.5 text-sm ring-1 ring-zinc-950/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:bg-zinc-900 dark:ring-white/10">
+                ${["claude", "codex"].map((name) => `<option ${state.defaultAgent === name ? "selected" : ""}>${name}</option>`).join("")}
+              </select>
+            </div>` +
+            `<div class="py-4">
+              <p class="text-base/6 font-medium sm:text-sm/6">Worktrees</p>
+              <p class="mt-0.5 text-base/6 text-pretty text-zinc-500 sm:text-sm/6 dark:text-zinc-400">Where a run that opens a worktree puts it.</p>
+              <input type="text" name="worktrees-dir" id="worktrees-dir" aria-label="Worktrees directory" value="${state.worktreesDir}"
+                class="mt-2 w-full rounded-xl bg-white px-3.5 py-2.5 font-mono text-base ring-1 ring-zinc-950/10 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-sky-500 sm:py-2 sm:text-sm dark:bg-white/5 dark:ring-white/10" />
+            </div>` +
+            `</div>`;
+        } else if (section === "Dreams") {
+          content = dreamList(state.globalDreams);
+        } else {
+          content =
+            `<ul role="list" class="divide-y divide-zinc-950/5 dark:divide-white/10">` +
+            state.projects
+              .map(
+                (project) => `
+                  <li class="flex items-center gap-3 py-3 first:pt-0">
+                    <span class="text-zinc-400 dark:text-zinc-500">${icon("folder", "size-4")}</span>
+                    <span class="min-w-0 flex-1 truncate font-mono text-sm sm:text-[0.8125rem]">${project.dir}</span>
+                    <button type="button" aria-label="Remove ${project.name}" class="relative rounded-sm p-1 text-zinc-400 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-500 dark:hover:text-red-400">${touch}${icon("trash", "size-4")}</button>
+                  </li>`,
+              )
+              .join("") +
+            `</ul>
+            <button type="button" class="mt-4 flex items-center gap-1.5 rounded-lg bg-zinc-950/5 py-1 pr-2.5 pl-1.5 text-sm font-medium hover:bg-zinc-950/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:bg-white/10 dark:hover:bg-white/15">${icon("plus", "size-4")}Add directory</button>`;
+        }
+        return modalShell(nav, `<h2 class="mb-4 text-sm font-semibold">${section}</h2>${content}`, "close-app-settings");
+      }
+
+      function sheet() {
+        if (!state.sheet) return "";
+        const project = state.projects.find((p) => p.id === state.sheet.projectId);
+        let body = "";
+        if (state.sheet.step === "pick") {
+          const query = state.sheet.query.toLowerCase();
+          const groups = ["project", "home", "starter"]
+            .map((scope) => {
+              const items = CATALOG.filter(
+                (w) =>
+                  w.scope === scope &&
+                  (scope !== "project" || w.project === project.id) &&
+                  (w.name.includes(query) || w.desc.toLowerCase().includes(query)),
+              );
+              if (!items.length) return "";
+              return `
+                <p class="mt-5 mb-1 px-2 font-mono text-[0.6875rem] tracking-wide text-zinc-400 uppercase first:mt-0 dark:text-zinc-500">${scope}</p>
+                ${items
+                  .map(
+                    (w) => `
+                      <button type="button" data-action="pick-workflow" data-workflow="${w.id}" class="w-full rounded-lg px-2 py-2 text-left hover:bg-zinc-950/2.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 dark:hover:bg-white/2.5">
+                        <p class="text-base/6 font-medium sm:text-sm/6">${w.name}</p>
+                        <p class="truncate text-base/6 text-zinc-500 sm:text-sm/6 dark:text-zinc-400">${w.desc}</p>
+                      </button>`,
+                  )
+                  .join("")}`;
+            })
+            .join("");
+          body = `
+            <div class="relative mb-2">
+              <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-zinc-400">${icon("search", "size-4")}</span>
+              <input type="text" name="workflow-search" id="sheet-search" aria-label="Search workflows" placeholder="Search workflows" value="${state.sheet.query}"
+                class="w-full rounded-xl bg-white py-2.5 pr-3.5 pl-9 text-base ring-1 ring-zinc-950/10 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-sky-500 sm:py-2 sm:text-sm dark:bg-white/5 dark:ring-white/10 dark:placeholder:text-zinc-500" />
+            </div>
+            <div class="min-h-0 flex-1 overflow-y-auto">${groups || `<p class="px-2 py-4 text-base/6 text-zinc-500 sm:text-sm/6 dark:text-zinc-400">No workflow matches.</p>`}</div>`;
+        } else {
+          const workflow = CATALOG.find((w) => w.id === state.sheet.workflowId);
+          body = `
+            <button type="button" data-action="sheet-back" class="mb-4 self-start rounded-md px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem] dark:text-zinc-400 dark:hover:bg-white/5">Back</button>
+            <div class="flex items-center gap-2">
+              <p class="text-base font-semibold">${workflow.name}</p>
+              ${scopeBadge(workflow.scope)}
+            </div>
+            <p class="mt-1 text-base/6 text-pretty text-zinc-500 sm:text-sm/6 dark:text-zinc-400">${workflow.desc}</p>
+            <form data-form="start-run" class="mt-6 flex min-h-0 flex-1 flex-col gap-4">
+              <div>
+                <label for="param-dir" class="text-base/6 font-medium sm:text-sm/6">dir</label>
+                <input type="text" name="dir" id="param-dir" value="${project.dir}"
+                  class="mt-1 w-full rounded-xl bg-white px-3.5 py-2.5 font-mono text-base ring-1 ring-zinc-950/10 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-sky-500 sm:py-2 sm:text-sm dark:bg-white/5 dark:ring-white/10" />
+              </div>
+              ${
+                workflow.fields.includes("prompt")
+                  ? `
+                <div>
+                  <label for="param-prompt" class="text-base/6 font-medium sm:text-sm/6">prompt</label>
+                  <textarea name="prompt" id="param-prompt" rows="3" placeholder="What should the agent do?"
+                    class="mt-1 w-full rounded-xl bg-white px-3.5 py-2.5 text-base ring-1 ring-zinc-950/10 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-sky-500 sm:py-2 sm:text-sm dark:bg-white/5 dark:ring-white/10 dark:placeholder:text-zinc-500"></textarea>
+                </div>`
+                  : ""
+              }
+              <span class="flex-1"></span>
+              <button type="submit" class="rounded-xl bg-sky-600 px-3 py-2 text-base font-semibold text-white hover:bg-sky-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-sm dark:bg-sky-500 dark:hover:bg-sky-400">Start run</button>
+            </form>`;
+        }
+        return `
+          <div class="fixed inset-0 z-50 flex justify-center bg-zinc-950/50 p-4 pt-24" data-action="close-sheet">
+            <div class="flex h-fit max-h-128 w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white p-4 shadow-2xl pop-in dark:bg-zinc-900 dark:shadow-none dark:inset-ring dark:inset-ring-white/10" data-stop>
+              <div class="mb-3 flex items-center gap-2">
+                <p class="text-sm font-semibold">New workflow · ${project.name}</p>
+                <span class="flex-1"></span>
+                <button type="button" data-action="close-sheet" aria-label="Close" class="relative rounded-md p-1.5 text-zinc-500 hover:bg-zinc-950/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-zinc-400 dark:hover:bg-white/5">${touch}${icon("x", "size-4")}</button>
+              </div>
+              ${body}
+            </div>
+          </div>`;
+      }
+
+      function renameSheet() {
+        if (!state.rename) return "";
+        const { run } = findRun(state.rename.runId);
+        return `
+          <div class="fixed inset-0 z-50 flex justify-center bg-zinc-950/50 p-4 pt-24" data-action="close-rename">
+            <div class="h-fit w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl pop-in dark:bg-zinc-900 dark:shadow-none dark:inset-ring dark:inset-ring-white/10" data-stop>
+              <p class="text-sm font-semibold">Rename run</p>
+              <form data-form="rename" data-run="${run.id}" class="mt-3 flex flex-col gap-3">
+                <input type="text" name="name" id="rename-input" aria-label="Run name" value="${run.name}"
+                  class="w-full rounded-xl bg-white px-3.5 py-2.5 text-base ring-1 ring-zinc-950/10 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-sky-500 sm:py-2 sm:text-sm dark:bg-white/5 dark:ring-white/10" />
+                <button type="submit" class="rounded-xl bg-sky-600 px-3 py-2 text-base font-semibold text-white hover:bg-sky-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 sm:text-sm dark:bg-sky-500 dark:hover:bg-sky-400">Rename</button>
+              </form>
+            </div>
+          </div>`;
+      }
+
+      function paletteEntries() {
+        const query = state.palette.query.toLowerCase();
+        const entries = [];
+        for (const project of state.projects) {
+          for (const { run } of allRuns(project)) {
+            entries.push({
+              group: "Runs",
+              label: `${run.name} · ${project.name}`,
+              hint: run.status,
+              action: () => {
+                if (run.status !== "running") project.showDone = true;
+                state.selected = run.id;
+              },
+            });
+          }
+        }
+        for (const workflow of CATALOG) {
+          const project = state.projects.find((p) => p.id === (workflow.project ?? "penguin"));
+          entries.push({
+            group: "Workflows",
+            label: `Start ${workflow.name} · ${project.name}`,
+            hint: workflow.scope,
+            action: () => {
+              state.sheet = { projectId: project.id, step: "params", workflowId: workflow.id, query: "" };
+            },
+          });
+        }
+        entries.push(
+          { group: "Panels", label: "Toggle terminal", hint: "", action: () => (state.panels.term = !state.panels.term) },
+          { group: "Panels", label: "Toggle web view", hint: "", action: () => (state.panels.web = !state.panels.web) },
+          { group: "Panels", label: "Toggle diff view", hint: "", action: () => (state.panels.diff = !state.panels.diff) },
+          { group: "Settings", label: "Open settings", hint: "", action: () => (state.appSettings = { section: "General" }) },
+        );
+        return entries.filter((entry) => entry.label.toLowerCase().includes(query));
+      }
+
+      function palette() {
+        if (!state.palette) return "";
+        const entries = paletteEntries();
+        let index = 0;
+        const groups = [...new Set(entries.map((entry) => entry.group))]
+          .map(
+            (group) => `
+              <p class="mt-3 mb-1 px-2 font-mono text-[0.6875rem] tracking-wide text-zinc-400 uppercase first:mt-0 dark:text-zinc-500">${group}</p>
+              ${entries
+                .filter((entry) => entry.group === group)
+                .map((entry) => {
+                  const i = index++;
+                  return `
+                    <button type="button" data-action="palette-run" data-index="${entries.indexOf(entry)}"
+                      class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${i === state.palette.active ? "bg-zinc-950/5 dark:bg-white/5" : "hover:bg-zinc-950/2.5 dark:hover:bg-white/2.5"} focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sky-500 sm:text-[0.8125rem]">
+                      <span class="min-w-0 truncate">${entry.label}</span>
+                      <span class="flex-1"></span>
+                      ${entry.hint ? `<span class="text-[0.6875rem] text-zinc-400 dark:text-zinc-500">${entry.hint}</span>` : ""}
+                    </button>`;
+                })
+                .join("")}`,
+          )
+          .join("");
+        return `
+          <div class="fixed inset-0 z-50 flex justify-center bg-zinc-950/50 p-4 pt-24" data-action="close-palette">
+            <div class="flex h-fit max-h-96 w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl pop-in dark:bg-zinc-900 dark:shadow-none dark:inset-ring dark:inset-ring-white/10" data-stop>
+              <div class="relative border-b border-zinc-950/5 dark:border-white/10">
+                <span class="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-zinc-400">${icon("search", "size-4")}</span>
+                <input type="text" name="palette-search" id="palette-search" aria-label="Search commands" placeholder="Runs, workflows, panels" value="${state.palette.query}"
+                  class="w-full bg-transparent py-3 pr-3.5 pl-10 text-base placeholder:text-zinc-400 focus:outline-hidden sm:text-sm dark:placeholder:text-zinc-500" />
+              </div>
+              <div class="min-h-0 flex-1 overflow-y-auto p-2">${groups || `<p class="px-2 py-4 text-base/6 text-zinc-500 sm:text-sm/6 dark:text-zinc-400">Nothing matches.</p>`}</div>
+            </div>
+          </div>`;
+      }
+
+      // ---------- render ----------
+
+      function render() {
+        const entry = findRun(state.selected);
+        const active = document.activeElement;
+        const keep =
+          active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")
+            ? { id: active.id, name: active.name, value: active.value, start: active.selectionStart, end: active.selectionEnd }
+            : null;
+        const scrollers = {};
+        for (const id of ["sidebar-scroll", "transcript"]) {
+          const el = document.getElementById(id);
+          if (el) scrollers[id] = { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 8 };
+        }
+        document.getElementById("root").innerHTML = `
+          <div class="relative flex h-full">
+            ${sidebar()}
+            <main class="flex h-full min-w-0 flex-1 flex-col">
+              ${header(entry)}
+              ${workArea(entry)}
+            </main>
+          </div>
+          ${ctxMenu()}${projSettingsModal()}${appSettingsModal()}${sheet()}${renameSheet()}${palette()}`;
+        for (const [id, pos] of Object.entries(scrollers)) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.scrollTop = id === "transcript" && pos.bottom ? el.scrollHeight : pos.top;
+        }
+        const transcript = document.getElementById("transcript");
+        if (transcript && !(state.selected in seenScroll)) {
+          transcript.scrollTop = transcript.scrollHeight;
+          seenScroll[state.selected] = true;
+        }
+        if (keep) {
+          const el =
+            (keep.id !== "" && document.getElementById(keep.id)) ||
+            (keep.name !== "" && document.querySelector(`[name="${keep.name}"]`));
+          if (el) {
+            el.value = keep.value;
+            el.focus();
+            try {
+              el.setSelectionRange(keep.start, keep.end);
+            } catch {
+              // selection is optional
+            }
+          }
+        }
+        for (const id of ["sheet-search", "palette-search"]) {
+          const el = document.getElementById(id);
+          if (el && refocus === id) {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+          }
+        }
+      }
+      const seenScroll = {};
+      let refocus = null;
+      let cmdTimer;
+
+      // ---------- behavior ----------
+
+      function later(ms, fn) {
+        setTimeout(() => {
+          fn();
+          render();
+        }, ms);
+      }
+
+      function finishRun(entry, status = "done") {
+        entry.run.status = status;
+        if (state.selected === entry.run.id && !entry.project.showDone) {
+          state.selected = entry.parent ? entry.parent.id : visibleRuns(entry.project)[0]?.run.id ?? state.selected;
+        }
+      }
+
+      function answer(runId, choice) {
+        const entry = findRun(runId);
+        const { run } = entry;
+        run.output.push({ t: "ask", text: run.ask.prompt }, { t: "answer", text: choice });
+        run.ask = null;
+        if (runId === "r-commit") {
+          if (choice === "yes") {
+            later(700, () => run.output.push({ t: "show", text: "committed fix: resolve cwd before spawn" }));
+            later(1600, () => {
+              run.output.push({ t: "tool", text: "returned { committed: true }" });
+              finishRun(entry);
+              const ship = findRun("r-ship");
+              ship.run.output.push({ t: "show", text: "commit done, HEAD is simplification" });
+              ship.run.ask = { prompt: "Push simplification to origin?", choices: ["yes", "no"] };
+            });
+          } else {
+            later(700, () => {
+              run.output.push({ t: "show", text: "leaving the tree as it is" }, { t: "tool", text: "returned { committed: false }" });
+              finishRun(entry);
+            });
+          }
+        } else if (runId === "r-ship") {
+          later(700, () =>
+            run.output.push({ t: "show", text: choice === "yes" ? "pushed simplification" : "not pushing" }),
+          );
+          later(1600, () => {
+            run.output.push({ t: "tool", text: `returned { pushed: ${choice === "yes"} }` });
+            finishRun(entry);
+            findRun("r-release").run.output.push({ t: "show", text: "shipped, drafting release notes" });
+          });
+        } else if (runId === "r-sky-notes") {
+          later(700, () => run.output.push({ t: "show", text: `drafting ${choice}` }));
+          later(1800, () => {
+            run.output.push({ t: "tool", text: "returned { published: true }" });
+            finishRun(entry);
+          });
+        } else {
+          later(700, () => run.output.push({ t: "show", text: "noted" }));
+        }
+        render();
+      }
+
+      function startRun(workflow, project, params) {
+        const id = `r-new-${Date.now()}`;
+        project.runs.unshift({
+          id,
+          name: workflow.name,
+          status: "running",
+          dir: params.dir || project.dir,
+          collapsed: false,
+          listening: workflow.fields.includes("prompt"),
+          ask: null,
+          output: [{ t: "show", text: `starting ${workflow.name}` }],
+          children: [],
+        });
+        state.selected = id;
+        state.sheet = null;
+        later(900, () => findRun(id).run.output.push({ t: "show", text: "checking the tree" }));
+        later(1800, () => findRun(id).run.output.push({ t: "tool", text: "vcs.dirty -> { dirty: true }" }));
+      }
+
+      document.addEventListener("click", (event) => {
+        const stop = event.target.closest("[data-stop]");
+        const el = event.target.closest("[data-action]");
+        if (!el) {
+          if (!stop && state.ctxMenu) {
+            state.ctxMenu = null;
+            render();
+          }
+          return;
+        }
+        if (stop && !stop.contains(el)) return;
+        const action = el.dataset.action;
+        refocus = null;
+        const fromMenu = ["filter", "new-run", "proj-settings", "run-stop", "run-rename", "run-copy"];
+        state.ctxMenu = fromMenu.includes(action) ? null : state.ctxMenu;
+        if (action === "run-stop") {
+          const entry = findRun(el.dataset.run);
+          entry.run.output.push({ t: "tool", text: "stopped by you" });
+          entry.run.ask = null;
+          entry.run.listening = false;
+          finishRun(entry, "stopped");
+        }
+        if (action === "run-rename") state.rename = { runId: el.dataset.run };
+        if (action === "run-copy") {
+          const { run } = findRun(el.dataset.run);
+          navigator.clipboard?.writeText(run.dir).catch(() => {});
+        }
+        if (action === "select") state.selected = el.dataset.run;
+        if (action === "toggle") {
+          event.stopPropagation();
+          const { run } = findRun(el.dataset.run);
+          run.collapsed = !run.collapsed;
+        }
+        if (action === "reveal-ask") {
+          const { run } = findRun(el.dataset.run);
+          const path = pathToAsk(run);
+          if (path) {
+            for (const ancestor of path.slice(0, -1)) ancestor.collapsed = false;
+            state.selected = path.at(-1).id;
+          }
+        }
+        if (action === "activity-toggle") state.activityOpen = !state.activityOpen;
+        if (action === "toggle-sidebar") state.sidebarOpen = !state.sidebarOpen;
+        if (action === "filter") {
+          const project = state.projects.find((p) => p.id === el.dataset.project);
+          project.showDone = !project.showDone;
+        }
+        if (action === "new-run") state.sheet = { projectId: el.dataset.project, step: "pick", query: "" };
+        if (action === "proj-settings") {
+          const project = state.projects.find((p) => p.id === el.dataset.project);
+          state.projSettings = { projectId: project.id, tab: "Settings" };
+        }
+        if (action === "proj-tab") {
+          state.projSettings.tab = el.dataset.tab;
+          if (el.dataset.tab === "Dreams") state.projects.find((p) => p.id === state.projSettings.projectId).dreamsUnread = false;
+        }
+        if (action === "app-settings") state.appSettings = { section: "General" };
+        if (action === "app-tab") {
+          state.appSettings.section = el.dataset.tab;
+          if (el.dataset.tab === "Dreams") state.globalDreamsUnread = false;
+        }
+        if (action === "close-proj-settings" && el === event.target) state.projSettings = null;
+        if (action === "close-app-settings" && el === event.target) state.appSettings = null;
+        if (action === "close-sheet" && (el === event.target || el.tagName === "BUTTON")) state.sheet = null;
+        if (action === "close-rename" && el === event.target) state.rename = null;
+        if (action === "close-palette" && el === event.target) state.palette = null;
+        if (action === "panel") {
+          state.panels[el.dataset.panel] = !state.panels[el.dataset.panel];
+          if (state.fullscreen === el.dataset.panel) state.fullscreen = null;
+        }
+        if (action === "fullscreen") state.fullscreen = state.fullscreen === el.dataset.panel ? null : el.dataset.panel;
+        if (action === "answer") return answer(el.dataset.run, el.dataset.choice);
+        if (action === "ask-toggle") {
+          const { run } = findRun(el.dataset.run);
+          const picked = new Set(run.ask.picked ?? []);
+          if (picked.has(el.dataset.choice)) picked.delete(el.dataset.choice);
+          else picked.add(el.dataset.choice);
+          run.ask.picked = [...picked];
+        }
+        if (action === "ask-send") {
+          const { run } = findRun(el.dataset.run);
+          return answer(el.dataset.run, (run.ask.picked ?? []).join(", "));
+        }
+        if (action === "pick-workflow") state.sheet = { ...state.sheet, step: "params", workflowId: el.dataset.workflow };
+        if (action === "sheet-back") state.sheet = { ...state.sheet, step: "pick", query: "" };
+        if (action === "palette") {
+          state.palette = { query: "", active: 0 };
+          refocus = "palette-search";
+        }
+        if (action === "palette-run") {
+          paletteEntries()[Number(el.dataset.index)].action();
+          state.palette = null;
+        }
+        render();
+      });
+
+      document.addEventListener("contextmenu", (event) => {
+        const row = event.target.closest("[data-ctx], [data-ctx-run]");
+        if (!row) return;
+        event.preventDefault();
+        const at = { x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 140) };
+        state.ctxMenu = row.dataset.ctxRun
+          ? { runId: row.dataset.ctxRun, ...at }
+          : { projectId: row.dataset.ctx, ...at };
+        render();
+      });
+
+      document.addEventListener("input", (event) => {
+        if (event.target.name === "message") {
+          const entry = findRun(state.selected);
+          if (entry) entry.run.draft = event.target.value;
+          return;
+        }
+        if (event.target.id === "sheet-search") {
+          state.sheet.query = event.target.value;
+          refocus = "sheet-search";
+          render();
+        }
+        if (event.target.id === "palette-search") {
+          state.palette.query = event.target.value;
+          state.palette.active = 0;
+          refocus = "palette-search";
+          render();
+        }
+      });
+
+      document.addEventListener("change", (event) => {
+        if (event.target.id === "default-agent") {
+          state.defaultAgent = event.target.value;
+          render();
+          return;
+        }
+        if (event.target.id === "worktrees-dir") {
+          state.worktreesDir = event.target.value.trim() || "~/.penguin/worktrees/<project>/<run>";
+          render();
+          return;
+        }
+        const toggle = event.target.dataset.toggle;
+        if (!toggle) return;
+        if (toggle === "theme") {
+          document.documentElement.classList.toggle("dark", event.target.checked);
+          localStorage.penguinTheme = event.target.checked ? "dark" : "light";
+        }
+        if (toggle === "global-dreaming") state.globalDreaming = event.target.checked;
+        if (toggle === "proj-dreaming") {
+          state.projects.find((p) => p.id === state.projSettings.projectId).dreaming = event.target.checked;
+        }
+        render();
+      });
+
+      document.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const form = event.target;
+        if (form.dataset.form === "message") {
+          const text = form.elements.message.value.trim();
+          if (!text) return;
+          const { run } = findRun(form.dataset.run);
+          run.output.push({ t: "me", text });
+          run.draft = "";
+          later(600, () => run.output.push({ t: "show", text: `stopped: ${text}` }));
+          render();
+        }
+        if (form.dataset.form === "other-answer") {
+          const text = form.elements.other.value.trim();
+          if (!text) return;
+          return answer(form.dataset.run, text);
+        }
+        if (form.dataset.form === "rename") {
+          const name = form.elements.name.value.trim();
+          if (name !== "") findRun(form.dataset.run).run.name = name;
+          state.rename = null;
+          render();
+        }
+        if (form.dataset.form === "start-run") {
+          const workflow = CATALOG.find((w) => w.id === state.sheet.workflowId);
+          const project = state.projects.find((p) => p.id === state.sheet.projectId);
+          startRun(workflow, project, { dir: form.elements.dir.value });
+          render();
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Meta" && !event.repeat) {
+          cmdTimer = setTimeout(() => {
+            state.cmdHeld = true;
+            render();
+          }, 500);
+        }
+        if (event.metaKey && /^[1-9]$/.test(event.key)) {
+          const entry = sidebarOrder()[Number(event.key) - 1];
+          if (entry) {
+            event.preventDefault();
+            state.selected = entry.run.id;
+            render();
+          }
+        }
+        if (event.metaKey && event.key === ",") {
+          event.preventDefault();
+          state.appSettings = { section: "General" };
+          render();
+        }
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+          event.preventDefault();
+          state.palette = state.palette ? null : { query: "", active: 0 };
+          refocus = "palette-search";
+          render();
+        }
+        if (event.key === "Escape") {
+          if (state.palette) state.palette = null;
+          else if (state.ctxMenu) state.ctxMenu = null;
+          else if (state.rename) state.rename = null;
+          else if (state.sheet) state.sheet = null;
+          else if (state.projSettings) state.projSettings = null;
+          else if (state.appSettings) state.appSettings = null;
+          else if (state.fullscreen) state.fullscreen = null;
+          else return;
+          render();
+        }
+        if (state.palette && event.target.id === "palette-search") {
+          const entries = paletteEntries();
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            state.palette.active = Math.min(state.palette.active + 1, entries.length - 1);
+            refocus = "palette-search";
+            render();
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            state.palette.active = Math.max(state.palette.active - 1, 0);
+            refocus = "palette-search";
+            render();
+          }
+          if (event.key === "Enter" && entries.length) {
+            entries[state.palette.active].action();
+            state.palette = null;
+            render();
+          }
+        }
+      });
+
+      document.addEventListener("keyup", (event) => {
+        if (event.key !== "Meta") return;
+        clearTimeout(cmdTimer);
+        if (!state.cmdHeld) return;
+        state.cmdHeld = false;
+        render();
+      });
+
+      window.addEventListener("blur", () => {
+        clearTimeout(cmdTimer);
+        if (!state.cmdHeld) return;
+        state.cmdHeld = false;
+        render();
+      });
+
+      document.addEventListener("pointerdown", (event) => {
+        const handle = event.target.closest("[data-drag]");
+        if (!handle) return;
+        event.preventDefault();
+        const kind = handle.dataset.drag;
+        const start = { x: event.clientX, y: event.clientY, ...state.sizes };
+        const stack = kind === "webFrac" ? handle.parentElement : null;
+        const move = (e) => {
+          if (kind === "rightW") state.sizes.rightW = Math.min(Math.max(start.rightW - (e.clientX - start.x), 240), window.innerWidth - 480);
+          if (kind === "termH") state.sizes.termH = Math.min(Math.max(start.termH - (e.clientY - start.y), 120), window.innerHeight - 240);
+          if (kind === "webFrac" && stack) {
+            state.sizes.webFrac = Math.min(Math.max(start.webFrac + (e.clientY - start.y) / stack.clientHeight, 0.2), 0.8);
+          }
+          render();
+        };
+        const up = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", up);
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", up);
+      });
+
+      const AGENT_LOOPS = {
+        "r-steer": [
+          "Read packages/engine/src/host.ts",
+          "Edit src/host.ts",
+          "Bash bun test host",
+          "Read packages/engine/src/run.ts",
+          "Grep createHost",
+          "Edit src/host.test.ts",
+        ],
+        "r-sky-commit": ["Bash git diff --staged", "Read Sources/Logbook.swift", "Bash git commit"],
+      };
+
+      setInterval(() => {
+        let changed = false;
+        for (const [id, lines] of Object.entries(AGENT_LOOPS)) {
+          const entry = findRun(id);
+          if (!entry || entry.run.status !== "running") continue;
+          entry.run.activity.push(lines[entry.run.tick++ % lines.length]);
+          if (entry.run.activity.length > 40) entry.run.activity.shift();
+          changed = true;
+        }
+        if (changed) render();
+      }, 2500);
+
+      render();
+    </script>
+  </body>
+</html>

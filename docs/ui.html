@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>UI</title>
+  </head>
+  <body>
+    <h1>UI</h1>
+
+    <p>The desktop app. One line per spec.</p>
+
+    <h2>State</h2>
+
+    <ul role="list">
+      <li>Every run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>: <code>run.jsonl</code> the run writes, <code>inbox.jsonl</code> frontends append to.</li>
+      <li>The app is a reader plus an inbox writer. It holds no state of its own.</li>
+      <li>Quitting the app changes nothing. Runs keep going; reopening reads the files.</li>
+      <li>Runs started from the CLI appear too. Same files, same tree.</li>
+      <li>The run tree is the parent id in each run's head line.</li>
+      <li>Status is derived: live pid running, pending ask needs you, closing entry done, failed, or stopped, dead pid without one crashed.</li>
+      <li>Stopping a run kills its process group; the pid is in the head line.</li>
+      <li>Answers are <code>{"answer": ...}</code> lines, messages <code>{"message": "..."}</code> lines, appended to the run's inbox.</li>
+      <li>Rename appends a note to the run's file.</li>
+    </ul>
+
+    <h2>Sidebar</h2>
+
+    <ul role="list">
+      <li>Runs are grouped by project root directory.</li>
+      <li>A run started in a worktree lists under its git project's root.</li>
+      <li>Each directory lists its running workflows. Done, stopped, and crashed runs filter out.</li>
+      <li>A filter button on the directory row shows that project's done, stopped, and crashed runs.</li>
+      <li>Status dots: green running, amber needs you, gray done, red stopped or crashed.</li>
+      <li>A run expands to show the runs inside it, to any depth.</li>
+      <li>A run blocked on a question shows a badge on its row only; a collapsed ancestor carries it.</li>
+      <li>Hovering a carried badge shows a button that expands to the first blocked run and selects it.</li>
+      <li>Each directory row has a plus button that starts a new workflow there.</li>
+      <li>Each directory row has a settings icon that opens that project's settings.</li>
+      <li>Row buttons show on hover. Right click shows the same as a menu, each with icon and words.</li>
+      <li>Right click on a run row shows its actions: stop, rename, copy directory.</li>
+      <li>Directories can be added and removed.</li>
+      <li>A settings button at the bottom opens app settings.</li>
+      <li>A button shows or hides the sidebar.</li>
+      <li>A run row's status dot sits flush left, one column for every depth.</li>
+      <li>Holding cmd for half a second puts a number in place of each status dot; cmd plus a number selects that run.</li>
+    </ul>
+
+    <h2>Output</h2>
+
+    <ul role="list">
+      <li>Shows the view output of the selected run only.</li>
+      <li>A sub-run's output shows by selecting that sub-run.</li>
+      <li>The input area shows only when the run is listening or blocked on a question.</li>
+      <li>A question pins in the input area and renders the control its shape names: yes/no, menu, multi-select, or text.</li>
+      <li>A menu whose shape also admits text carries an "or type an answer" field.</li>
+      <li>A running agent shows one activity line under the transcript: latest action and elapsed time, replaced in place.</li>
+      <li>Clicking it expands the recent activity stream. It leaves when the run finishes.</li>
+      <li>No progress bars. Structure comes from narration, liveness from the activity line.</li>
+      <li>A sent message shows in the transcript right away.</li>
+    </ul>
+
+    <h2>Panels</h2>
+
+    <p>Three buttons in the top right corner: terminal, web view, diff.</p>
+
+    <ul role="list">
+      <li>Terminal: opens in the selected run's directory.</li>
+      <li>The terminal follows the selection, and follows the run when the run changes directory.</li>
+      <li>Web view: a browser.</li>
+      <li>Diff: file diffs for the run's directory, when it is a git directory.</li>
+      <li>All three can be open at once.</li>
+      <li>Web view and diff stack on the right; the output area keeps the left.</li>
+      <li>The terminal spans the full width, under everything else.</li>
+      <li>Drag a border to resize.</li>
+      <li>Each panel has a full screen button that hides the others and animates it to fill the space.</li>
+      <li>A full screen panel shows a button to leave full screen.</li>
+      <li>Full screen never covers the sidebar.</li>
+    </ul>
+
+    <h2>New workflow</h2>
+
+    <ul role="list">
+      <li>A sheet to search and pick a workflow.</li>
+      <li>Workflows are sorted by catalog.</li>
+      <li>Picking one asks for its params, then starts the run.</li>
+    </ul>
+
+    <h2>Catalogs</h2>
+
+    <ul role="list">
+      <li>starter: the package's examples.</li>
+      <li>home: <code>~/.penguin</code> workflows, skills, adapters. Yours, every project.</li>
+      <li>project: <code>.penguin</code> workflows, skills, adapters. In git.</li>
+      <li>project local: same, kept out of git.</li>
+    </ul>
+
+    <h2>Project settings</h2>
+
+    <ul role="list">
+      <li>A modal with a sidebar: main settings, workflows, skills, adapters.</li>
+      <li>Main settings holds the project's dreaming toggle.</li>
+      <li>The other tabs list what the project has of each.</li>
+    </ul>
+
+    <h2>App settings</h2>
+
+    <ul role="list">
+      <li>A sheet with a sidebar of sections, rows of settings. Cmd comma opens it.</li>
+      <li>Holds the global dreaming toggle.</li>
+      <li>Light and dark, with a toggle.</li>
+      <li>Holds the worktrees directory. Default <code>~/.penguin/worktrees/&lt;project&gt;/&lt;run&gt;</code>.</li>
+      <li>Holds the default agent adapter. Both write <code>~/.penguin/config</code>.</li>
+    </ul>
+
+    <h2>Dreaming</h2>
+
+    <ul role="list">
+      <li>A workflow that runs in the background, suggesting improvements to your workflows and new ones from your patterns.</li>
+      <li>Off by default. On globally or per project.</li>
+      <li>A project's dreams show a dot on that project's settings icon; global dreams on the app settings button.</li>
+      <li>Inside settings, a dot marks the dreams row. Clicking it shows the suggestions.</li>
+    </ul>
+
+    <h2>Command palette</h2>
+
+    <ul role="list">
+      <li>Switches runs, starts workflows, toggles panels.</li>
+      <li>Opens with cmd K, or the button next to the settings button.</li>
+    </ul>
+  </body>
+</html>

@@ -52,6 +52,11 @@ const server = Bun.serve({
       });
     }
 
+    const html = fs.readFileSync(doc.file, "utf8");
+    if (/<meta\s+name="penguin-docs"\s+content="standalone"/.test(html)) {
+      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+
     const order = docs(entries);
     const at = order.findIndex((entry) => entry.slug === doc.slug);
     return new Response(
@@ -59,7 +64,7 @@ const server = Bun.serve({
         entries,
         doc,
         section: sectionOf(entries, doc.slug),
-        body: bodyOf(fs.readFileSync(doc.file, "utf8")),
+        body: bodyOf(html),
         previous: order[at - 1],
         next: order[at + 1],
       }),
