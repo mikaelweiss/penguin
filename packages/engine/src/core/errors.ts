@@ -2,6 +2,12 @@ import type { z } from "zod";
 
 export class PenguinError extends Error {}
 
+/** A sub-run's process was told to stop, by a person or a parent. */
+export class RunStopped extends PenguinError {}
+
+/** A sub-run's process died without recording an outcome. */
+export class RunCrashed extends PenguinError {}
+
 export function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);

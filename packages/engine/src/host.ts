@@ -1,14 +1,19 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import type { CommandResult, ExecOptions, Host } from "./core/adapter.ts";
+import { readConfig } from "./config.ts";
+import type { CommandResult, ExecOptions, Host, RunLocation } from "./core/adapter.ts";
 import { PenguinError } from "./core/errors.ts";
-import { stateRoot } from "./paths.ts";
+import { home, stateRoot } from "./paths.ts";
 
-export function createHost(cwd: string): Host {
+export function createHost(cwd: string, location: RunLocation): Host {
   const resolve = (relative: string | undefined): string => path.resolve(cwd, relative ?? ".");
+  const settings = readConfig();
   return {
     cwd,
+    home: home(),
     state: stateRoot(),
+    run: location,
+    config: (key) => settings.get(key),
     shell: (cmd, options) => run(cmd, undefined, resolve(options?.cwd), options),
     exec: (argv, options) => {
       const [cmd, ...args] = argv;

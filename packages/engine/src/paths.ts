@@ -17,12 +17,16 @@ export function projectHome(cwd: string): string {
   return path.join(cwd, ".penguin");
 }
 
-export function tracesDir(): string {
-  return path.join(stateRoot(), "traces");
+export function runsDir(): string {
+  return path.join(stateRoot(), "runs");
 }
 
-export function defaultsFile(): string {
-  return path.join(home(), "defaults");
+export function runDir(id: string): string {
+  return path.join(runsDir(), id);
+}
+
+export function configFile(): string {
+  return path.join(home(), "config");
 }
 
 export function catalogsFile(): string {

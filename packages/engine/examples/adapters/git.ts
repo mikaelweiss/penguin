@@ -131,7 +131,8 @@ export default adapter({
         ): Promise<{ ok: boolean; path: string; exists: boolean; reason: string }> {
           const root = await git(["rev-parse", "--show-toplevel"]);
           const project = path.basename(root.stdout.trim() === "" ? host.cwd : root.stdout.trim());
-          const target = path.join(host.state, "worktrees", project, name);
+          const base = host.config("worktrees") ?? path.join(host.home, "worktrees");
+          const target = path.join(base, project, name);
           if (fs.existsSync(target))
             return { ok: false, path: target, exists: true, reason: `${target} already exists` };
           fs.mkdirSync(path.dirname(target), { recursive: true });

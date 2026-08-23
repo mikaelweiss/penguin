@@ -11,7 +11,8 @@ export default workflow({
     const narration = (async () => {
       for await (const chunk of turn.output) {
         if (chunk.kind === "text") await view.show(chunk.text);
-        if (chunk.kind === "tool") await view.show(`  ${chunk.text}: ${chunk.detail ?? ""}`);
+        if (chunk.kind === "tool")
+          await view.show(`${chunk.text}: ${chunk.detail ?? ""}`, { kind: "tool" });
       }
     })();
 

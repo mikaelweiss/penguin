@@ -16,12 +16,24 @@ export type ExecOptions = ShellOptions & {
   signal?: AbortSignal;
 };
 
+/** Where a run's files live: run.jsonl written by the run, inbox.jsonl written by frontends. */
+export type RunLocation = {
+  id: string;
+  dir: string;
+};
+
 /** What the engine hands an adapter's build function. */
 export type Host = {
   /** The run's invoking folder. Relative cwd options resolve against it. */
   cwd: string;
+  /** penguin's home folder, ~/.penguin: config, catalogs, worktrees. */
+  home: string;
   /** penguin's state folder, where an adapter puts what it keeps between runs. */
   state: string;
+  /** This run's id and folder. */
+  run: RunLocation;
+  /** One value from ~/.penguin/config, or undefined when the key has no line. */
+  config(key: string): string | undefined;
   /** Runs one string through a real shell. For constant strings and shell features, never interpolation. */
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   /** Spawns an argv directly, so arguments need no quoting. Aborting the signal kills the process. */

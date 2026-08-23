@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { readConfig } from "../config.ts";
 import type { Adapter } from "../core/adapter.ts";
 import { PenguinError } from "../core/errors.ts";
-import { defaultsFile } from "../paths.ts";
+import { configFile } from "../paths.ts";
 import * as catalogs from "./catalogs.ts";
 import { importDefault } from "./loader.ts";
 
@@ -52,25 +53,11 @@ export async function loadAdapter(file: string): Promise<Adapter> {
   return definition;
 }
 
-/** The implementation the user chose per role, from ~/.penguin/defaults: one "role name" per line. */
-export function defaults(): Map<string, string> {
-  const file = defaultsFile();
-  const map = new Map<string, string>();
-  if (!fs.existsSync(file)) return map;
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    const text = line.trim();
-    if (text === "" || text.startsWith("#")) continue;
-    const [role, name] = text.split(/\s+/);
-    if (role !== undefined && name !== undefined) map.set(role, name);
-  }
-  return map;
-}
-
 export type Picked = { found: AdapterFound } | { missing: string } | { conflict: string };
 
 export function pick(list: AdapterFound[], role: string, name?: string): Picked {
   const implementations = list.filter((entry) => entry.role === role);
-  const chosen = defaults().get(role);
+  const chosen = readConfig().get(role);
   const wanted = name ?? chosen;
   if (wanted !== undefined) {
     const found = implementations.find((entry) => entry.name === wanted);
@@ -79,17 +66,20 @@ export function pick(list: AdapterFound[], role: string, name?: string): Picked 
       return { missing: `no ${role} adapter is installed` };
     }
     const names = implementations.map((entry) => entry.name).join(", ");
-    const fix = name === undefined ? ` Edit ${defaultsFile()} to choose one.` : "";
+    const fix = name === undefined ? ` Edit ${configFile()} to choose one.` : "";
     return { missing: `no ${role} adapter named ${wanted}. Installed: ${names}.${fix}` };
   }
-  const first = implementations[0];
+  // A builtin is a fallback: one installed implementation shadows it without a config line.
+  const installed = implementations.filter((entry) => entry.scope !== "builtin");
+  const candidates = installed.length > 0 ? installed : implementations;
+  const first = candidates[0];
   if (first === undefined) {
     return { missing: `no ${role} adapter is installed` };
   }
-  if (implementations.length > 1) {
-    const names = implementations.map((entry) => entry.name).join(", ");
+  if (candidates.length > 1) {
+    const names = candidates.map((entry) => entry.name).join(", ");
     return {
-      conflict: `${implementations.length} ${role} adapters are installed (${names}). Write "${role} <name>" to ${defaultsFile()} to choose one.`,
+      conflict: `${candidates.length} ${role} adapters are installed (${names}). Write "${role} <name>" to ${configFile()} to choose one.`,
     };
   }
   return { found: first };

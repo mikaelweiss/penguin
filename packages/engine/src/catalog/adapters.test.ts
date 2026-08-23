@@ -52,11 +52,19 @@ test("a role with nothing installed is missing", () => {
   expect("missing" in pick([], "vcs")).toBe(true);
 });
 
-test("the defaults file chooses a role's implementation", () => {
+test("the config file chooses a role's implementation", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-home-"));
   temps.push(home);
   process.env["PENGUIN_HOME"] = home;
-  fs.writeFileSync(path.join(home, "defaults"), "# picks\nvcs jj\n");
+  fs.writeFileSync(path.join(home, "config"), "# picks\nvcs jj\n");
   const picked = pick([entry("vcs", "git"), entry("vcs", "jj")], "vcs");
   expect("found" in picked && picked.found.name).toBe("jj");
+});
+
+test("a builtin is a fallback: one installed implementation shadows it", () => {
+  const builtin: AdapterFound = { ...entry("view", "files"), scope: "builtin" };
+  const alone = pick([builtin], "view");
+  expect("found" in alone && alone.found.name).toBe("files");
+  const shadowed = pick([builtin, entry("view", "web")], "view");
+  expect("found" in shadowed && shadowed.found.name).toBe("web");
 });

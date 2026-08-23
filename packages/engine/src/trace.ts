@@ -1,71 +1,115 @@
 import fs from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import { messageOf, PenguinError } from "./core/errors.ts";
-import { tracesDir } from "./paths.ts";
+import { runDir, runsDir } from "./paths.ts";
 
 export type Trace = {
   file: string;
+  dir: string;
   note(entry: Record<string, unknown>): void;
   wrap<A>(role: string, api: A): A;
+  wrapCall<Args extends unknown[], R>(
+    name: string,
+    fn: (...args: Args) => Promise<R>,
+  ): (...args: Args) => Promise<R>;
+};
+
+export type RunInfo = {
+  id: string;
+  workflow: string;
+  params: unknown;
+  cwd: string;
+  parent?: string | undefined;
 };
 
 type Entry = Record<string, unknown>;
 
-/** A JSON-safe copy: functions named, the unserializable admitted. Values stay whole, resume returns them. */
+/** A JSON-safe copy: functions named, zod shapes as JSON Schema, the unserializable admitted. */
 function safe(value: unknown): unknown {
   try {
-    const text = JSON.stringify(value, (_key, item: unknown) =>
-      typeof item === "function" ? "[function]" : item,
-    );
+    const text = JSON.stringify(value, (_key, item: unknown) => {
+      if (typeof item === "function") return "[function]";
+      if (item !== null && typeof item === "object" && "_zod" in item) {
+        try {
+          return z.toJSONSchema(item as z.ZodType);
+        } catch {
+          return "[shape]";
+        }
+      }
+      return item;
+    });
     return text === undefined ? undefined : (JSON.parse(text) as unknown);
   } catch {
     return "[unserializable]";
   }
 }
 
-/** The newest trace file, for run's resume option. */
-export function latestTrace(): string | undefined {
-  const dir = tracesDir();
+/** A fresh run id, its folder claimed under <state>/runs. */
+export function runId(): string {
+  fs.mkdirSync(runsDir(), { recursive: true });
+  const stamp = new Date().toISOString().replaceAll(":", "-");
+  let id = `${stamp}-${process.pid}`;
+  for (let extra = 2; fs.existsSync(runDir(id)); extra++) {
+    id = `${stamp}-${process.pid}-${extra}`;
+  }
+  fs.mkdirSync(runDir(id));
+  return id;
+}
+
+/** The newest run file, for run's resume option. */
+export function latestRun(): string | undefined {
+  const dir = runsDir();
   if (!fs.existsSync(dir)) return undefined;
   const last = fs
     .readdirSync(dir)
-    .filter((name) => name.endsWith(".jsonl"))
-    .map((name) => path.join(dir, name))
+    .map((name) => path.join(dir, name, "run.jsonl"))
+    .filter((file) => fs.existsSync(file))
     .sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs)
     .at(-1);
   return last;
 }
 
-/** Reads a trace back as a journal of calls, refusing one from another workflow or params. */
+/** Reads a run file back as a journal of calls, refusing one from another workflow or params. */
 export function openJournal(file: string, workflow: string, params: unknown): Entry[] {
   const entries = fs
     .readFileSync(file, "utf8")
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line) as Entry);
-  const head = entries.find((entry) => "workflow" in entry);
+  const head = entries.find((entry) => "workflow" in entry && "params" in entry);
   const same =
     head !== undefined &&
     head["workflow"] === workflow &&
     JSON.stringify(head["params"]) === JSON.stringify(safe(params));
-  if (!same) throw new PenguinError(`${file} is not a trace of this workflow and params`);
-  return entries.filter((entry) => typeof entry["call"] === "string");
+  if (!same) throw new PenguinError(`${file} is not a run of this workflow and params`);
+  return entries.filter((entry) => typeof entry["call"] === "string" && entry["pending"] !== true);
 }
 
-export function createTrace(journal?: Entry[]): Trace {
-  fs.mkdirSync(tracesDir(), { recursive: true });
-  const stamp = new Date().toISOString().replaceAll(":", "-");
-  let file = path.join(tracesDir(), `${stamp}-${process.pid}.jsonl`);
-  for (let extra = 2; fs.existsSync(file); extra++) {
-    file = path.join(tracesDir(), `${stamp}-${process.pid}-${extra}.jsonl`);
-  }
+export function createTrace(info: RunInfo, journal?: Entry[]): Trace {
+  const dir = runDir(info.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "run.jsonl");
+  const inbox = path.join(dir, "inbox.jsonl");
+  if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, "");
   const ahead = journal ?? [];
   let index = 0;
   let live = journal === undefined;
+  let seq = 0;
 
   const append = (entry: Entry): void => {
     fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
   };
+
+  append({
+    at: new Date().toISOString(),
+    run: info.id,
+    pid: process.pid,
+    workflow: info.workflow,
+    params: safe(info.params),
+    cwd: info.cwd,
+    ...(info.parent === undefined ? {} : { parent: info.parent }),
+  });
 
   const note = (entry: Entry): void => {
     const cleaned: Entry = { at: new Date().toISOString() };
@@ -116,13 +160,15 @@ export function createTrace(journal?: Entry[]): Trace {
         throw error;
       }
       if (result instanceof Promise) {
+        const id = `c${++seq}`;
+        append({ ...called, id, pending: true });
         return result.then(
           (value) => {
-            append({ ...called, elapsedMs: elapsed(), outcome: safe(value) });
+            append({ ...called, id, elapsedMs: elapsed(), outcome: safe(value) });
             return value;
           },
           (error: unknown) => {
-            append({ ...called, elapsedMs: elapsed(), threw: messageOf(error) });
+            append({ ...called, id, elapsedMs: elapsed(), threw: messageOf(error) });
             throw error;
           },
         );
@@ -152,7 +198,10 @@ export function createTrace(journal?: Entry[]): Trace {
 
   return {
     file,
+    dir,
     note,
     wrap: <A>(role: string, api: A): A => wrapApi(role, api) as A,
+    wrapCall: (name, fn) =>
+      wrapFunction(name, fn as (...args: unknown[]) => unknown, undefined) as typeof fn,
   };
 }

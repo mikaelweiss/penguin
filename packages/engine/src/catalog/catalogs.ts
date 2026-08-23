@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { catalogsFile, home, projectHome } from "../paths.ts";
 
-export type CatalogScope = "project" | "home" | "starter" | "catalog";
+export type CatalogScope = "project" | "home" | "starter" | "catalog" | "builtin";
 
 export type Catalog = {
   dir: string;
@@ -22,9 +22,14 @@ export function starterCatalog(): Catalog {
   return { dir: fileURLToPath(new URL("../../examples", import.meta.url)), scope: "starter" };
 }
 
-/** Project, then home, then catalogs enabled in ~/.penguin/catalogs. Earlier wins. */
+/** The engine's own adapters, always installed last so anything else can shadow them. */
+export function builtinCatalog(): Catalog {
+  return { dir: fileURLToPath(new URL("..", import.meta.url)), scope: "builtin" };
+}
+
+/** Project, then home, then catalogs enabled in ~/.penguin/catalogs, then builtin. Earlier wins. */
 export function roots(cwd: string): Catalog[] {
-  return [projectCatalog(cwd), homeCatalog(), ...enabled()];
+  return [projectCatalog(cwd), homeCatalog(), ...enabled(), builtinCatalog()];
 }
 
 export function workflowsDir(catalog: Catalog): string {

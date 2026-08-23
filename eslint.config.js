@@ -64,7 +64,12 @@ export default [
     },
   },
   {
-    files: ["packages/engine/src/host.ts", "packages/engine/src/paths.ts", "packages/engine/src/trace.ts"],
+    files: [
+      "packages/engine/src/host.ts",
+      "packages/engine/src/paths.ts",
+      "packages/engine/src/config.ts",
+      "packages/engine/src/trace.ts",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -73,6 +78,22 @@ export default [
             {
               group: ["**/catalog/**"],
               message: "only run.ts orchestrates the catalog",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/engine/src/adapters/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/host*", "**/catalog/**", "**/run*", "**/trace*", "**/config*"],
+              message: "builtin adapters depend only on core",
             },
           ],
         },

@@ -1,117 +1,127 @@
-import { expect, test } from "bun:test";
-import { PassThrough } from "node:stream";
+import { afterEach, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { z } from "zod";
-import { createTerminal, type View } from "../examples/adapters/view.ts";
+import { createFilesView } from "../src/adapters/files-view.ts";
+import { menuOf, type View } from "../src/core/index.ts";
 
-function terminal(): { view: View; input: PassThrough; text: () => string } {
-  const input = new PassThrough();
-  const output = new PassThrough();
-  let seen = "";
-  output.on("data", (chunk: Buffer) => {
-    seen += chunk.toString();
-  });
-  return { view: createTerminal(input, output), input, text: () => seen };
+let temps: string[] = [];
+
+function filesView(): { view: View; dir: string; sent: (line: Record<string, unknown>) => void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-view-"));
+  temps.push(dir);
+  fs.writeFileSync(path.join(dir, "run.jsonl"), "");
+  fs.writeFileSync(path.join(dir, "inbox.jsonl"), "");
+  return {
+    view: createFilesView(dir),
+    dir,
+    sent: (line) => {
+      fs.appendFileSync(path.join(dir, "inbox.jsonl"), `${JSON.stringify(line)}\n`);
+    },
+  };
 }
 
-test("ask resolves with the raw line when no shape is given", async () => {
-  const { view, input } = terminal();
+function written(dir: string): string {
+  return fs.readFileSync(path.join(dir, "run.jsonl"), "utf8");
+}
+
+afterEach(() => {
+  for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true });
+  temps = [];
+});
+
+test("an answer line settles a plain ask with its text", async () => {
+  const { view, sent } = filesView();
   const answer = view.ask("name?");
-  input.write("pip\n");
+  sent({ answer: "pip" });
   expect(await answer).toBe("pip");
 });
 
-test("a typed ask rejects what does not fit and asks again", async () => {
-  const { view, input, text } = terminal();
+test("a typed answer that does not fit is rejected in the run file, the ask stays open", async () => {
+  const { view, dir, sent } = filesView();
   const answer = view.ask("pick", z.enum(["a", "b"]));
-  input.write("zzz\n");
-  input.write("a\n");
+  sent({ answer: "zzz" });
+  await Bun.sleep(300);
+  expect(written(dir)).toContain('"rejected":"zzz"');
+  sent({ answer: "a" });
   expect(await answer).toBe("a");
-  expect(text()).toContain("does not fit");
 });
 
 test("a typed ask parses JSON answers into shaped values", async () => {
-  const { view, input } = terminal();
+  const { view, sent } = filesView();
   const answer = view.ask("how many?", z.number());
-  input.write("4\n");
+  sent({ answer: "4" });
   expect(await answer).toBe(4);
 });
 
 test("parallel asks answer in order, one at a time", async () => {
-  const { view, input } = terminal();
+  const { view, sent } = filesView();
   const first = view.ask("one?");
   const second = view.ask("two?");
-  input.write("1\n2\n");
+  sent({ answer: "1" });
+  sent({ answer: "2" });
   expect(await first).toBe("1");
   expect(await second).toBe("2");
 });
 
-test("listen hears lines no ask claimed", async () => {
-  const { view, input } = terminal();
-  const messages = view.listen()[Symbol.asyncIterator]();
-  const waiting = messages.next();
-  input.write("hello there\n");
-  expect((await waiting).value).toEqual({ text: "hello there" });
-  await messages.return?.(undefined);
+test("an array answer fits an array shape without quoting tricks", async () => {
+  const { view, sent } = filesView();
+  const answer = view.ask("which?", z.array(z.enum(["a", "b", "c"])));
+  sent({ answer: ["a", "c"] });
+  expect(await answer).toEqual(["a", "c"]);
 });
 
-test("a pending ask takes the line, listeners get the rest", async () => {
-  const { view, input } = terminal();
+test("listen hears message lines and notes the listening state", async () => {
+  const { view, dir, sent } = filesView();
+  const messages = view.listen()[Symbol.asyncIterator]();
+  const waiting = messages.next();
+  sent({ message: "hello there" });
+  expect((await waiting).value).toEqual({ text: "hello there" });
+  await messages.return?.(undefined);
+  expect(written(dir)).toContain('"listening":true');
+  expect(written(dir)).toContain('"listening":false');
+});
+
+test("an answer line settles the ask, message lines reach the listener", async () => {
+  const { view, sent } = filesView();
   const messages = view.listen()[Symbol.asyncIterator]();
   const answer = view.ask("name?");
-  input.write("pip\n");
+  sent({ answer: "pip" });
   expect(await answer).toBe("pip");
   const waiting = messages.next();
-  input.write("after\n");
+  sent({ message: "after" });
   expect((await waiting).value).toEqual({ text: "after" });
   await messages.return?.(undefined);
 });
 
-test("a boolean ask offers yes and no as choices", async () => {
-  const { view, input, text } = terminal();
-  const answer = view.ask("ship it?", z.boolean());
-  input.write("1\n");
-  expect(await answer).toBe(true);
-  expect(text()).toContain("1. yes");
-  expect(text()).toContain("2. no");
+test("a boolean shape maps to yes and no", () => {
+  const menu = menuOf(z.boolean());
+  expect(menu?.choices.map((choice) => choice.label)).toEqual(["yes", "no"]);
+  expect(menu?.choices.map((choice) => choice.value)).toEqual([true, false]);
+  expect(menu?.other).toBe(false);
+  expect(menu?.many).toBe(false);
 });
 
-test("an enum ask lists its options and takes a pick by number or label", async () => {
-  const { view, input } = terminal();
-  const first = view.ask("worktree?", z.enum(["replace", "reuse", "stop"]));
-  input.write("3\n");
-  expect(await first).toBe("stop");
-  const second = view.ask("worktree?", z.enum(["replace", "reuse", "stop"]));
-  input.write("reuse\n");
-  expect(await second).toBe("reuse");
+test("an enum shape maps to its options", () => {
+  const menu = menuOf(z.enum(["replace", "reuse", "stop"]));
+  expect(menu?.choices.map((choice) => choice.label)).toEqual(["replace", "reuse", "stop"]);
+  expect(menu?.many).toBe(false);
 });
 
-test("an options-only ask refuses free text", async () => {
-  const { view, input, text } = terminal();
-  const answer = view.ask("pick", z.enum(["a", "b"]));
-  input.write("something else\n");
-  input.write("1\n");
-  expect(await answer).toBe("a");
-  expect(text()).toContain("pick an option");
+test("a union of options and text keeps the options and admits free text", () => {
+  const menu = menuOf(z.union([z.enum(["approve"]), z.string()]));
+  expect(menu?.choices.map((choice) => choice.label)).toEqual(["approve"]);
+  expect(menu?.other).toBe(true);
 });
 
-test("a union of options and text takes either", async () => {
-  const shape = z.union([z.enum(["approve"]), z.string()]);
-  const { view, input, text } = terminal();
-  const first = view.ask("review", shape);
-  input.write("make the button blue\n");
-  expect(await first).toBe("make the button blue");
-  const second = view.ask("review", shape);
-  input.write("1\n");
-  expect(await second).toBe("approve");
-  expect(text()).toContain("or type an answer");
+test("an array of options maps to a multi-select", () => {
+  const menu = menuOf(z.array(z.enum(["a", "b"])));
+  expect(menu?.many).toBe(true);
+  expect(menu?.choices.map((choice) => choice.label)).toEqual(["a", "b"]);
 });
 
-test("scope prefixes shows and questions with the path", async () => {
-  const { view, input, text } = terminal();
-  await view.scope("a").scope("b").show("hi");
-  expect(text()).toContain("[a/b] hi");
-  const answer = view.scope("web").ask("deploy?");
-  input.write("yes\n");
-  expect(await answer).toBe("yes");
-  expect(text()).toContain("? [web] deploy?");
+test("a free shape has no menu", () => {
+  expect(menuOf(z.string())).toBeUndefined();
+  expect(menuOf(z.object({ a: z.string() }))).toBeUndefined();
 });

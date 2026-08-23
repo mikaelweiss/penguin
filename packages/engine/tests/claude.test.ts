@@ -11,7 +11,10 @@ function fakeHost(
   const calls: Call[] = [];
   const host: Host = {
     cwd: "/",
+    home: "/tmp",
     state: "/tmp",
+    run: { id: "test", dir: "/tmp" },
+    config: () => undefined,
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: (argv, options) => {
       const call = { argv, options };

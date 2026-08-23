@@ -1,8 +1,10 @@
 export { PenguinError, messageOf } from "../core/errors.ts";
-export { catalogsFile, defaultsFile, home, projectHome } from "../paths.ts";
+export { readConfig } from "../config.ts";
+export { catalogsFile, configFile, home, projectHome, runsDir } from "../paths.ts";
 
 export {
   adaptersDir,
+  builtinCatalog,
   homeCatalog,
   projectCatalog,
   roots,
@@ -13,7 +15,6 @@ export {
 } from "./catalogs.ts";
 
 export {
-  defaults,
   installed,
   installedIn,
   loadAdapter,

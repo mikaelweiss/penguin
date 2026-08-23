@@ -6,6 +6,10 @@ import type { Host } from "../src/core/adapter.ts";
 import { createHost } from "../src/host.ts";
 import definition from "../examples/adapters/git.ts";
 
+function hostFor(dir: string): Host {
+  return createHost(dir, { id: "test", dir });
+}
+
 let temps: string[] = [];
 
 function tempDir(prefix: string): string {
@@ -27,7 +31,7 @@ async function git(host: Host, args: string[]): Promise<string> {
 
 async function repo(): Promise<{ dir: string; host: Host; vcs: ReturnType<typeof definition.build> }> {
   const dir = tempDir("penguin-git-");
-  const host = createHost(dir);
+  const host = hostFor(dir);
   await git(host, ["init", "-q"]);
   await git(host, ["config", "user.email", "test@test"]);
   await git(host, ["config", "user.name", "test"]);
@@ -69,7 +73,7 @@ test("a commit message with quotes survives intact", async () => {
 
 test("pull refuses to touch diverged work; resetHard is the explicit discard", async () => {
   const bare = tempDir("penguin-bare-");
-  await git(createHost(bare), ["init", "-q", "--bare"]);
+  await git(hostFor(bare), ["init", "-q", "--bare"]);
 
   const ours = await repo();
   await commitFile(ours, "base.txt", "base");
@@ -78,7 +82,7 @@ test("pull refuses to touch diverged work; resetHard is the explicit discard", a
   await git(ours.host, ["push", "-q", "-u", "origin", branch]);
 
   const theirsDir = tempDir("penguin-theirs-");
-  const theirs = { dir: theirsDir, host: createHost(theirsDir) };
+  const theirs = { dir: theirsDir, host: hostFor(theirsDir) };
   await git(theirs.host, ["clone", "-q", bare, "."]);
   await git(theirs.host, ["config", "user.email", "test@test"]);
   await git(theirs.host, ["config", "user.name", "test"]);
@@ -101,7 +105,7 @@ test("pull refuses to touch diverged work; resetHard is the explicit discard", a
 
 test("pull fast-forwards when histories have not diverged", async () => {
   const bare = tempDir("penguin-bare-");
-  await git(createHost(bare), ["init", "-q", "--bare"]);
+  await git(hostFor(bare), ["init", "-q", "--bare"]);
 
   const ours = await repo();
   await commitFile(ours, "base.txt", "base");
@@ -110,7 +114,7 @@ test("pull fast-forwards when histories have not diverged", async () => {
   await git(ours.host, ["push", "-q", "-u", "origin", branch]);
 
   const theirsDir = tempDir("penguin-theirs-");
-  const theirs = { dir: theirsDir, host: createHost(theirsDir) };
+  const theirs = { dir: theirsDir, host: hostFor(theirsDir) };
   await git(theirs.host, ["clone", "-q", bare, "."]);
   await git(theirs.host, ["config", "user.email", "test@test"]);
   await git(theirs.host, ["config", "user.name", "test"]);

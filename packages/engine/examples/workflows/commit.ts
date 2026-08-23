@@ -43,7 +43,8 @@ export default workflow({
     const turn = agent.turn(session, PICK, { result: Commit });
     for await (const chunk of turn.output) {
       if (chunk.kind === "text") await view.show(chunk.text);
-      if (chunk.kind === "tool") await view.show(`  ${chunk.text}: ${chunk.detail ?? ""}`);
+      if (chunk.kind === "tool")
+        await view.show(`${chunk.text}: ${chunk.detail ?? ""}`, { kind: "tool" });
     }
     const written = await turn.value;
     if (written.files.length === 0) {

@@ -11,7 +11,7 @@ export default workflow({
     const results = await Promise.all(
       params.dirs.map(async (dir) => ({
         dir,
-        done: await call({ ...ctx, view: ctx.view.scope(dir) }, commit, { dir }),
+        done: await call(ctx, commit, { dir }),
       })),
     );
     const committed = results.filter((entry) => entry.done.committed);
