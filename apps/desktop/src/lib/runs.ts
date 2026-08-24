@@ -188,11 +188,9 @@ function problemOf(entries: Entry[], waiting: Entry): string | undefined {
   return refused === undefined ? undefined : text(refused["problem"]);
 }
 
-/** The transcript, without the question the composer is already pinning. */
-function outputOf(entries: Entry[], pinned: Entry | undefined): OutputLine[] {
+function outputOf(entries: Entry[]): OutputLine[] {
   const lines: OutputLine[] = [];
   for (const entry of entries) {
-    if (entry === pinned) continue;
     const args = argsOf(entry);
     const at = text(entry["at"]) ?? "";
     if (entry["call"] === "view.show" && entry["pending"] === true) {
@@ -245,7 +243,7 @@ function place(file: RunFile): Placed | undefined {
       ...(ask === undefined ? {} : { ask }),
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
-      output: outputOf(file.entries, waiting),
+      output: outputOf(file.entries),
       children: [],
     },
     parent: text(head["parent"]),

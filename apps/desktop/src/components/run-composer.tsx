@@ -146,20 +146,13 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
         onPaste={onPaste}
         className={cn(hovering && "border-ring ring-3 ring-ring/50")}
       >
-        {run.ask ? (
+        {menu === undefined && run.ask?.problem === undefined ? null : (
           <InputGroupAddon
             align="block-start"
             className="flex-col items-stretch gap-2.5 border-b cursor-default select-text"
           >
-            <InputGroupText className="items-start font-mono text-[0.8125rem]/6 text-warning">
-              <span aria-hidden="true" className="w-3 shrink-0">
-                ?
-              </span>
-              <span className="min-w-0 flex-1 whitespace-pre-wrap">{run.ask.prompt}</span>
-            </InputGroupText>
-
             {menu === undefined ? null : menu.many ? (
-              <FieldGroup ref={choices} onKeyDown={onChoiceKeys} className="gap-2 ps-3">
+              <FieldGroup ref={choices} onKeyDown={onChoiceKeys} className="gap-2">
                 {rows}
               </FieldGroup>
             ) : (
@@ -170,19 +163,19 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
                 onKeyDown={onChoiceKeys}
                 aria-label="answers"
                 loop={false}
-                className="gap-2 ps-3"
+                className="gap-2"
               >
                 {rows}
               </RadioGroup>
             )}
 
-            {run.ask.problem ? (
+            {run.ask?.problem ? (
               <InputGroupText className="items-start font-mono text-[0.8125rem]/6 text-destructive">
                 {run.ask.problem}
               </InputGroupText>
             ) : null}
           </InputGroupAddon>
-        ) : null}
+        )}
 
         {attach.files.length > 0 ? (
           <InputGroupAddon align="block-start" className="border-b">
