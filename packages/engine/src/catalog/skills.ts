@@ -32,6 +32,24 @@ export function locateSkill(name: string, list: catalogs.Catalog[]): SkillFound 
   return skillsIn(list).find((entry) => entry.name === name);
 }
 
+/** Resolves a skill by name against the given catalogs, naming what is installed when it misses. */
+export function skillLookup(list: catalogs.Catalog[]): (name: string) => Skill {
+  return (name) => {
+    const found = locateSkill(name, list);
+    if (found === undefined) {
+      const names = skillsIn(list)
+        .map((entry) => entry.name)
+        .join(", ");
+      throw new PenguinError(
+        names === ""
+          ? `no skill named ${name} is installed`
+          : `no skill named ${name}. Installed: ${names}`,
+      );
+    }
+    return readSkill(found.dir);
+  };
+}
+
 export function searchedSkills(cwd: string): string[] {
   return catalogs.roots(cwd).map(catalogs.skillsDir);
 }

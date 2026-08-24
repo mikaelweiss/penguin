@@ -3,10 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Host } from "./core/adapter.ts";
+import { roots } from "./catalog/catalogs.ts";
+import { skillLookup } from "./catalog/skills.ts";
 import { createHost } from "./host.ts";
 
 function hostFor(dir: string): Host {
-  return createHost(dir, { id: "test", dir });
+  return createHost(dir, { id: "test", dir }, skillLookup(roots(dir)));
 }
 
 let temps: string[] = [];
@@ -73,7 +75,7 @@ test("skill reads one skill from the given catalogs", () => {
     path.join(dir, "skills", "greet", "SKILL.md"),
     "---\nname: greet\ndescription: greets. Use for tests.\n---\n\nSay hello.\n",
   );
-  const host = createHost(dir, { id: "test", dir }, [{ dir, scope: "project" }]);
+  const host = createHost(dir, { id: "test", dir }, skillLookup([{ dir, scope: "project" }]));
   const skill = host.skill("greet");
   expect(skill.description).toBe("greets. Use for tests.");
   expect(skill.text).toBe("Say hello.");
@@ -87,7 +89,7 @@ test("an unknown skill throws and names the installed ones", () => {
     path.join(dir, "skills", "greet", "SKILL.md"),
     "---\nname: greet\ndescription: greets. Use for tests.\n---\n\nSay hello.\n",
   );
-  const host = createHost(dir, { id: "test", dir }, [{ dir, scope: "project" }]);
+  const host = createHost(dir, { id: "test", dir }, skillLookup([{ dir, scope: "project" }]));
   expect(() => host.skill("missing")).toThrow("no skill named missing. Installed: greet");
 });
 

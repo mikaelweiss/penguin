@@ -3,11 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Host } from "../src/core/adapter.ts";
+import { roots } from "../src/catalog/catalogs.ts";
+import { skillLookup } from "../src/catalog/skills.ts";
 import { createHost } from "../src/host.ts";
 import definition from "../examples/adapters/git.ts";
 
 function hostFor(dir: string): Host {
-  return createHost(dir, { id: "test", dir });
+  return createHost(dir, { id: "test", dir }, skillLookup(roots(dir)));
 }
 
 let temps: string[] = [];

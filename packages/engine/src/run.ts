@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { installedIn, pick } from "./catalog/adapters.ts";
 import { builtinCatalog, roots, type Catalog } from "./catalog/catalogs.ts";
 import { load } from "./catalog/loader.ts";
+import { skillLookup } from "./catalog/skills.ts";
 import { PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
 import { RUN, type RunHooks } from "./core/workflow.ts";
 import { createHost } from "./host.ts";
@@ -45,7 +46,7 @@ export async function run(
   );
   const list =
     options?.catalogs === undefined ? roots(cwd) : [...options.catalogs, builtinCatalog()];
-  const host = createHost(cwd, { id, dir: trace.dir }, list);
+  const host = createHost(cwd, { id, dir: trace.dir }, skillLookup(list));
   const found = await installedIn(list);
   const ctx: Record<PropertyKey, unknown> = { params: parsed };
   for (const role of new Set(found.map((entry) => entry.role))) {

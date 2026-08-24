@@ -32,6 +32,7 @@ export {
   locateSkill,
   readSkill,
   searchedSkills,
+  skillLookup,
   skillsIn,
   type SkillFound,
 } from "./skills.ts";

@@ -1,36 +1,23 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { roots, type Catalog } from "./catalog/catalogs.ts";
-import { locateSkill, readSkill, skillsIn } from "./catalog/skills.ts";
 import { readConfig } from "./config.ts";
-import type { CommandResult, ExecOptions, Host, RunLocation } from "./core/adapter.ts";
+import type { CommandResult, ExecOptions, Host, RunLocation, Skill } from "./core/adapter.ts";
 import { PenguinError } from "./core/errors.ts";
 import { home, stateRoot } from "./paths.ts";
 
-export function createHost(cwd: string, location: RunLocation, catalogs?: Catalog[]): Host {
+/** Resolves a skill by name. The caller owns which catalogs are in play. */
+export type SkillLookup = (name: string) => Skill;
+
+export function createHost(cwd: string, location: RunLocation, skill: SkillLookup): Host {
   const resolve = (relative: string | undefined): string => path.resolve(cwd, relative ?? ".");
   const settings = readConfig();
-  const list = (): Catalog[] => catalogs ?? roots(cwd);
   return {
     cwd,
     home: home(),
     state: stateRoot(),
     run: location,
     config: (key) => settings.get(key),
-    skill: (name) => {
-      const found = locateSkill(name, list());
-      if (found === undefined) {
-        const names = skillsIn(list())
-          .map((entry) => entry.name)
-          .join(", ");
-        throw new PenguinError(
-          names === ""
-            ? `no skill named ${name} is installed`
-            : `no skill named ${name}. Installed: ${names}`,
-        );
-      }
-      return readSkill(found.dir);
-    },
+    skill,
     shell: (cmd, options) => run(cmd, undefined, resolve(options?.cwd), options),
     exec: (argv, options) => {
       const [cmd, ...args] = argv;
