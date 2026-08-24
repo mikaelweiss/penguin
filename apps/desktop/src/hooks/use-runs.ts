@@ -20,6 +20,7 @@ export function useRuns(dirs: string[]): Runs {
 
   useEffect(() => {
     let tracked = new Map<string, Tracked>();
+    let published = false;
     let stopped = false;
     let timer = 0;
 
@@ -28,7 +29,8 @@ export function useRuns(dirs: string[]): Runs {
       for (const [id, file] of tracked) offsets[id] = file.offset;
 
       const updates = await readRuns(offsets);
-      let changed = updates.length !== tracked.size;
+      // These directories are new, so they need a first draw even when no run file has grown.
+      let changed = !published || updates.length !== tracked.size;
 
       const next = new Map<string, Tracked>();
       for (const update of updates) {
@@ -47,7 +49,9 @@ export function useRuns(dirs: string[]): Runs {
       }
 
       tracked = next;
-      if (changed) setProjects(toProjects([...next.values()], dirs));
+      if (!changed) return;
+      published = true;
+      setProjects(toProjects([...next.values()], dirs));
     };
 
     const loop = async () => {
