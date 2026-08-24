@@ -18,7 +18,7 @@ Never run npm, pnpm, or yarn.
     bun run check                  # root tsc, then nx typecheck, then eslint
     nx run-many -t typecheck       # apps/desktop and packages/ui
     eslint .
-    bun run tauri dev              # from apps/desktop
+    bun run desktop                # tauri dev, from anywhere
     nx serve docs
 
 Root `tsc` covers the Bun-side projects. `apps/desktop` and `packages/ui` are

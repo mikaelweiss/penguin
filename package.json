@@ -18,6 +18,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit && nx run-many -t typecheck && eslint .",
+    "desktop": "nx serve desktop",
     "docs": "nx serve docs",
     "graph": "nx graph"
   },

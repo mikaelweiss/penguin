@@ -8,5 +8,5 @@ Tauri v2 + Vite + React.
   Anything reusable and presentational belongs in `@workspace/ui`.
 - Import the design system by name, `@workspace/ui/components/button`.
   Relative paths into `packages/` are an eslint error.
-- `bun run tauri dev` runs the app. Plain `vite` opens a browser where every
-  `invoke()` throws.
+- `bun run desktop` from the repo root runs the app. Plain `vite` opens a
+  browser where every `invoke()` throws.

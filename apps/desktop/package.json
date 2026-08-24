@@ -30,12 +30,22 @@
   },
   "nx": {
     "name": "desktop",
-    "tags": ["scope:desktop"],
+    "tags": [
+      "scope:desktop"
+    ],
     "targets": {
       "typecheck": {
         "command": "tsc -b",
-        "options": { "cwd": "{projectRoot}" },
+        "options": {
+          "cwd": "{projectRoot}"
+        },
         "cache": true
+      },
+      "serve": {
+        "command": "tauri dev",
+        "options": {
+          "cwd": "{projectRoot}"
+        }
       }
     }
   }

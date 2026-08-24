@@ -41,5 +41,5 @@ options side by side in the browser before committing to one.
 ## Verify
 
 - `bun run check` passes.
-- The page renders in `bun run tauri dev`, light and dark, with `d` toggling.
+- The page renders in `bun run desktop`, light and dark, with `d` toggling.
 - No raw palette colors, no `tailwind.config.js`, no hand-styled primitives.
