@@ -10,7 +10,8 @@ type Job = {
   params: unknown;
   cwd: string;
   id: string;
-  parent: string;
+  /** Absent when a frontend starts a root run this way. */
+  parent?: string;
   catalogs: RunOptions["catalogs"];
 };
 
