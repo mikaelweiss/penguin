@@ -20,7 +20,7 @@
     <h2>State</h2>
 
     <ul role="list">
-      <li>Every run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>: <code>run.jsonl</code> the run writes, <code>inbox.jsonl</code> frontends append to.</li>
+      <li>Every run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>: <code>run.jsonl</code> the run writes, <code>inbox.jsonl</code> frontends append to, <code>files/</code> holding what you paste.</li>
       <li>The app is a reader plus an inbox writer. Its only state is settings.</li>
       <li>Quitting the app changes nothing. Runs keep going; reopening reads the files.</li>
       <li>Runs started from the CLI appear too. Same files, same tree.</li>
@@ -70,6 +70,19 @@
       <li>Clicking it expands the recent activity stream. It leaves when the run finishes.</li>
       <li>No progress bars. Structure comes from narration, liveness from the activity line.</li>
       <li>A sent message shows in the transcript right away.</li>
+    </ul>
+
+    <h2>Attachments</h2>
+
+    <ul role="list">
+      <li>Paste an image or a file into the input area to attach it. Dragging one onto the input area does the same.</li>
+      <li>The input area outlines itself while a drag hovers it.</li>
+      <li>Attachments preview in a row above the input: a thumbnail for an image, an icon and the file name for anything else.</li>
+      <li>Each preview has a button that removes it.</li>
+      <li>A pasted image has no path yet, so the app writes it into the run's <code>files/</code> directory.</li>
+      <li>A dropped file keeps the path it already has. Nothing is copied.</li>
+      <li>The message sends paths, never bytes: one path per line, then the typed text. The agent opens the files itself.</li>
+      <li>The transcript shows a sent message with the same previews.</li>
     </ul>
 
     <h2>Panels</h2>
