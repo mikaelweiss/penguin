@@ -22,6 +22,7 @@ import {
 import { Spinner } from "@workspace/ui/components/spinner";
 import { cn } from "@workspace/ui/lib/utils";
 
+import { ReadingCatalogs } from "@/components/reading-catalogs";
 import { WorkflowParams } from "@/components/workflow-params";
 import { fill, initialValues, paramsOf } from "@/lib/params";
 import type { Values } from "@/lib/params";
@@ -194,10 +195,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
               <CommandInput placeholder="Search workflows" />
               <CommandList>
                 {reading ? (
-                  <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-                    <Spinner />
-                    Reading the catalogs
-                  </div>
+                  <ReadingCatalogs />
                 ) : (
                   <CommandEmpty>No workflow matches.</CommandEmpty>
                 )}
