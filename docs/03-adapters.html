@@ -99,6 +99,7 @@ export default adapter({
   state: string;
   run: { id: string; dir: string };
   config(key: string): string | undefined;
+  skill(name: string): Skill;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
   exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
 };</code></pre>
@@ -110,7 +111,10 @@ export default adapter({
       this run's id and folder, which is how the builtin view finds the run's inbox.
       <code>config(key)</code> reads one line of <code>~/.penguin/config</code>: the git adapter
       puts worktrees at the configured <code>worktrees</code> path, falling back to
-      <code>~/.penguin/worktrees/&lt;project&gt;/&lt;name&gt;</code>. Without these, every adapter
+      <code>~/.penguin/worktrees/&lt;project&gt;/&lt;name&gt;</code>.
+      <code>skill(name)</code> reads one skill from the run's catalogs, project first: its
+      description, folder, and SKILL.md body, which is how the agent adapter turns
+      <code>{ skill: "commit" }</code> into a prompt. Without these, every adapter
       would invent its own hidden folder.
     </p>
 
@@ -199,7 +203,8 @@ await git(["commit", "-m", message], options?.cwd);</code></pre>
         <code>refs/remotes/origin/HEAD</code> and answers <code>ok: false</code> when it is unset,
         rather than assuming <code>main</code>. <code>worktree.add</code> answers
         <code>{ ok: false, exists: true }</code> when the target folder is already there, so the
-        workflow chooses between reusing it and failing.
+        workflow chooses between reusing it and failing. On success it appends a
+        <code>{"dir": ...}</code> note to the run's file, so frontends follow the run there.
       </li>
       <li>
         A destructive function carries its danger in its name. <code>pull</code> fast-forwards and

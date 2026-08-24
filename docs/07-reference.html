@@ -51,7 +51,7 @@
           </tr>
           <tr>
             <td><code>src/core/adapter.ts</code></td>
-            <td><code>Adapter</code>, <code>Host</code>, <code>RunLocation</code>, <code>CommandResult</code>, <code>adapter()</code></td>
+            <td><code>Adapter</code>, <code>Host</code>, <code>RunLocation</code>, <code>Skill</code>, <code>CommandResult</code>, <code>adapter()</code></td>
           </tr>
           <tr>
             <td><code>src/core/view.ts</code></td>
@@ -80,6 +80,10 @@
           <tr>
             <td><code>src/catalog/workflows.ts</code></td>
             <td>Listing and locating workflow files</td>
+          </tr>
+          <tr>
+            <td><code>src/catalog/skills.ts</code></td>
+            <td>Listing, locating, and reading skills: <code>skillsIn</code>, <code>locateSkill</code>, <code>readSkill</code></td>
           </tr>
           <tr>
             <td><code>src/catalog/loader.ts</code></td>
@@ -111,7 +115,11 @@
           </tr>
           <tr>
             <td><code>src/child.ts</code></td>
-            <td>The entrypoint a sub-run process starts from</td>
+            <td>The entrypoint a run process starts from: sub-runs always, root runs when a frontend spawns them detached</td>
+          </tr>
+          <tr>
+            <td><code>src/describe.ts</code></td>
+            <td><code>describe(cwd)</code>: the catalogs as plain JSON, runnable as <code>bun describe.ts [cwd]</code></td>
           </tr>
           <tr>
             <td><code>src/trace.ts</code></td>
@@ -147,6 +155,10 @@
           <tr>
             <td><code>examples/adapters/claude.ts</code></td>
             <td>role <code>agent</code>, name <code>claude</code></td>
+          </tr>
+          <tr>
+            <td><code>examples/skills/commit/SKILL.md</code></td>
+            <td>The instructions the commit workflow's turn runs on.</td>
           </tr>
           <tr>
             <td><code>examples/workflows/commit.ts</code></td>
@@ -263,9 +275,12 @@ type Host = {
   state: string;
   run: { id: string; dir: string };
   config(key: string): string | undefined;
+  skill(name: string): Skill;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
   exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
 };
+
+type Skill = { name: string; description: string; dir: string; text: string };
 
 type CommandResult = { code: number; stdout: string; stderr: string };
 
@@ -303,8 +318,8 @@ type ExecOptions = ShellOptions &amp; {
             <td>One catalog each.</td>
           </tr>
           <tr>
-            <td><code>workflowsDir</code>, <code>adaptersDir</code></td>
-            <td>The two subfolders of a catalog.</td>
+            <td><code>workflowsDir</code>, <code>adaptersDir</code>, <code>skillsDir</code></td>
+            <td>The three subfolders of a catalog.</td>
           </tr>
           <tr>
             <td><code>installed(cwd)</code>, <code>installedIn(list)</code></td>
@@ -323,7 +338,15 @@ type ExecOptions = ShellOptions &amp; {
             <td>Workflow files, all of them or the first by name.</td>
           </tr>
           <tr>
-            <td><code>searchedWorkflows</code>, <code>searchedAdapters</code></td>
+            <td><code>foundSkills(cwd)</code>, <code>skillsIn(list)</code>, <code>locateSkill(name, list)</code></td>
+            <td>Skills found, deduped by name, earlier catalog winning.</td>
+          </tr>
+          <tr>
+            <td><code>readSkill(dir)</code></td>
+            <td>One skill folder's SKILL.md as a <code>Skill</code>, or <code>PenguinError</code>.</td>
+          </tr>
+          <tr>
+            <td><code>searchedWorkflows</code>, <code>searchedAdapters</code>, <code>searchedSkills</code></td>
             <td>Which folders were looked in, for an error message.</td>
           </tr>
           <tr>
@@ -333,7 +356,7 @@ type ExecOptions = ShellOptions &amp; {
           <tr>
             <td>
               <code>Catalog</code>, <code>CatalogScope</code>, <code>AdapterFound</code>,
-              <code>WorkflowFound</code>, <code>Picked</code>
+              <code>WorkflowFound</code>, <code>SkillFound</code>, <code>Picked</code>
             </td>
             <td>The shapes the above return.</td>
           </tr>
@@ -375,12 +398,22 @@ type ExecOptions = ShellOptions &amp; {
             <td>The newest run file, for <code>resume</code>.</td>
           </tr>
           <tr>
-            <td><code>createHost(cwd, run)</code></td>
+            <td><code>createHost(cwd, run, catalogs?)</code></td>
             <td>A <code>Host</code>, for a frontend wiring adapters by hand.</td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <h3>penguin/describe</h3>
+
+    <p>
+      <code>describe(cwd)</code> answers everything the catalogs hold for one folder as plain JSON:
+      each workflow with its description and params as JSON Schema, each skill, each adapter, plus
+      an <code>errors</code> list. A file that refuses to load keeps its slot with an
+      <code>error</code> field. Run as <code>bun src/describe.ts [cwd]</code> it prints the same
+      JSON, which is how a frontend reads the catalogs without importing definition files.
+    </p>
 
     <h2>Workspace conventions</h2>
 

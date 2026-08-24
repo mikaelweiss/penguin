@@ -16,7 +16,7 @@
     <h2>The API</h2>
 
     <pre><code>const session = await agent.open({ cwd: params.dir });
-const turn = agent.turn(session, PROMPT, { result: Commit });
+const turn = agent.turn(session, { skill: "commit" }, { result: Commit });
 for await (const chunk of turn.output) await view.show(chunk.text);
 const commit = await turn.value;</code></pre>
 
@@ -26,9 +26,13 @@ const commit = await turn.value;</code></pre>
         opens it, later turns resume it.
       </li>
       <li>
-        <code>turn(session, prompt)</code> returns a handle with two halves. <code>output</code> is an
+        <code>turn(session, ask)</code> returns a handle with two halves. <code>output</code> is an
         <code>AsyncIterable</code> of what the agent is doing. <code>value</code> is a promise of the
         result.
+      </li>
+      <li>
+        <code>ask</code> is <code>{ skill, prompt? }</code> or a prompt string. A skill carries the
+        reusable instructions; the prompt carries the dynamic part.
       </li>
       <li>
         Pass <code>{ result: Shape }</code> and <code>value</code> is typed as
@@ -45,6 +49,32 @@ const commit = await turn.value;</code></pre>
       Splitting <code>output</code> from <code>value</code> is the design. The stream is what
       happened, the value is what it produced, and the workflow decides whether the stream reaches a
       person.
+    </p>
+
+    <h2>Skills</h2>
+
+    <p>
+      Instructions an agent reuses live as skills, never as prose in workflow code. A skill is a
+      folder under a catalog's <code>skills/</code> holding a <code>SKILL.md</code> in the
+      <a href="https://agentskills.io/specification">Agent Skills format</a>:
+      <code>name</code> and <code>description</code> frontmatter, the instructions below, extra
+      files beside it. The name must match the folder. The starter catalog's
+      <code>skills/commit/</code> is the model.
+    </p>
+
+    <p>
+      A turn takes <code>{ skill: "commit" }</code> in place of a prompt string. The adapter
+      resolves the name through <code>host.skill()</code>, which searches the run's catalogs in
+      order, project first, so a project can shadow a shared skill. The adapter sends the skill's
+      body, then where the skill's files live when it has any, then the <code>prompt</code>. That
+      prompt is for runtime data only: the branch name, the file list, what a person typed. A
+      prompt string alone stays right when the whole ask is runtime data, the way
+      <code>steer</code> forwards a user's words.
+    </p>
+
+    <p>
+      The line to hold: if the text would be the same on every run, it is a skill. If it exists
+      only at run time, it is a prompt.
     </p>
 
     <h2>Chunks</h2>

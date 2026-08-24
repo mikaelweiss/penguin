@@ -61,7 +61,7 @@
 
     <p>
       Before the workflow sees them, each adapter is wrapped by <code>src/trace.ts</code>: a head
-      line with the run's id, pid, workflow, params, and parent opens
+      line with the run's id, pid, workflow, params, git root, and parent opens
       <code>~/.local/state/penguin/runs/&lt;id&gt;/run.jsonl</code>, then every call appends a
       pending line when it starts and an outcome line when it settles. The workflow never knows.
       This file is the run's whole story: frontends render it live, and when a run surprises you it
@@ -74,7 +74,7 @@
 
     <ol role="list">
       <li><code>vcs.dirty()</code> asks git whether there is anything to commit. A clean tree returns early with a full result. This is the reconciler pattern: inspect first, act on what is missing.</li>
-      <li><code>agent.open()</code> makes a session, <code>agent.turn(session, PICK, { result: Commit })</code> starts the claude CLI as a child process and returns a handle: <code>output</code>, a stream of chunks, and <code>value</code>, a promise of the schema-checked result.</li>
+      <li><code>agent.open()</code> makes a session, <code>agent.turn(session, { skill: "commit" }, { result: Commit })</code> loads the commit skill's instructions, starts the claude CLI as a child process, and returns a handle: <code>output</code>, a stream of chunks, and <code>value</code>, a promise of the schema-checked result.</li>
       <li>The workflow forwards chunks it chooses to <code>view.show</code>. Nothing reaches a person unless this loop sends it.</li>
       <li><code>await turn.value</code> is the typed answer: which files, what message. The adapter already retried once on a malformed result and validated the shape.</li>
       <li><code>vcs.stage(files)</code> then <code>vcs.commit(message)</code> act on the answer. The agent proposed; the workflow performs the deterministic steps itself.</li>

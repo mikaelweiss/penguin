@@ -9,18 +9,28 @@
 
     <p>The desktop app. One line per spec.</p>
 
+    <h2>Build</h2>
+
+    <ul role="list">
+      <li>Tauri. React, shadcn/ui, Lucide icons.</li>
+      <li>The app bundles bun and the engine. Installing the app is the whole install.</li>
+      <li>The app starts a run by spawning the engine's child entry detached, on the bundled bun.</li>
+    </ul>
+
     <h2>State</h2>
 
     <ul role="list">
       <li>Every run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>: <code>run.jsonl</code> the run writes, <code>inbox.jsonl</code> frontends append to.</li>
-      <li>The app is a reader plus an inbox writer. It holds no state of its own.</li>
+      <li>The app is a reader plus an inbox writer. Its only state is settings.</li>
       <li>Quitting the app changes nothing. Runs keep going; reopening reads the files.</li>
       <li>Runs started from the CLI appear too. Same files, same tree.</li>
       <li>The run tree is the parent id in each run's head line.</li>
+      <li>The head line records the git root, so a worktree run groups under its project.</li>
+      <li>A run that moves into a worktree appends a <code>{"dir": ...}</code> note; the newest one is the run's directory.</li>
       <li>Status is derived: live pid running, pending ask needs you, closing entry done, failed, or stopped, dead pid without one crashed.</li>
-      <li>Stopping a run kills its process group; the pid is in the head line.</li>
+      <li>Stopping a run kills its process group and every run inside it, pids from their head lines.</li>
       <li>Answers are <code>{"answer": ...}</code> lines, messages <code>{"message": "..."}</code> lines, appended to the run's inbox.</li>
-      <li>Rename appends a note to the run's file.</li>
+      <li>Rename appends a <code>{"name": ...}</code> note to the run's file; the newest one is the run's name.</li>
     </ul>
 
     <h2>Sidebar</h2>
@@ -83,6 +93,7 @@
       <li>A sheet to search and pick a workflow.</li>
       <li>Workflows are sorted by catalog.</li>
       <li>Picking one asks for its params, then starts the run.</li>
+      <li>The sheet's data comes from an engine describe run: each workflow's name, description, and params as JSON Schema, printed as JSON.</li>
     </ul>
 
     <h2>Catalogs</h2>
@@ -92,6 +103,7 @@
       <li>home: <code>~/.penguin</code> workflows, skills, adapters. Yours, every project.</li>
       <li>project: <code>.penguin</code> workflows, skills, adapters. In git.</li>
       <li>project local: same, kept out of git.</li>
+      <li>A skill is a folder under a catalog's <code>skills/</code> holding a SKILL.md, per the Agent Skills spec: name and description frontmatter, instructions below.</li>
     </ul>
 
     <h2>Project settings</h2>
@@ -110,12 +122,14 @@
       <li>Light and dark, with a toggle.</li>
       <li>Holds the worktrees directory. Default <code>~/.penguin/worktrees/&lt;project&gt;/&lt;run&gt;</code>.</li>
       <li>Holds the default agent adapter. Both write <code>~/.penguin/config</code>.</li>
+      <li>App-only settings, the directory list and theme, live in Tauri's app config dir.</li>
     </ul>
 
     <h2>Dreaming</h2>
 
     <ul role="list">
       <li>A workflow that runs in the background, suggesting improvements to your workflows and new ones from your patterns.</li>
+      <li>Behind a feature flag, hidden until the design settles.</li>
       <li>Off by default. On globally or per project.</li>
       <li>A project's dreams show a dot on that project's settings icon; global dreams on the app settings button.</li>
       <li>Inside settings, a dot marks the dreams row. Clicking it shows the suggestions.</li>

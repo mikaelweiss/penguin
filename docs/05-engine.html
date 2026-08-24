@@ -80,8 +80,8 @@
 
     <pre><code>const definition = await load(file);
 const parsed = definition.params.parse(params);
-const trace = createTrace({ id, workflow: file, params: parsed, cwd, parent });
-const host = createHost(cwd, { id, dir: trace.dir });
+const trace = createTrace({ id, workflow: file, params: parsed, cwd, root, parent });
+const host = createHost(cwd, { id, dir: trace.dir }, list);
 const found = await installedIn(list);
 for (const role of new Set(found.map((entry) =&gt; entry.role))) {
   const picked = pick(found, role);
@@ -105,7 +105,8 @@ return definition.run(ctx);</code></pre>
       child workflow as its own process, <code>bun src/child.ts</code>, with its own id, its own
       run folder, and this run recorded as its parent. The parent's file notes the child's id, and
       the child's outcome, throw, or stop comes back to the awaiting <code>call</code> from the
-      child's own file. Stopping a run is killing its process group; the pid is in the head line.
+      child's own file. Stopping a run is killing its process group; each child is its own group,
+      so stopping a subtree is walking the head-line pids and killing each.
     </p>
 
     <p>
@@ -118,13 +119,16 @@ return definition.run(ctx);</code></pre>
 
     <p>
       Each run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>, holding two files.
-      <code>run.jsonl</code> is written by the run alone: a head line with the run's id, pid,
-      workflow, params, cwd, and parent; a <code>pending</code> line when a call starts and a line
-      with its <code>outcome</code> and <code>elapsedMs</code> when it settles, the two sharing an
-      id; a note per spawned child; and the final result, error, or stop. Values are recorded
+      <code>run.jsonl</code> is written by the run: a head line with the run's id, pid,
+      workflow, params, cwd, git root, and parent; a <code>pending</code> line when a call starts
+      and a line with its <code>outcome</code> and <code>elapsedMs</code> when it settles, the two
+      sharing an id; a note per spawned child; a <code>{"dir": ...}</code> note when the run moves
+      its work into a worktree; and the final result, error, or stop. Values are recorded
       whole, with a zod shape written as its JSON Schema so a frontend can render the control an
       ask needs. A call that returns a live object (an open stream, a turn) is marked
-      <code>handle: true</code> instead, since an object like that cannot be written down.
+      <code>handle: true</code> instead, since an object like that cannot be written down. One
+      frontend note is allowed in: a <code>{"name": ...}</code> line renames the run, the newest
+      winning. Every writer appends whole single lines, which is what keeps two writers safe.
     </p>
 
     <p>
@@ -147,7 +151,8 @@ return definition.run(ctx);</code></pre>
     <h2>Catalogs</h2>
 
     <p>
-      A catalog is a folder with <code>workflows/</code> and <code>adapters/</code> inside it.
+      A catalog is a folder with <code>workflows/</code>, <code>adapters/</code>, and
+      <code>skills/</code> inside it.
       <code>roots(cwd)</code> returns the ones to scan, in order, and earlier wins.
     </p>
 
