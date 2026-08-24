@@ -9,6 +9,10 @@
       "types": "./src/core/index.ts",
       "default": "./src/core/index.ts"
     },
+    "./view": {
+      "types": "./src/core/view.ts",
+      "default": "./src/core/view.ts"
+    },
     "./catalog": {
       "types": "./src/catalog/index.ts",
       "default": "./src/catalog/index.ts"

@@ -1,14 +1,17 @@
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
 
 export type OutputLine = {
-  kind: "show" | "tool" | "ask" | "answer";
+  kind: "show" | "tool" | "ask" | "answer" | "message";
   text: string;
+  at: string;
 };
 
 export type Ask = {
   prompt: string;
   /** The JSON Schema the workflow asked with, when it named one. */
   schema: Record<string, unknown> | undefined;
+  /** Why the engine refused the last answer to this question. */
+  problem: string | undefined;
 };
 
 export type Run = {
@@ -17,6 +20,8 @@ export type Run = {
   status: RunStatus;
   dir: string;
   ask?: Ask;
+  /** The run is waiting on view.listen, so it can take a message. */
+  listening: boolean;
   output: OutputLine[];
   children: Run[];
 };
@@ -133,15 +138,16 @@ function statusOf(notes: Entry[], alive: boolean): RunStatus {
   return "done";
 }
 
-function askOf(entries: Entry[]): Ask | undefined {
+/** The question the run is stuck on, when one is still unanswered. */
+function waitingAsk(entries: Entry[]): Entry | undefined {
   const asks = entries.filter((entry) => entry["call"] === "view.ask");
   const settled = new Set(
     asks.filter((entry) => entry["pending"] !== true).map((entry) => entry["id"]),
   );
-  const waiting = asks.find(
-    (entry) => entry["pending"] === true && !settled.has(entry["id"]),
-  );
-  if (waiting === undefined) return undefined;
+  return asks.find((entry) => entry["pending"] === true && !settled.has(entry["id"]));
+}
+
+function askOf(entries: Entry[], waiting: Entry): Ask {
   const args = argsOf(waiting);
   const schema = args[1];
   return {
@@ -150,20 +156,30 @@ function askOf(entries: Entry[]): Ask | undefined {
       schema !== null && typeof schema === "object"
         ? (schema as Record<string, unknown>)
         : undefined,
+    problem: problemOf(entries, waiting),
   };
 }
 
-function outputOf(entries: Entry[]): OutputLine[] {
+/** The engine's complaint about the last answer, when it came after this question. */
+function problemOf(entries: Entry[], waiting: Entry): string | undefined {
+  const refused = entries.slice(entries.indexOf(waiting)).findLast((entry) => "rejected" in entry);
+  return refused === undefined ? undefined : text(refused["problem"]);
+}
+
+/** The transcript, without the question the composer is already pinning. */
+function outputOf(entries: Entry[], pinned: Entry | undefined): OutputLine[] {
   const lines: OutputLine[] = [];
   for (const entry of entries) {
+    if (entry === pinned) continue;
     const args = argsOf(entry);
+    const at = text(entry["at"]) ?? "";
     if (entry["call"] === "view.show" && entry["pending"] === true) {
       const options = args[1] as { kind?: string } | undefined;
-      lines.push({ kind: options?.kind === "tool" ? "tool" : "show", text: display(args[0]) });
+      lines.push({ kind: options?.kind === "tool" ? "tool" : "show", text: display(args[0]), at });
     } else if (entry["call"] === "view.ask" && entry["pending"] === true) {
-      lines.push({ kind: "ask", text: display(args[0]) });
+      lines.push({ kind: "ask", text: display(args[0]), at });
     } else if (entry["call"] === "view.ask" && "outcome" in entry) {
-      lines.push({ kind: "answer", text: display(entry["outcome"]) });
+      lines.push({ kind: "answer", text: display(entry["outcome"]), at });
     }
   }
   return lines;
@@ -189,8 +205,11 @@ function place(file: RunFile): Placed | undefined {
   const moved = notes.findLast((note) => text(note["dir"]) !== undefined);
   const renamed = notes.findLast((note) => text(note["name"]) !== undefined);
   const status = statusOf(notes, file.alive);
-  // A run that is no longer running cannot take an answer, whatever its last ask says.
-  const ask = status === "running" ? askOf(file.entries) : undefined;
+  const heard = notes.findLast((note) => typeof note["listening"] === "boolean");
+  // A run that is no longer running cannot take an answer or a message, whatever its notes say.
+  const waiting = status === "running" ? waitingAsk(file.entries) : undefined;
+  const ask = waiting === undefined ? undefined : askOf(file.entries, waiting);
+  const listening = status === "running" && heard?.["listening"] === true;
 
   return {
     run: {
@@ -199,7 +218,8 @@ function place(file: RunFile): Placed | undefined {
       status,
       dir: text(moved?.["dir"]) ?? cwd,
       ...(ask === undefined ? {} : { ask }),
-      output: outputOf(file.entries),
+      listening,
+      output: outputOf(file.entries, waiting),
       children: [],
     },
     parent: text(head["parent"]),

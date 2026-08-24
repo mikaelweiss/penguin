@@ -25,6 +25,7 @@ const MARKERS: Record<OutputLine["kind"], string> = {
   tool: "",
   ask: "?",
   answer: ">",
+  message: ">",
 };
 
 function markerColor(kind: OutputLine["kind"]): string {
@@ -58,7 +59,12 @@ const CLOSING: Partial<Record<Run["status"], string>> = {
   crashed: "run crashed",
 };
 
-export function RunTranscript({ run }: { run: Run | undefined }) {
+type RunTranscriptProps = {
+  run: Run | undefined;
+  sent: OutputLine[];
+};
+
+export function RunTranscript({ run, sent }: RunTranscriptProps) {
   if (!run) {
     return (
       <Empty className="flex-1">
@@ -74,16 +80,17 @@ export function RunTranscript({ run }: { run: Run | undefined }) {
   }
 
   const closing = CLOSING[run.status];
+  const lines = [...run.output, ...sent];
 
   return (
     <MessageScrollerProvider>
       <MessageScroller className="flex-1">
         <MessageScrollerViewport>
           <MessageScrollerContent className="gap-0 p-4">
-            {run.output.map((line, index) => (
+            {lines.map((line, index) => (
               <MessageScrollerItem
                 key={`${run.id}-${index}`}
-                scrollAnchor={index === run.output.length - 1}
+                scrollAnchor={index === lines.length - 1}
               >
                 <TranscriptLine line={line} />
               </MessageScrollerItem>

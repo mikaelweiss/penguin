@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use tauri::Manager;
@@ -79,11 +79,36 @@ fn read_runs(app: tauri::AppHandle, offsets: HashMap<String, u64>) -> Vec<RunUpd
         .collect()
 }
 
+/// A run id names one folder under the runs directory. Anything else is refused.
+fn run_folder(runs: PathBuf, id: &str) -> Option<PathBuf> {
+    if id.is_empty() || id.starts_with('.') || id.contains(std::path::is_separator) {
+        return None;
+    }
+    Some(runs.join(id))
+}
+
+fn append_line(dir: &PathBuf, entry: &serde_json::Value) -> std::io::Result<()> {
+    let mut file = File::options()
+        .create(true)
+        .append(true)
+        .open(dir.join("inbox.jsonl"))?;
+    writeln!(file, "{entry}")
+}
+
+/// One line onto a run's inbox. The engine reads `{"answer": ...}` and `{"message": "..."}` from it.
+#[tauri::command]
+fn append_inbox(app: tauri::AppHandle, id: String, entry: serde_json::Value) -> Result<(), String> {
+    let dir = runs_dir(&app)
+        .and_then(|runs| run_folder(runs, &id))
+        .ok_or_else(|| format!("no inbox for {id}"))?;
+    append_line(&dir, &entry).map_err(|cause| cause.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![read_runs])
+        .invoke_handler(tauri::generate_handler![read_runs, append_inbox])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -91,7 +116,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     fn run_file(dir: &std::path::Path, pid: i32, lines: &[&str]) -> PathBuf {
         std::fs::create_dir_all(dir).unwrap();
@@ -159,5 +183,25 @@ mod tests {
         let dir = temp("empty");
         std::fs::create_dir_all(&dir).unwrap();
         assert!(update("r".into(), dir.join("run.jsonl"), 0).is_none());
+    }
+
+    #[test]
+    fn an_inbox_line_lands_as_its_own_json_line() {
+        let dir = temp("inbox");
+        std::fs::create_dir_all(&dir).unwrap();
+        append_line(&dir, &serde_json::json!({ "answer": "yes" })).unwrap();
+        append_line(&dir, &serde_json::json!({ "message": "stop" })).unwrap();
+
+        let text = std::fs::read_to_string(dir.join("inbox.jsonl")).unwrap();
+        assert_eq!(text, "{\"answer\":\"yes\"}\n{\"message\":\"stop\"}\n");
+    }
+
+    #[test]
+    fn an_id_that_leaves_the_runs_directory_is_refused() {
+        let runs = temp("runs");
+        assert!(run_folder(runs.clone(), "..").is_none());
+        assert!(run_folder(runs.clone(), "../elsewhere").is_none());
+        assert!(run_folder(runs.clone(), "").is_none());
+        assert_eq!(run_folder(runs.clone(), "a-run"), Some(runs.join("a-run")));
     }
 }

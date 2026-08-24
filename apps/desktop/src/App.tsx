@@ -6,16 +6,21 @@ import { Separator } from "@workspace/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/sidebar";
 import { TooltipProvider } from "@workspace/ui/components/tooltip";
 
+import { RunActivity } from "@/components/run-activity";
 import { RunBreadcrumb } from "@/components/run-breadcrumb";
+import { RunComposer } from "@/components/run-composer";
 import { RunSidebar } from "@/components/run-sidebar";
 import { RunTranscript } from "@/components/run-transcript";
+import { useInbox } from "@/hooks/use-inbox";
 import { useRuns } from "@/hooks/use-runs";
 import { findRun } from "@/lib/runs";
 
 export function App() {
   const { projects, error } = useRuns();
+  const inbox = useInbox();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const selected = findRun(projects, selectedId);
+  const run = selected?.run;
 
   return (
     <TooltipProvider>
@@ -43,7 +48,18 @@ export function App() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : (
-            <RunTranscript run={selected?.run} />
+            <>
+              <RunTranscript run={run} sent={run === undefined ? [] : (inbox.sent[run.id] ?? [])} />
+              {run ? <RunActivity run={run} /> : null}
+              {run !== undefined && (run.ask !== undefined || run.listening) ? (
+                <RunComposer
+                  key={`${run.id}:${run.ask?.prompt ?? ""}`}
+                  run={run}
+                  error={inbox.error}
+                  onSend={(entry) => inbox.send(run.id, entry)}
+                />
+              ) : null}
+            </>
           )}
         </SidebarInset>
       </SidebarProvider>
