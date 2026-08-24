@@ -21,3 +21,8 @@ export function stopRuns(ids: string[]): Promise<void> {
 export function renameRun(id: string, name: string): Promise<void> {
   return invoke("rename_run", { id, name });
 }
+
+/** What a run wrote to stderr. A crashed run left its reason only there. */
+export function readRunLog(id: string): Promise<string> {
+  return invoke<string>("read_run_log", { id });
+}

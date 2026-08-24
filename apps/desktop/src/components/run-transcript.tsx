@@ -19,6 +19,7 @@ import {
 import { cn } from "@workspace/ui/lib/utils";
 
 import { AttachmentRow } from "@/components/attachment-row";
+import { useRunLog } from "@/hooks/use-run-log";
 import type { OutputLine, Run } from "@/lib/runs";
 
 const MARKERS: Record<OutputLine["kind"], string> = {
@@ -27,10 +28,13 @@ const MARKERS: Record<OutputLine["kind"], string> = {
   ask: "?",
   answer: ">",
   message: ">",
+  problem: "!",
 };
 
 function markerColor(kind: OutputLine["kind"]): string {
-  return kind === "ask" ? "text-warning" : "text-muted-foreground";
+  if (kind === "ask") return "text-warning";
+  if (kind === "problem") return "text-destructive";
+  return "text-muted-foreground";
 }
 
 function TranscriptLine({ line }: { line: OutputLine }) {
@@ -45,6 +49,7 @@ function TranscriptLine({ line }: { line: OutputLine }) {
             className={cn(
               "min-w-0 flex-1 whitespace-pre-wrap",
               line.kind === "tool" && "ps-4 text-muted-foreground",
+              line.kind === "problem" && "text-destructive",
             )}
           >
             {line.text}
@@ -69,6 +74,8 @@ type RunTranscriptProps = {
 };
 
 export function RunTranscript({ run, sent }: RunTranscriptProps) {
+  const log = useRunLog(run);
+
   if (!run) {
     return (
       <Empty className="flex-1">
@@ -84,6 +91,7 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
   }
 
   const closing = CLOSING[run.status];
+  const reason = run.problem ?? log;
   const lines = [...run.output, ...sent];
 
   return (
@@ -106,6 +114,11 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
                 </div>
               </MessageScrollerItem>
             ) : null}
+            {reason === undefined ? null : (
+              <MessageScrollerItem>
+                <TranscriptLine line={{ kind: "problem", text: reason, at: "" }} />
+              </MessageScrollerItem>
+            )}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />

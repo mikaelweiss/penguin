@@ -168,6 +168,20 @@ fn read_attachment(path: String) -> Result<tauri::ipc::Response, String> {
         .map_err(|cause| cause.to_string())
 }
 
+/// A run's stderr. A run the app did not start wrote none, which is not a failure to report.
+fn start_log(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("start.log")).unwrap_or_default()
+}
+
+/// What a run said on stderr. A run that crashed before its own file says why left it only here.
+#[tauri::command]
+fn read_run_log(app: tauri::AppHandle, id: String) -> Result<String, String> {
+    let dir = runs_dir(&app)
+        .and_then(|runs| run_folder(runs, &id))
+        .ok_or_else(|| format!("no run named {id}"))?;
+    Ok(start_log(&dir))
+}
+
 #[cfg(unix)]
 fn signal_group(pid: i32) -> bool {
     // The run leads its own group, so this reaches the agents it spawned with it.
@@ -522,6 +536,7 @@ pub fn run() {
             rename_run,
             write_run_file,
             read_attachment,
+            read_run_log,
             stop_runs,
             read_config,
             write_config
@@ -717,6 +732,16 @@ mod tests {
         assert_eq!(died("/a/b/ship.ts", &log), "ship.ts died before it wrote anything");
         std::fs::write(&log, "  cannot find module\n").unwrap();
         assert_eq!(died("/a/b/ship.ts", &log), "cannot find module");
+    }
+
+    #[test]
+    fn a_run_without_a_start_log_reports_nothing() {
+        let dir = temp("log");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(start_log(&dir), "");
+
+        std::fs::write(dir.join("start.log"), "bun: out of memory\n").unwrap();
+        assert_eq!(start_log(&dir), "bun: out of memory\n");
     }
 
     #[test]

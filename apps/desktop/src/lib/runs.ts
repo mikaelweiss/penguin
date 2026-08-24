@@ -3,7 +3,7 @@ import type { Attachment } from "@/lib/attachments";
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
 
 export type OutputLine = {
-  kind: "show" | "tool" | "ask" | "answer" | "message";
+  kind: "show" | "tool" | "ask" | "answer" | "message" | "problem";
   text: string;
   at: string;
   /** What a sent message carried. The run file holds only the paths. */
@@ -24,6 +24,8 @@ export type Run = {
   status: RunStatus;
   dir: string;
   ask?: Ask;
+  /** Why the run ended badly, when its own file says. */
+  problem?: string;
   /** The run is waiting on view.listen, so it can take a message. */
   listening: boolean;
   output: OutputLine[];
@@ -137,14 +139,20 @@ function workflowName(file: string): string {
   return baseName(file).replace(/\.[^.]+$/, "");
 }
 
-function statusOf(notes: Entry[], alive: boolean): RunStatus {
+type Closing = {
+  status: RunStatus;
+  /** What the run threw. A crashed run left nothing here, only a start log. */
+  problem?: string;
+};
+
+function closingOf(notes: Entry[], alive: boolean): Closing {
   const closing = notes.findLast(
     (note) => "outcome" in note || "threw" in note || note["stopped"] === true,
   );
-  if (closing === undefined) return alive ? "running" : "crashed";
-  if (closing["stopped"] === true) return "stopped";
-  if ("threw" in closing) return "failed";
-  return "done";
+  if (closing === undefined) return { status: alive ? "running" : "crashed" };
+  if (closing["stopped"] === true) return { status: "stopped" };
+  if ("threw" in closing) return { status: "failed", problem: display(closing["threw"]) };
+  return { status: "done" };
 }
 
 /** The question the run is stuck on, when one is still unanswered. */
@@ -213,7 +221,8 @@ function place(file: RunFile): Placed | undefined {
   const notes = file.entries.filter((entry) => entry["call"] === undefined);
   const moved = notes.findLast((note) => text(note["dir"]) !== undefined);
   const renamed = notes.findLast((note) => text(note["name"]) !== undefined);
-  const status = statusOf(notes, file.alive);
+  const closing = closingOf(notes, file.alive);
+  const status = closing.status;
   const heard = notes.findLast((note) => typeof note["listening"] === "boolean");
   // A run that is no longer running cannot take an answer or a message, whatever its notes say.
   const waiting = status === "running" ? waitingAsk(file.entries) : undefined;
@@ -227,6 +236,7 @@ function place(file: RunFile): Placed | undefined {
       status,
       dir: text(moved?.["dir"]) ?? cwd,
       ...(ask === undefined ? {} : { ask }),
+      ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
       output: outputOf(file.entries, waiting),
       children: [],
