@@ -68,21 +68,29 @@ export async function run(
   }
 }
 
+type Job = { workflow: string; params: unknown; cwd?: string };
+
 function hooks(trace: Trace, parent: string, cwd: string, catalogs: Catalog[]): RunHooks {
-  const perform = async (job: { workflow: string; params: unknown }): Promise<unknown> => {
+  const perform = async (job: Job): Promise<unknown> => {
     const child = runId();
     trace.note({ child, workflow: job.workflow });
     return spawnRun({
       file: job.workflow,
       params: job.params,
-      cwd,
+      cwd: job.cwd ?? cwd,
       id: child,
       parent,
       catalogs,
     });
   };
   const wrapped = trace.wrapCall("run", perform);
-  return { spawn: (file, params) => wrapped({ workflow: file, params }) };
+  // A child without a folder of its own records the job it always did, so prior runs still replay.
+  return {
+    spawn: (file, params, at) =>
+      wrapped(at === undefined
+        ? { workflow: file, params }
+        : { workflow: file, params, cwd: path.resolve(cwd, at) }),
+  };
 }
 
 type ChildConfig = {

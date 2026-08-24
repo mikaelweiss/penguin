@@ -46,7 +46,7 @@ function noted(notes: Note[]): string {
 export default workflow({
   description:
     "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until your approval lands or it closes",
-  params: z.object({ pr: z.string() }),
+  params: z.object({ pr: z.string().describe("the pull request, as a number or a url") }),
 
   async run({ params, agent, vcs, github, view }) {
     const found = await github.pr.get(params.pr);

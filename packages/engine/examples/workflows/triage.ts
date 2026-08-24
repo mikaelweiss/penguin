@@ -30,7 +30,7 @@ async function answered(
 
 export default workflow({
   description: "decide if a ticket is ready to work on, and split it into tasks",
-  params: z.object({ ticket: z.string() }),
+  params: z.object({ ticket: z.string().describe("the ticket to work, as an id, a url, or the text itself") }),
 
   async run(ctx) {
     const { params, agent, view } = ctx;

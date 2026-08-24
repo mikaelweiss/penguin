@@ -15,11 +15,12 @@ function listed(files: string[]): string {
 export default workflow({
   description: "rebase a branch onto main until it is clean, then move main to it",
   params: z.object({
-    branch: z.string(),
-    dir: z.string().optional(),
-    onto: z.string().default("main"),
-    passes: z.number().int().min(1).default(3),
-    resolutions: z.number().int().min(1).default(10),
+    branch: z.string().describe("the branch to land"),
+    onto: z.string().default("main").describe("the branch it lands on"),
+    /** The worktree the branch rebases in, which is not the checkout this run moves. */
+    dir: z.string().optional().meta({ internal: true }),
+    passes: z.number().int().min(1).default(3).meta({ internal: true }),
+    resolutions: z.number().int().min(1).default(10).meta({ internal: true }),
   }),
 
   async run({ params, agent, vcs, view }) {

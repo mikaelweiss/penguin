@@ -19,10 +19,10 @@ import { z } from "zod";
 
 export default workflow({
   description: "what this does, one line",
-  params: z.object({ dir: z.string().optional() }),
+  params: z.object({}),
 
-  async run({ params, vcs, view }) {
-    const state = await vcs.dirty({ cwd: params.dir });
+  async run({ vcs, view }) {
+    const state = await vcs.dirty();
     await view.show(state.dirty ? "tree is dirty" : "tree is clean");
     return { dirty: state.dirty };
   },
@@ -34,9 +34,10 @@ export default workflow({
     </p>
 
     <p>
-      <code>workflow()</code> is an identity function with one check. It throws
-      <code>PenguinError</code> when the description is missing or blank, because the description is
-      what a person reads in a list of workflows.
+      <code>workflow()</code> is an identity function with two checks, both about what a person
+      reads. It throws <code>PenguinError</code> when the description is missing or blank, and when
+      a param carries neither a <code>.describe()</code> line nor
+      <code>.meta({ internal: true })</code>.
     </p>
 
     <h2>ctx</h2>
@@ -102,6 +103,26 @@ z.object({ title: z.string(), urgent: z.boolean() })  // a form</code></pre>
       records as JSON Schema. No workflow changes between them.
     </p>
 
+    <h2>Params a person answers</h2>
+
+    <p>
+      A launch form is built from the params schema, so the schema decides what a person is asked.
+      Every param they fill carries a one-line <code>.describe()</code>, which is the only label the
+      form has to show. A param that only a calling workflow ever fills carries
+      <code>.meta({ internal: true })</code> instead, which keeps it off the form while
+      <code>call</code> still passes it:
+    </p>
+
+    <pre><code>params: z.object({
+  task: z.string().describe("the change to make"),
+  baseline: z.string().default("").meta({ internal: true }),
+})</code></pre>
+
+    <p>
+      The two markers are exhaustive: a param with neither refuses to load, so a form can never
+      show a person a box nobody can label.
+    </p>
+
     <p>
       Each call is its own request with its own response. There is no inbox and no message router. An
       answer reaches its asker because the asker is the one awaiting it, so two parallel branches
@@ -164,7 +185,7 @@ if (heard !== undefined) {
       without asking which path produced it:
     </p>
 
-    <pre><code>const state = await vcs.dirty({ cwd: params.dir });
+    <pre><code>const state = await vcs.dirty();
 if (!state.ok) {
   await view.show(`commit failed: ${state.reason}`);
   return { ok: false, committed: false, message: "", reason: state.reason };
@@ -184,7 +205,7 @@ if (!state.dirty) {
       frontend's tree.
     </p>
 
-    <pre><code>const done = await call(ctx, commit, { dir: params.dir });</code></pre>
+    <pre><code>const done = await call(ctx, commit, {});</code></pre>
 
     <p>
       The child builds its own adapters and gets its own params. Because it is a process, it can be
@@ -199,9 +220,17 @@ if (!state.dirty) {
 
     <pre><code>async run(ctx) {
   const { params, vcs, view } = ctx;
-  const done = await call(ctx, commit, { dir: params.dir });
+  const done = await call(ctx, commit, {});
   if (!done.committed) return { ...done, pushed: false };
 }</code></pre>
+
+    <p>
+      A child works in its parent's folder unless the call names another one. That is
+      <code>call</code>'s fourth argument, not a param, so no workflow carries a folder in its
+      schema and no launch form ever asks for a path:
+    </p>
+
+    <pre><code>await call(ctx, commit, {}, { cwd: worktree });</code></pre>
 
     <p>
       Parallel children are <code>Promise.all</code> over <code>call</code>:
@@ -210,7 +239,7 @@ if (!state.dirty) {
     <pre><code>const results = await Promise.all(
   params.dirs.map(async (dir) =&gt; ({
     dir,
-    done: await call(ctx, commit, { dir }),
+    done: await call(ctx, commit, {}, { cwd: dir }),
   })),
 );</code></pre>
 
@@ -253,9 +282,9 @@ if (!state.dirty) {
     </p>
 
     <pre><code>async function send(): Promise&lt;{ ok: boolean; reason: string }&gt; {
-  const wrote = await call(ctx, commit, { dir: params.dir });
+  const wrote = await call(ctx, commit, {});
   if (!wrote.ok) return { ok: false, reason: wrote.reason };
-  return vcs.push(head.branch, { cwd: params.dir });
+  return vcs.push(head.branch);
 }</code></pre>
 
     <p>

@@ -23,8 +23,13 @@ function slug(name: string): string {
 export default workflow({
   description: "triage a ticket, then plan and implement each task in a worktree",
   params: z.object({
-    ticket: z.string(),
-    rounds: z.number().int().min(1).default(3),
+    ticket: z.string().describe("the ticket to work, as an id, a url, or the text itself"),
+    rounds: z
+      .number()
+      .int()
+      .min(1)
+      .default(3)
+      .describe("how many times the reviewer sends a change back before the run gives up"),
   }),
 
   async run(ctx) {
@@ -58,28 +63,37 @@ export default workflow({
 
     // The fresh worktree is the base, so what the gates say here is what every review compares against.
     const head = await vcs.head({ cwd: ws.path });
-    const before = await call(ctx, baseline, { dir: ws.path });
+    const before = await call(ctx, baseline, {}, { cwd: ws.path });
 
     const checks: string[] = [];
     const total = triaged.tasks.length;
     for (const [index, task] of triaged.tasks.entries()) {
       await view.show(`task ${index + 1} of ${total}`);
-      const planned = await call(ctx, plan, { ticket: task, dir: ws.path, context: triaged.context });
+      const planned = await call(
+        ctx,
+        plan,
+        { ticket: task, context: triaged.context },
+        { cwd: ws.path },
+      );
       checks.push(planned.acceptance);
-      const built = await call(ctx, implement, {
-        task: planned.plan,
-        acceptance: planned.acceptance,
-        dir: ws.path,
-        baseline: before.gates,
-        base: head.sha,
-        rounds: params.rounds,
-      });
+      const built = await call(
+        ctx,
+        implement,
+        {
+          task: planned.plan,
+          acceptance: planned.acceptance,
+          baseline: before.gates,
+          base: head.sha,
+          rounds: params.rounds,
+        },
+        { cwd: ws.path },
+      );
       if (!built.approved)
         await view.ask(
           `The review did not approve the change:\n\n${built.blocking}\n\nTake a look.`,
           Ack,
         );
-      await call(ctx, commit, { dir: ws.path });
+      await call(ctx, commit, {}, { cwd: ws.path });
 
       for (;;) {
         const answer = await view.ask(
@@ -87,15 +101,19 @@ export default workflow({
           Tried,
         );
         if (answer === "done") break;
-        await call(ctx, implement, {
-          task: answer,
-          acceptance: planned.acceptance,
-          dir: ws.path,
-          baseline: before.gates,
-          base: head.sha,
-          rounds: params.rounds,
-        });
-        await call(ctx, commit, { dir: ws.path });
+        await call(
+          ctx,
+          implement,
+          {
+            task: answer,
+            acceptance: planned.acceptance,
+            baseline: before.gates,
+            base: head.sha,
+            rounds: params.rounds,
+          },
+          { cwd: ws.path },
+        );
+        await call(ctx, commit, {}, { cwd: ws.path });
       }
     }
 

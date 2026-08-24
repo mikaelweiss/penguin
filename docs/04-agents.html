@@ -15,7 +15,7 @@
 
     <h2>The API</h2>
 
-    <pre><code>const session = await agent.open({ cwd: params.dir });
+    <pre><code>const session = await agent.open();
 const turn = agent.turn(session, { skill: "commit" }, { result: Commit });
 for await (const chunk of turn.output) await view.show(chunk.text);
 const commit = await turn.value;</code></pre>

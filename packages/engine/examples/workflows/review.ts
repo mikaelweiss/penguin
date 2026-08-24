@@ -38,15 +38,14 @@ export function checklist(brief: Brief): string {
 export default workflow({
   description: "review a working tree against its acceptance checks",
   params: z.object({
-    acceptance: z.string(),
-    dir: z.string().optional(),
-    blocking: z.string().default(""),
-    baseline: z.string().default(""),
-    base: z.string().default(""),
+    acceptance: z.string().describe("what the change has to satisfy, one check per line"),
+    blocking: z.string().default("").meta({ internal: true }),
+    baseline: z.string().default("").meta({ internal: true }),
+    base: z.string().default("").meta({ internal: true }),
   }),
 
   async run({ params, agent, view }) {
-    const session = await agent.open({ cwd: params.dir });
+    const session = await agent.open();
     const review = await narrated(
       view,
       agent.turn(session, { skill: "review", prompt: checklist(params) }, { result: Review }),

@@ -39,8 +39,8 @@
 
     <p>
       <code>definition.params.parse(params)</code> runs the workflow's own Zod schema over the JSON
-      from argv. <code>{"dir":"."}</code> fits <code>z.object({ dir: z.string().optional() })</code>,
-      so the run continues. A wrong shape throws here, before anything touches the world.
+      from argv. <code>{"ticket":"PEN-14"}</code> fits
+      <code>z.object({ ticket: z.string().describe("...") })</code>, so the run continues. A wrong shape throws here, before anything touches the world.
     </p>
 
     <h2>4. A host is made, adapters are built onto ctx</h2>

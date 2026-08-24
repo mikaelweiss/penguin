@@ -23,7 +23,7 @@ import { z } from "zod";
 type Echo = { say(text: string): Promise<{ ok: boolean; text: string }> };
 export default workflow({
   description: "greets by echo",
-  params: z.object({ name: z.string() }),
+  params: z.object({ name: z.string().describe("who to greet") }),
   async run(ctx) {
     const echo = (ctx as unknown as { echo: Echo }).echo;
     return echo.say("hello " + ctx.params.name);
@@ -145,7 +145,7 @@ import { z } from "zod";
 type Echo = { say(text: string): Promise<{ ok: boolean; text: string }> };
 export default workflow({
   description: "greets from a sub-run",
-  params: z.object({ name: z.string() }),
+  params: z.object({ name: z.string().describe("who to greet") }),
   async run(ctx) {
     const echo = (ctx as unknown as { echo: Echo }).echo;
     return echo.say("hi " + ctx.params.name);
@@ -158,9 +158,25 @@ import { z } from "zod";
 import child from "./child.ts";
 export default workflow({
   description: "spawns a child run",
-  params: z.object({ name: z.string() }),
+  params: z.object({ name: z.string().describe("who to greet") }),
   async run(ctx) {
     const inner = await call(ctx, child, { name: ctx.params.name });
+    return { inner };
+  },
+});
+`;
+
+const PARENT_AT = `import { call, workflow } from "penguin";
+import { z } from "zod";
+import child from "./child.ts";
+export default workflow({
+  description: "spawns a child run in a folder of its own",
+  params: z.object({
+    name: z.string().describe("who to greet"),
+    at: z.string().describe("where the child runs"),
+  }),
+  async run(ctx) {
+    const inner = await call(ctx, child, { name: ctx.params.name }, { cwd: ctx.params.at });
     return { inner };
   },
 });
@@ -183,4 +199,26 @@ test("call spawns the child as its own run and hands back its outcome", async ()
   const child = heads.find((head) => head["parent"] !== undefined);
   const parent = heads.find((head) => head["parent"] === undefined);
   expect(child?.["parent"]).toBe(parent?.["run"]);
+}, 20000);
+
+test("a child takes the folder call names, resolved against the parent's", async () => {
+  const { list, workflow } = catalog({
+    "adapters/echo.ts": ECHO,
+    "workflows/hello.ts": PARENT_AT,
+    "workflows/child.ts": CHILD,
+  });
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-base-"));
+  temps.push(base);
+  fs.mkdirSync(path.join(base, "sub"));
+
+  await run(workflow, { name: "pip", at: "sub" }, { catalogs: list, cwd: base });
+
+  const heads = fs.readdirSync(runsDir()).map((dir) => {
+    const line = fs.readFileSync(path.join(runsDir(), dir, "run.jsonl"), "utf8").split("\n")[0];
+    return JSON.parse(line ?? "{}") as Record<string, unknown>;
+  });
+  const child = heads.find((head) => head["parent"] !== undefined);
+  const parent = heads.find((head) => head["parent"] === undefined);
+  expect(parent?.["cwd"]).toBe(base);
+  expect(child?.["cwd"]).toBe(path.join(base, "sub"));
 }, 20000);

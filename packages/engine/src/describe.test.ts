@@ -17,7 +17,7 @@ const HELLO = `import { workflow } from "penguin";
 import { z } from "zod";
 export default workflow({
   description: "greets by echo",
-  params: z.object({ name: z.string() }),
+  params: z.object({ name: z.string().describe("who to greet") }),
   async run() {
     return null;
   },

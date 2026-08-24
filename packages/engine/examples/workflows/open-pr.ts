@@ -14,12 +14,12 @@ const Description = z.object({
 
 export default workflow({
   description: "open the pull request and answer its review feedback",
-  params: z.object({ dir: z.string().optional() }),
+  params: z.object({}),
 
   async run(ctx) {
-    const { params, agent, github, vcs, view } = ctx;
+    const { agent, github, vcs, view } = ctx;
 
-    const head = await vcs.head({ cwd: params.dir });
+    const head = await vcs.head();
     if (!head.ok) {
       await view.ask(`The checkout did not read: ${head.reason}`, Ack);
       return { url: "" };
@@ -31,7 +31,7 @@ export default workflow({
       );
       return { url: "" };
     }
-    const base = await vcs.defaultBranch({ cwd: params.dir });
+    const base = await vcs.defaultBranch();
     if (base.ok && head.branch === base.branch) {
       for (;;) {
         const answer = await view.ask(
@@ -45,9 +45,9 @@ export default workflow({
 
     // The pull request reads the remote, so every local change goes up before it is asked for.
     async function send(): Promise<{ ok: boolean; reason: string }> {
-      const wrote = await call(ctx, commit, { dir: params.dir });
+      const wrote = await call(ctx, commit, {});
       if (!wrote.ok) return { ok: false, reason: wrote.reason };
-      return vcs.push(head.branch, { cwd: params.dir });
+      return vcs.push(head.branch);
     }
 
     // What blocks a send is often a person's to fix, so the ask retries instead of ending the run.
@@ -68,16 +68,12 @@ export default workflow({
 
     if (!(await delivered())) return { url: "" };
 
-    const writer = await agent.open({ cwd: params.dir });
+    const writer = await agent.open();
     const written = await narrated(
       view,
       agent.turn(writer, { skill: "open-pr" }, { result: Description }),
     );
-    let pr = await github.pr.create({
-      cwd: params.dir,
-      title: written.title,
-      body: written.body,
-    });
+    let pr = await github.pr.create({ title: written.title, body: written.body });
     while (!pr.ok) {
       for (;;) {
         const answer = await view.ask(
@@ -87,11 +83,7 @@ export default workflow({
         if (answer === "stop") return { url: "" };
         if (answer === "retry") break;
       }
-      pr = await github.pr.create({
-        cwd: params.dir,
-        title: written.title,
-        body: written.body,
-      });
+      pr = await github.pr.create({ title: written.title, body: written.body });
     }
 
     for (;;) {
@@ -101,7 +93,7 @@ export default workflow({
       );
       if (answer === "done") break;
       const asked = answer === "address-feedback" ? "Answer the open review threads." : answer;
-      const helper = await agent.open({ cwd: params.dir });
+      const helper = await agent.open();
       await narrated(
         view,
         agent.turn(helper, {

@@ -5,7 +5,12 @@ import reviewPr from "./review-pr.ts";
 export default workflow({
   description:
     "watch the pull requests that ask for your review, and run a review on each one as it arrives",
-  params: z.object({ reviewer: z.string().default("@me") }),
+  params: z.object({
+    reviewer: z
+      .string()
+      .default("@me")
+      .describe("whose review requests to watch, as a github login"),
+  }),
 
   async run(ctx) {
     const { params, github, view } = ctx;

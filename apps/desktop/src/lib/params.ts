@@ -49,7 +49,7 @@ function initialOf(control: Control, fallback: unknown): string | boolean {
   return typeof fallback === "string" ? fallback : JSON.stringify(fallback);
 }
 
-/** The form a workflow's params schema asks for, one row per property. */
+/** The form a workflow's params schema asks a person for, one row per property it shows. */
 export function paramsOf(schema: Record<string, unknown> | undefined): Param[] {
   const properties = schemaOf(schema?.["properties"]);
   if (properties === undefined) return [];
@@ -58,7 +58,8 @@ export function paramsOf(schema: Record<string, unknown> | undefined): Param[] {
 
   return Object.entries(properties).flatMap(([name, value]) => {
     const property = schemaOf(value);
-    if (property === undefined) return [];
+    // An internal param is a caller's to fill, so the form neither shows it nor sends it.
+    if (property === undefined || property["internal"] === true) return [];
     const control = controlOf(property);
     const fallback = property["default"];
     return [

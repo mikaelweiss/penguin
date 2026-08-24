@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 import { PenguinError } from "./errors.ts";
 
 /** The roles the installed adapters put on ctx. penguin-env.d.ts merges them in. */
@@ -10,7 +10,7 @@ export type Ctx<Params> = { params: Params } & Adapters;
 export const RUN: unique symbol = Symbol.for("penguin.run");
 
 export type RunHooks = {
-  spawn(file: string, params: unknown): Promise<unknown>;
+  spawn(file: string, params: unknown, cwd?: string): Promise<unknown>;
 };
 
 export type Workflow<Schema extends z.ZodObject = z.ZodObject, R = unknown> = {
@@ -27,8 +27,28 @@ export function workflow<Schema extends z.ZodObject, R>(
   if (typeof definition.description !== "string" || definition.description.trim() === "") {
     throw new PenguinError("a workflow needs a description");
   }
+  const bare = undescribed(definition.params);
+  if (bare.length > 0) {
+    throw new PenguinError(
+      `these params need a description, or .meta({ internal: true }) when only a caller fills them: ${bare.join(", ")}`,
+    );
+  }
   if (definition.file === undefined) definition.file = definitionSite();
   return definition;
+}
+
+/**
+ * The params a launch form would show with nothing to label them. Read off the
+ * JSON Schema a frontend renders, so this agrees with the form by construction.
+ */
+function undescribed(params: z.ZodObject): string[] {
+  const schema = z.toJSONSchema(params) as { properties?: Record<string, unknown> };
+  return Object.entries(schema.properties ?? {})
+    .filter(([, value]) => {
+      const property = value as Record<string, unknown>;
+      return property["internal"] !== true && typeof property["description"] !== "string";
+    })
+    .map(([name]) => name);
 }
 
 /** The file that called workflow(), read off the stack. */
@@ -43,22 +63,29 @@ function definitionSite(): string | undefined {
   return undefined;
 }
 
+/** Where a child run works. It defaults to the folder the calling run works in. */
+export type CallOptions = { cwd?: string };
+
 /**
  * Runs a child workflow as its own run: a new process, a new run folder, the
  * child's params validated. Stopping the child rejects with RunStopped, a
  * process death without an outcome with RunCrashed, and a child that threw
  * rejects with its message. Outside an engine run it falls back to running the
- * child in place.
+ * child in place, where it shares the caller's folder.
  */
 export function call<Schema extends z.ZodObject, R>(
   ctx: Ctx<unknown>,
   child: Workflow<Schema, R>,
   params: z.input<Schema>,
+  options?: CallOptions,
 ): Promise<R> {
   const parsed = child.params.parse(params);
   const hooks = (ctx as unknown as Record<PropertyKey, unknown>)[RUN] as RunHooks | undefined;
   if (hooks === undefined || child.file === undefined) {
+    if (options?.cwd !== undefined) {
+      throw new PenguinError("a child that runs in place cannot take a folder of its own");
+    }
     return child.run({ ...ctx, params: parsed });
   }
-  return hooks.spawn(child.file, parsed) as Promise<R>;
+  return hooks.spawn(child.file, parsed, options?.cwd) as Promise<R>;
 }

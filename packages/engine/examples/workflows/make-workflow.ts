@@ -24,9 +24,17 @@ function brief(design: string, dest: string, findings: string[]): string {
 export default workflow({
   description: "design, write, and review a new workflow from an idea",
   params: z.object({
-    idea: z.string(),
-    scope: z.enum(["project", "home"]).default("home"),
-    rounds: z.number().int().min(1).default(3),
+    idea: z.string().describe("what the new workflow should do"),
+    scope: z
+      .enum(["project", "home"])
+      .default("home")
+      .describe("which catalog it is written into"),
+    rounds: z
+      .number()
+      .int()
+      .min(1)
+      .default(3)
+      .describe("how many times the reviewer sends the workflow back before the run gives up"),
   }),
 
   async run({ params, agent, view }) {

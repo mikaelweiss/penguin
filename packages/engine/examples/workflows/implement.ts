@@ -16,18 +16,22 @@ function brief(task: string, blocking: string, baseline: string): string {
 export default workflow({
   description: "implement a change and close the review findings",
   params: z.object({
-    task: z.string(),
-    acceptance: z.string().optional(),
-    dir: z.string().optional(),
-    baseline: z.string().default(""),
-    base: z.string().default(""),
-    rounds: z.number().int().min(1).default(3),
+    task: z.string().describe("the change to make"),
+    rounds: z
+      .number()
+      .int()
+      .min(1)
+      .default(3)
+      .describe("how many times the reviewer sends the change back before the run gives up"),
+    acceptance: z.string().optional().meta({ internal: true }),
+    baseline: z.string().default("").meta({ internal: true }),
+    base: z.string().default("").meta({ internal: true }),
   }),
 
   async run({ params, agent, view }) {
-    const implementer = await agent.open({ cwd: params.dir });
+    const implementer = await agent.open();
     // One reviewer across the rounds: round two reads the new diff, not the whole tree again.
-    const reviewer = await agent.open({ cwd: params.dir });
+    const reviewer = await agent.open();
     let blocking = "";
     let notes = "";
     let approved = false;

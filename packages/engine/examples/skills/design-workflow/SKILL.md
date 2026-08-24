@@ -29,6 +29,10 @@ The default schema is one required free-text param: the subject the user types a
 - No agent turn can derive it.
 - No ask can collect it at the moment it matters.
 
+A param a person fills carries a one-line `.describe()`, because that line is the only label the launch form shows. A param only a calling workflow fills carries `.meta({ internal: true })` instead, which keeps it out of the form. Design each param as one or the other.
+
+The folder a child workflow works in is never a param. `call` takes it as a `cwd` option, so design the child to work where it is run.
+
 What fails a test is a literal in the file, a default, a turn, or an ask. A loop bound is a literal or an optional param with a default. Params check the form of a value, never its meaning: a repo convention (a branch pattern, a folder name, a flag key) is skill craft, not a zod regex.
 
 ## The penguin model

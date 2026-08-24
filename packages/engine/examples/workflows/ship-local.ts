@@ -13,9 +13,14 @@ export default workflow({
   description:
     "ticket to a landed commit: triage, plan, and implement in a worktree, then hold until you land it on main",
   params: z.object({
-    ticket: z.string(),
-    onto: z.string().default("main"),
-    rounds: z.number().int().min(1).default(3),
+    ticket: z.string().describe("the ticket to work, as an id, a url, or the text itself"),
+    onto: z.string().default("main").describe("the branch the work lands on"),
+    rounds: z
+      .number()
+      .int()
+      .min(1)
+      .default(3)
+      .describe("how many times the reviewer sends a change back before the run gives up"),
   }),
 
   async run(ctx) {
@@ -24,7 +29,7 @@ export default workflow({
     if (!worked.done) return { landed: false, sha: "", reason: "the work never started" };
 
     for (;;) {
-      const written = await call(ctx, commit, { dir: worked.path });
+      const written = await call(ctx, commit, {}, { cwd: worked.path });
       const state = written.committed
         ? `committed: ${title(written.message)}`
         : "the tree was committed already";
@@ -33,14 +38,18 @@ export default workflow({
         z.union([z.enum(["done"]), z.string()]),
       );
       if (answer === "done") break;
-      await call(ctx, implement, {
-        task: answer,
-        acceptance: worked.acceptance,
-        dir: worked.path,
-        baseline: worked.gates,
-        base: worked.base,
-        rounds: params.rounds,
-      });
+      await call(
+        ctx,
+        implement,
+        {
+          task: answer,
+          acceptance: worked.acceptance,
+          baseline: worked.gates,
+          base: worked.base,
+          rounds: params.rounds,
+        },
+        { cwd: worked.path },
+      );
     }
 
     return call(ctx, land, { branch: worked.branch, dir: worked.path, onto: params.onto });

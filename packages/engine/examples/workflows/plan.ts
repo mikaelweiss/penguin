@@ -27,9 +27,8 @@ async function answered(
 export default workflow({
   description: "plan a change with feedback and approval from the user",
   params: z.object({
-    ticket: z.string(),
-    dir: z.string().optional(),
-    context: z.string().default(""),
+    ticket: z.string().describe("the ticket to plan, as an id, a url, or the text itself"),
+    context: z.string().default("").meta({ internal: true }),
   }),
 
   async run(ctx) {
@@ -37,7 +36,7 @@ export default workflow({
 
     const ticket = await resolveTicket(ctx, params.ticket);
 
-    const session = await agent.open({ cwd: params.dir });
+    const session = await agent.open();
     let input =
       params.context === "" ? ticket : `${ticket}\n\n# What triage already read\n\n${params.context}`;
     for (;;) {
