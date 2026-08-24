@@ -13,6 +13,7 @@ import {
 } from "@workspace/ui/components/command";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -142,7 +143,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
           "sm:max-w-xl",
           picked === undefined &&
             preset === undefined &&
-            "top-1/3 translate-y-0 gap-0 overflow-hidden p-0",
+            "gap-0 p-0 [&>[data-slot=command]]:min-h-0",
         )}
       >
         {picked !== undefined ? (
@@ -151,12 +152,14 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
               <DialogTitle>{picked.name}</DialogTitle>
               <DialogDescription>{picked.description}</DialogDescription>
             </DialogHeader>
-            <WorkflowParams
-              params={paramsOf(picked.params)}
-              values={values}
-              problems={problems}
-              onChange={(name, value) => setValues((current) => ({ ...current, [name]: value }))}
-            />
+            <DialogBody>
+              <WorkflowParams
+                params={paramsOf(picked.params)}
+                values={values}
+                problems={problems}
+                onChange={(name, value) => setValues((current) => ({ ...current, [name]: value }))}
+              />
+            </DialogBody>
             {alert}
             <DialogFooter>
               <Button

@@ -167,7 +167,7 @@ export function CommandPalette({
               <CommandGroup heading="Settings">
                 <CommandItem value={SETTINGS} onSelect={() => pick(onAppSettings)}>
                   <span className="min-w-0 flex-1 truncate">Open settings</span>
-                  <Kbd>⇧⌘,</Kbd>
+                  <Kbd>⌘,</Kbd>
                 </CommandItem>
               </CommandGroup>
               <CommandGroup heading="Runs">

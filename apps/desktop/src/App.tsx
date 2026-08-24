@@ -60,7 +60,7 @@ export function App() {
       if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPalette((showing) => !showing);
-      } else if (event.shiftKey && event.key === ",") {
+      } else if (event.key === ",") {
         event.preventDefault();
         setAppSettings(true);
       }

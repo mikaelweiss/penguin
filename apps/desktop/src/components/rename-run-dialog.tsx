@@ -3,6 +3,7 @@ import { useEffect, useId, useState } from "react";
 import { Button } from "@workspace/ui/components/button";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -51,15 +52,17 @@ export function RenameRunDialog({ run, onClose, onRename }: RenameRunDialogProps
               The name shows in the sidebar. The run keeps going.
             </DialogDescription>
           </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor={id}>Name</FieldLabel>
-            <Input
-              id={id}
-              value={name}
-              autoFocus
-              onChange={(event) => setName(event.target.value)}
-            />
-          </Field>
+          <DialogBody>
+            <Field>
+              <FieldLabel htmlFor={id}>Name</FieldLabel>
+              <Input
+                id={id}
+                value={name}
+                autoFocus
+                onChange={(event) => setName(event.target.value)}
+              />
+            </Field>
+          </DialogBody>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
