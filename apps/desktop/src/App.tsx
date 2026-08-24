@@ -7,6 +7,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/com
 import { TooltipProvider } from "@workspace/ui/components/tooltip";
 
 import { AppSettingsDialog } from "@/components/app-settings-dialog";
+import { CommandPalette } from "@/components/command-palette";
 import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { RunActivity } from "@/components/run-activity";
@@ -19,8 +20,17 @@ import { useDirectories } from "@/hooks/use-directories";
 import { useInbox } from "@/hooks/use-inbox";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
+import { useRunTree } from "@/hooks/use-run-tree";
+import { useWorkflowIndex } from "@/hooks/use-workflow-index";
 import { findRun } from "@/lib/runs";
 import type { Project } from "@/lib/runs";
+import type { Workflow } from "@/lib/workflows";
+
+type Starting = {
+  dir: string;
+  /** Set when the palette already picked the workflow, so only its params are left. */
+  workflow?: Workflow;
+};
 
 export function App() {
   const directories = useDirectories();
@@ -28,18 +38,32 @@ export function App() {
   const inbox = useInbox();
   const actions = useRunActions();
   const config = useConfig();
+  const tree = useRunTree();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
-  const [startingIn, setStartingIn] = useState<string | undefined>(undefined);
+  const [starting, setStarting] = useState<Starting | undefined>(undefined);
   const [settingProject, setSettingProject] = useState<Project | undefined>(undefined);
   const [appSettings, setAppSettings] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const index = useWorkflowIndex(projects, palette);
   const selected = findRun(projects, selectedId);
   const run = selected?.run;
 
+  const select = (id: string) => {
+    const node = findRun(projects, id);
+    if (node !== undefined) tree.reveal(node);
+    setSelectedId(id);
+  };
+
   useEffect(() => {
     const open = (event: KeyboardEvent) => {
-      if (!event.metaKey || !event.shiftKey || event.key !== ",") return;
-      event.preventDefault();
-      setAppSettings(true);
+      if (!event.metaKey) return;
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPalette((showing) => !showing);
+      } else if (event.shiftKey && event.key === ",") {
+        event.preventDefault();
+        setAppSettings(true);
+      }
     };
     window.addEventListener("keydown", open);
     return () => window.removeEventListener("keydown", open);
@@ -51,14 +75,25 @@ export function App() {
         <RunSidebar
           projects={projects}
           selectedId={selectedId}
+          tree={tree}
           actions={actions}
-          onSelect={setSelectedId}
-          onNewWorkflow={setStartingIn}
+          onSelect={select}
+          onNewWorkflow={(dir) => setStarting({ dir })}
           onAddDirectory={directories.add}
           onRemoveDirectory={directories.remove}
           onProjectSettings={setSettingProject}
           onAppSettings={() => setAppSettings(true)}
+          onPalette={() => setPalette(true)}
           error={directories.error}
+        />
+        <CommandPalette
+          open={palette}
+          onOpenChange={setPalette}
+          projects={projects}
+          index={index}
+          onSelectRun={select}
+          onStartWorkflow={(workflow, dir) => setStarting({ dir, workflow })}
+          onAppSettings={() => setAppSettings(true)}
         />
         <ProjectSettingsDialog
           project={settingProject}
@@ -72,16 +107,17 @@ export function App() {
           directories={directories}
         />
         <NewWorkflowDialog
-          dir={startingIn}
-          onClose={() => setStartingIn(undefined)}
-          onStarted={setSelectedId}
+          dir={starting?.dir}
+          preset={starting?.workflow}
+          onClose={() => setStarting(undefined)}
+          onStarted={select}
         />
         <SidebarInset className="min-w-0 overflow-hidden">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
             <Separator orientation="vertical" className="h-4 data-vertical:self-center" />
             {selected ? (
-              <RunBreadcrumb node={selected} onSelect={setSelectedId} />
+              <RunBreadcrumb node={selected} onSelect={select} />
             ) : (
               <div className="text-sm text-muted-foreground">No run selected</div>
             )}

@@ -8,6 +8,7 @@ import {
   FunnelIcon,
   PencilIcon,
   PlusIcon,
+  SearchIcon,
   SettingsIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -49,6 +50,7 @@ import { cn } from "@workspace/ui/lib/utils";
 
 import { RenameRunDialog } from "@/components/rename-run-dialog";
 import type { RunActions } from "@/hooks/use-run-actions";
+import type { RunTree } from "@/hooks/use-run-tree";
 import { findBlocked, isLive, visibleRuns } from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
 
@@ -71,7 +73,6 @@ type RunRowProps = {
   actions: RunActions;
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
-  onReveal: (path: { expand: string[]; blocked: Run }) => void;
   onRename: (run: Run) => void;
 };
 
@@ -82,7 +83,6 @@ function RunRow({
   actions,
   onSelect,
   onToggle,
-  onReveal,
   onRename,
 }: RunRowProps) {
   const { run, depth } = node;
@@ -142,7 +142,7 @@ function RunRow({
               <button
                 type="button"
                 aria-label={`Show ${carried.blocked.name}, which needs you`}
-                onClick={() => onReveal(carried)}
+                onClick={() => onSelect(carried.blocked.id)}
               >
                 needs you
                 <ChevronRightIcon />
@@ -267,6 +267,7 @@ function DirectoryRow({
 type RunSidebarProps = {
   projects: Project[];
   selectedId: string | undefined;
+  tree: RunTree;
   actions: RunActions;
   onSelect: (id: string) => void;
   onNewWorkflow: (dir: string) => void;
@@ -274,12 +275,14 @@ type RunSidebarProps = {
   onRemoveDirectory: (dir: string) => void;
   onProjectSettings: (project: Project) => void;
   onAppSettings: () => void;
+  onPalette: () => void;
   error: string | undefined;
 };
 
 export function RunSidebar({
   projects,
   selectedId,
+  tree,
   actions,
   onSelect,
   onNewWorkflow,
@@ -287,34 +290,10 @@ export function RunSidebar({
   onRemoveDirectory,
   onProjectSettings,
   onAppSettings,
+  onPalette,
   error,
 }: RunSidebarProps) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const [finished, setFinished] = useState<ReadonlySet<string>>(new Set());
   const [renaming, setRenaming] = useState<Run | undefined>(undefined);
-
-  const toggleRun = (id: string) =>
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-
-  const toggleFinished = (id: string) =>
-    setFinished((current) => {
-      const next = new Set(current);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-
-  const reveal = ({ expand, blocked }: { expand: string[]; blocked: Run }) => {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      for (const id of expand) next.delete(id);
-      return next;
-    });
-    onSelect(blocked.id);
-  };
 
   return (
     <Sidebar>
@@ -367,15 +346,15 @@ export function RunSidebar({
           </Empty>
         ) : null}
         {projects.map((project) => {
-          const showFinished = finished.has(project.id);
-          const rows = visibleRuns(project, { collapsed, showFinished });
+          const showFinished = tree.finished.has(project.id);
+          const rows = visibleRuns(project, { collapsed: tree.collapsed, showFinished });
 
           return (
             <SidebarGroup key={project.id}>
               <DirectoryRow
                 project={project}
                 showFinished={showFinished}
-                onToggleFinished={toggleFinished}
+                onToggleFinished={tree.toggleFinished}
                 onNewWorkflow={onNewWorkflow}
                 onSettings={onProjectSettings}
                 onRemove={onRemoveDirectory}
@@ -387,11 +366,10 @@ export function RunSidebar({
                       key={node.run.id}
                       node={node}
                       selected={node.run.id === selectedId}
-                      collapsed={collapsed.has(node.run.id)}
+                      collapsed={tree.collapsed.has(node.run.id)}
                       actions={actions}
                       onSelect={onSelect}
-                      onToggle={toggleRun}
-                      onReveal={reveal}
+                      onToggle={tree.toggleRun}
                       onRename={setRenaming}
                     />
                   ))}
@@ -403,6 +381,13 @@ export function RunSidebar({
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="sm" onClick={onPalette}>
+              <SearchIcon />
+              <span className="min-w-0 flex-1 truncate">Commands</span>
+              <Kbd>⌘K</Kbd>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton size="sm" onClick={onAppSettings}>
               <SettingsIcon />

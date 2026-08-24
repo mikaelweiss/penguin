@@ -37,11 +37,13 @@ function detailOf(cause: unknown): string {
 type NewWorkflowDialogProps = {
   /** The project directory the run starts in. The dialog is open whenever there is one. */
   dir: string | undefined;
+  /** The workflow the palette already picked, so the search step is skipped. */
+  preset: Workflow | undefined;
   onClose: () => void;
   onStarted: (id: string) => void;
 };
 
-export function NewWorkflowDialog({ dir, onClose, onStarted }: NewWorkflowDialogProps) {
+export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkflowDialogProps) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [reading, setReading] = useState(false);
   const [trouble, setTrouble] = useState<Trouble | undefined>(undefined);
@@ -51,7 +53,7 @@ export function NewWorkflowDialog({ dir, onClose, onStarted }: NewWorkflowDialog
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
-    if (dir === undefined) return;
+    if (dir === undefined || preset !== undefined) return;
     setWorkflows([]);
     setReading(true);
     describe(dir).then(
@@ -66,7 +68,7 @@ export function NewWorkflowDialog({ dir, onClose, onStarted }: NewWorkflowDialog
         setReading(false);
       },
     );
-  }, [dir]);
+  }, [dir, preset]);
 
   const close = () => {
     onClose();
@@ -103,6 +105,11 @@ export function NewWorkflowDialog({ dir, onClose, onStarted }: NewWorkflowDialog
     setPicked(workflow);
   };
 
+  useEffect(() => {
+    if (dir === undefined || preset === undefined) return;
+    choose(preset);
+  }, [dir, preset]);
+
   const submit = () => {
     if (picked === undefined) return;
     const filled = fill(paramsOf(picked.params), values);
@@ -132,10 +139,52 @@ export function NewWorkflowDialog({ dir, onClose, onStarted }: NewWorkflowDialog
       <DialogContent
         className={cn(
           "sm:max-w-xl",
-          picked === undefined && "top-1/3 translate-y-0 gap-0 overflow-hidden p-0",
+          picked === undefined &&
+            preset === undefined &&
+            "top-1/3 translate-y-0 gap-0 overflow-hidden p-0",
         )}
       >
-        {picked === undefined ? (
+        {picked !== undefined ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>{picked.name}</DialogTitle>
+              <DialogDescription>{picked.description}</DialogDescription>
+            </DialogHeader>
+            <WorkflowParams
+              params={paramsOf(picked.params)}
+              values={values}
+              problems={problems}
+              onChange={(name, value) => setValues((current) => ({ ...current, [name]: value }))}
+            />
+            {alert}
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={preset === undefined ? () => setPicked(undefined) : close}
+                disabled={starting}
+              >
+                {preset === undefined ? "Back" : "Cancel"}
+              </Button>
+              <Button onClick={submit} disabled={starting}>
+                {starting ? <Spinner data-icon="inline-start" /> : null}
+                {starting ? "Starting" : "Start"}
+              </Button>
+            </DialogFooter>
+          </>
+        ) : preset !== undefined ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>{preset.name}</DialogTitle>
+              <DialogDescription>{preset.description}</DialogDescription>
+            </DialogHeader>
+            {alert ?? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner />
+                Starting {preset.name}
+              </div>
+            )}
+          </>
+        ) : (
           <>
             <DialogHeader className="sr-only">
               <DialogTitle>New workflow</DialogTitle>
@@ -180,29 +229,6 @@ export function NewWorkflowDialog({ dir, onClose, onStarted }: NewWorkflowDialog
               </CommandList>
             </Command>
             {trouble ? <div className="border-t p-3">{alert}</div> : null}
-          </>
-        ) : (
-          <>
-            <DialogHeader>
-              <DialogTitle>{picked.name}</DialogTitle>
-              <DialogDescription>{picked.description}</DialogDescription>
-            </DialogHeader>
-            <WorkflowParams
-              params={paramsOf(picked.params)}
-              values={values}
-              problems={problems}
-              onChange={(name, value) => setValues((current) => ({ ...current, [name]: value }))}
-            />
-            {alert}
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setPicked(undefined)}>
-                Back
-              </Button>
-              <Button onClick={submit} disabled={starting}>
-                {starting ? <Spinner data-icon="inline-start" /> : null}
-                {starting ? "Starting" : "Start"}
-              </Button>
-            </DialogFooter>
           </>
         )}
       </DialogContent>
