@@ -8,7 +8,6 @@ import {
   FunnelIcon,
   PencilIcon,
   PlusIcon,
-  SearchIcon,
   SettingsIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -103,17 +102,16 @@ function RunRow({
           </span>
 
           {run.children.length > 0 ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label={`${collapsed ? "Expand" : "Collapse"} ${run.name}`}
               aria-expanded={!collapsed}
               onClick={() => onToggle(run.id)}
-              className="absolute top-1/2 left-6 z-10 ms-(--run-indent) -translate-y-1/2 rounded-sm p-0.5 text-sidebar-foreground/50 hover:text-sidebar-foreground"
+              className="absolute top-1/2 left-5 z-10 ms-(--run-indent) -translate-y-1/2 text-sidebar-foreground/50"
             >
-              <ChevronRightIcon
-                className={cn("size-3.5 transition-transform", !collapsed && "rotate-90")}
-              />
-            </button>
+              <ChevronRightIcon className={cn("transition-transform", !collapsed && "rotate-90")} />
+            </Button>
           ) : null}
 
           <SidebarMenuButton
@@ -379,23 +377,25 @@ export function RunSidebar({
           );
         })}
       </SidebarContent>
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="sm" onClick={onPalette}>
-              <SearchIcon />
-              <span className="min-w-0 flex-1 truncate">Commands</span>
-              <Kbd>⌘K</Kbd>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="sm" onClick={onAppSettings}>
-              <SettingsIcon />
-              <span className="min-w-0 flex-1 truncate">Settings</span>
-              <Kbd>⇧⌘,</Kbd>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarFooter className="flex-row items-center gap-1 border-t">
+        <SidebarMenuButton size="sm" onClick={onAppSettings} className="min-w-0 flex-1">
+          <SettingsIcon />
+          <span className="min-w-0 flex-1 truncate">Settings</span>
+        </SidebarMenuButton>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Open the command palette"
+              onClick={onPalette}
+              className="shrink-0 px-2"
+            >
+              <Kbd className="bg-transparent">⌘K</Kbd>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Open the command palette</TooltipContent>
+        </Tooltip>
       </SidebarFooter>
       <RenameRunDialog
         run={renaming}

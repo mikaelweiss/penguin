@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
 
+import { Button } from "@workspace/ui/components/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -43,11 +44,13 @@ export function RunActivity({ run }: { run: Run }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="shrink-0 border-t px-4 py-2">
-      <CollapsibleTrigger className="flex w-full items-center gap-2 font-mono text-xs text-muted-foreground">
-        <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-        <Spinner className="size-3" />
-        <span className="min-w-0 flex-1 truncate text-left">{latest.text}</span>
-        <span className="shrink-0 tabular-nums">{elapsed(latest.at, now)}</span>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" size="sm" className="w-full justify-start font-mono text-xs">
+          <ChevronRightIcon className={cn("transition-transform", open && "rotate-90")} />
+          <Spinner className="size-3" />
+          <span className="min-w-0 flex-1 truncate text-left">{latest.text}</span>
+          <span className="shrink-0 tabular-nums">{elapsed(latest.at, now)}</span>
+        </Button>
       </CollapsibleTrigger>
       <CollapsibleContent className="ps-6 pt-1">
         {actions.slice(-RECENT).map((line, index) => (
