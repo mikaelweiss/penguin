@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 export default [
   ...nx.configs["flat/base"],
   {
-    ignores: ["**/node_modules/**"],
+    ignores: ["**/node_modules/**", "**/src-tauri/target/**"],
   },
   ...tseslint.configs.recommended,
   {
