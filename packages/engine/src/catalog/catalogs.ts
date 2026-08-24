@@ -40,6 +40,10 @@ export function adaptersDir(catalog: Catalog): string {
   return path.join(catalog.dir, "adapters");
 }
 
+export function skillsDir(catalog: Catalog): string {
+  return path.join(catalog.dir, "skills");
+}
+
 function enabled(): Catalog[] {
   const file = catalogsFile();
   if (!fs.existsSync(file)) return [];

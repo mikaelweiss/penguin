@@ -8,6 +8,7 @@ export {
   homeCatalog,
   projectCatalog,
   roots,
+  skillsDir,
   starterCatalog,
   workflowsDir,
   type Catalog,
@@ -25,5 +26,14 @@ export {
 } from "./adapters.ts";
 
 export { found, locate, searchedWorkflows, type WorkflowFound } from "./workflows.ts";
+
+export {
+  foundSkills,
+  locateSkill,
+  readSkill,
+  searchedSkills,
+  skillsIn,
+  type SkillFound,
+} from "./skills.ts";
 
 export { load } from "./loader.ts";

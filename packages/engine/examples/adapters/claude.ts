@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { adapter, Channel, issuesOf, PenguinError } from "penguin";
+import { adapter, Channel, issuesOf, PenguinError, type Skill } from "penguin";
 
 type OpenOptions = {
   cwd?: string;
@@ -13,11 +14,14 @@ type Chunk = { kind: "text" | "thinking" | "tool"; text: string; detail?: string
 
 type Turn<T> = { output: AsyncIterable<Chunk>; value: Promise<T> };
 
+/** What a turn runs on: a catalog skill with an optional prompt for the dynamic part, or a prompt alone. */
+type TurnAsk = string | { skill: string; prompt?: string };
+
 type TurnFn = {
-  (session: string, prompt: string): Turn<null>;
+  (session: string, ask: TurnAsk): Turn<null>;
   <Shape extends z.ZodObject>(
     session: string,
-    prompt: string,
+    ask: TurnAsk,
     options: { result: Shape },
   ): Turn<z.infer<Shape>>;
 };
@@ -73,6 +77,15 @@ function jsonSchema(shape: z.ZodObject): Record<string, unknown> {
   const schema = z.toJSONSchema(shape) as Record<string, unknown>;
   delete schema["$schema"];
   return schema;
+}
+
+/** The skill's instructions, where its files live when it has any, then the prompt. */
+function withSkill(skill: Skill, prompt: string | undefined): string {
+  const parts = [skill.text];
+  const extras = fs.readdirSync(skill.dir).filter((name) => name !== "SKILL.md");
+  if (extras.length > 0) parts.push(`This skill's files live in ${skill.dir}.`);
+  if (prompt !== undefined && prompt.trim() !== "") parts.push(prompt);
+  return parts.join("\n\n");
 }
 
 export default adapter({
@@ -165,11 +178,12 @@ export default adapter({
       return { ok: true, value: value ?? null };
     }
 
-    const turn = ((session: string, prompt: string, options?: { result?: z.ZodObject }) => {
+    const turn = ((session: string, ask: TurnAsk, options?: { result?: z.ZodObject }) => {
       const opened = sessions.get(session);
       if (opened === undefined) {
         throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
       }
+      const prompt = typeof ask === "string" ? ask : withSkill(host.skill(ask.skill), ask.prompt);
       const output = new Channel<Chunk>();
       const schema = options?.result === undefined ? undefined : jsonSchema(options.result);
       const value = (async () => {

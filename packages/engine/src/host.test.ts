@@ -66,6 +66,31 @@ test("onOutput streams chunks while exec still captures them", async () => {
   expect(done.stdout).toBe("hello");
 });
 
+test("skill reads one skill from the given catalogs", () => {
+  const dir = tempDir();
+  fs.mkdirSync(path.join(dir, "skills", "greet"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "skills", "greet", "SKILL.md"),
+    "---\nname: greet\ndescription: greets. Use for tests.\n---\n\nSay hello.\n",
+  );
+  const host = createHost(dir, { id: "test", dir }, [{ dir, scope: "project" }]);
+  const skill = host.skill("greet");
+  expect(skill.description).toBe("greets. Use for tests.");
+  expect(skill.text).toBe("Say hello.");
+  expect(skill.dir).toBe(path.join(dir, "skills", "greet"));
+});
+
+test("an unknown skill throws and names the installed ones", () => {
+  const dir = tempDir();
+  fs.mkdirSync(path.join(dir, "skills", "greet"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "skills", "greet", "SKILL.md"),
+    "---\nname: greet\ndescription: greets. Use for tests.\n---\n\nSay hello.\n",
+  );
+  const host = createHost(dir, { id: "test", dir }, [{ dir, scope: "project" }]);
+  expect(() => host.skill("missing")).toThrow("no skill named missing. Installed: greet");
+});
+
 test("aborting the signal kills the process", async () => {
   const host = hostFor(tempDir());
   const controller = new AbortController();

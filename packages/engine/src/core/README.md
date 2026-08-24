@@ -129,13 +129,15 @@ installed.
 ## Agents are adapters
 
 An agent CLI is one more outside thing. The starter `agent` role speaks in
-plain data: `open(options)` returns a session id, `turn(session, prompt)`
+plain data: `open(options)` returns a session id, `turn(session, ask)`
 returns a handle with `output` (a stream of what the agent is doing) and
 `value` (a promise of the result, typed when a result shape is given).
+The ask is `{ skill, prompt? }` or a prompt string: reusable instructions
+live as a catalog skill, the prompt carries only runtime data.
 
 ```ts
 const session = await agent.open({ cwd: params.dir });
-const turn = agent.turn(session, PROMPT, { result: Commit });
+const turn = agent.turn(session, { skill: "commit" }, { result: Commit });
 for await (const chunk of turn.output) await view.show(chunk.text);
 const commit = await turn.value;
 ```
@@ -160,7 +162,7 @@ journal and no replay.
 The engine has four jobs, and any feature that needs a fifth is either a new
 adapter, a new workflow, or out of scope:
 
-1. **Catalog.** Find workflow and adapter files across catalog directories.
+1. **Catalog.** Find workflow files, adapter files, and skill folders across catalog directories.
 2. **Ctx.** Validate params and wire installed adapter roles onto ctx.
 3. **Process.** Own the run's working directory and the processes it spawns.
 4. **Trace.** Append each adapter call and outcome to a log, for debugging.

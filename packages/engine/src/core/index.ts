@@ -12,4 +12,5 @@ export type {
   Host,
   RunLocation,
   ShellOptions,
+  Skill,
 } from "./adapter.ts";

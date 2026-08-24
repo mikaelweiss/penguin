@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { z } from "zod";
 import type { CommandResult, ExecOptions, Host } from "../src/core/adapter.ts";
 import definition from "../examples/adapters/claude.ts";
@@ -7,6 +10,7 @@ type Call = { argv: string[]; options: ExecOptions | undefined };
 
 function fakeHost(
   handler: (call: Call, count: number) => Promise<CommandResult>,
+  skill?: Host["skill"],
 ): { host: Host; calls: Call[] } {
   const calls: Call[] = [];
   const host: Host = {
@@ -15,6 +19,11 @@ function fakeHost(
     state: "/tmp",
     run: { id: "test", dir: "/tmp" },
     config: () => undefined,
+    skill:
+      skill ??
+      (() => {
+        throw new Error("no skills installed");
+      }),
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: (argv, options) => {
       const call = { argv, options };
@@ -97,6 +106,45 @@ test("stop aborts the running turn and the session survives", async () => {
   const turn = agent.turn(session, "go");
   await agent.stop(session);
   await expect(turn.value).rejects.toThrow("the turn was stopped");
+});
+
+test("a skill ask sends the skill's instructions, then the prompt", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-skill-"));
+  const { host, calls } = fakeHost(
+    async () => OK,
+    (name) => ({ name, description: "test skill", dir, text: "# The instructions" }),
+  );
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const turn = agent.turn(session, { skill: "commit", prompt: "the branch is main" });
+  await turn.value;
+  expect(calls[0]?.options?.stdin).toBe("# The instructions\n\nthe branch is main");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a skill with extra files says where they live", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-skill-"));
+  fs.writeFileSync(path.join(dir, "REFERENCE.md"), "details\n");
+  const { host, calls } = fakeHost(
+    async () => OK,
+    (name) => ({ name, description: "test skill", dir, text: "# The instructions" }),
+  );
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const turn = agent.turn(session, { skill: "commit" });
+  await turn.value;
+  expect(calls[0]?.options?.stdin).toBe(
+    `# The instructions\n\nThis skill's files live in ${dir}.`,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("an unknown skill fails the turn before the CLI runs", async () => {
+  const { host, calls } = fakeHost(async () => OK);
+  const agent = definition.build(host);
+  const session = await agent.open();
+  expect(() => agent.turn(session, { skill: "missing" })).toThrow("no skills installed");
+  expect(calls).toHaveLength(0);
 });
 
 test("an unopened session is refused with the fix in the message", async () => {

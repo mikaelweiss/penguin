@@ -22,6 +22,16 @@ export type RunLocation = {
   dir: string;
 };
 
+/** One skill from a catalog: a folder holding a SKILL.md in the Agent Skills format. */
+export type Skill = {
+  name: string;
+  description: string;
+  /** The skill's folder, where its extra files live. */
+  dir: string;
+  /** The SKILL.md body, the instructions. */
+  text: string;
+};
+
 /** What the engine hands an adapter's build function. */
 export type Host = {
   /** The run's invoking folder. Relative cwd options resolve against it. */
@@ -34,6 +44,8 @@ export type Host = {
   run: RunLocation;
   /** One value from ~/.penguin/config, or undefined when the key has no line. */
   config(key: string): string | undefined;
+  /** One skill from the run's catalogs, project first. Throws when no catalog holds the name. */
+  skill(name: string): Skill;
   /** Runs one string through a real shell. For constant strings and shell features, never interpolation. */
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   /** Spawns an argv directly, so arguments need no quoting. Aborting the signal kills the process. */
