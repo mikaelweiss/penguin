@@ -44,6 +44,11 @@ export function isLive(run: Run): boolean {
   return run.status === "running" || run.children.some(isLive);
 }
 
+/** A run and every run inside it, outermost first, the order stopping sends them in. */
+export function subtree(run: Run): string[] {
+  return [run.id, ...run.children.flatMap(subtree)];
+}
+
 /** The first run inside this one waiting on an answer, and the ids to expand to reach it. */
 export function findBlocked(run: Run): { expand: string[]; blocked: Run } | undefined {
   for (const child of run.children) {

@@ -1,9 +1,12 @@
 import { useState } from "react";
 import {
   ChevronRightIcon,
+  CircleStopIcon,
+  CopyIcon,
   FolderIcon,
   FolderPlusIcon,
   FunnelIcon,
+  PencilIcon,
   PlusIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -41,7 +44,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@workspace/ui/components/tooltip";
 import { cn } from "@workspace/ui/lib/utils";
 
-import { findBlocked, visibleRuns } from "@/lib/runs";
+import { RenameRunDialog } from "@/components/rename-run-dialog";
+import type { RunActions } from "@/hooks/use-run-actions";
+import { findBlocked, isLive, visibleRuns } from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
 
 function statusColor(run: Run): string {
@@ -60,75 +65,104 @@ type RunRowProps = {
   node: RunNode;
   selected: boolean;
   collapsed: boolean;
+  actions: RunActions;
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
   onReveal: (path: { expand: string[]; blocked: Run }) => void;
+  onRename: (run: Run) => void;
 };
 
-function RunRow({ node, selected, collapsed, onSelect, onToggle, onReveal }: RunRowProps) {
+function RunRow({
+  node,
+  selected,
+  collapsed,
+  actions,
+  onSelect,
+  onToggle,
+  onReveal,
+  onRename,
+}: RunRowProps) {
   const { run, depth } = node;
   const carried = collapsed && !run.ask ? findBlocked(run) : undefined;
 
   return (
-    <SidebarMenuItem
-      className="[--run-indent:calc(var(--run-depth)*--spacing(4))]"
-      style={{ "--run-depth": depth } as React.CSSProperties}
-    >
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute top-1/2 left-2 flex size-4 -translate-y-1/2 items-center justify-center"
-      >
-        <span className={cn("size-1.5 rounded-full", statusColor(run))} />
-      </span>
-
-      {run.children.length > 0 ? (
-        <button
-          type="button"
-          aria-label={`${collapsed ? "Expand" : "Collapse"} ${run.name}`}
-          aria-expanded={!collapsed}
-          onClick={() => onToggle(run.id)}
-          className="absolute top-1/2 left-6 z-10 ms-(--run-indent) -translate-y-1/2 rounded-sm p-0.5 text-sidebar-foreground/50 hover:text-sidebar-foreground"
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SidebarMenuItem
+          className="[--run-indent:calc(var(--run-depth)*--spacing(4))]"
+          style={{ "--run-depth": depth } as React.CSSProperties}
         >
-          <ChevronRightIcon
-            className={cn("size-3.5 transition-transform", !collapsed && "rotate-90")}
-          />
-        </button>
-      ) : null}
-
-      <SidebarMenuButton
-        size="sm"
-        isActive={selected}
-        onClick={() => onSelect(run.id)}
-        className="gap-0 pl-11"
-      >
-        <span className="w-(--run-indent) shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{run.name}</span>
-        <span className="sr-only">{statusLabel(run)}</span>
-      </SidebarMenuButton>
-
-      {run.ask ? (
-        <Badge
-          variant="warning"
-          aria-label={`needs you: ${run.ask.prompt}`}
-          className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
-        >
-          needs you
-        </Badge>
-      ) : null}
-
-      {carried ? (
-        <Badge variant="warning" asChild className="absolute top-1/2 right-2 -translate-y-1/2">
-          <button
-            type="button"
-            aria-label={`Show ${carried.blocked.name}, which needs you`}
-            onClick={() => onReveal(carried)}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-2 flex size-4 -translate-y-1/2 items-center justify-center"
           >
-            needs you
-            <ChevronRightIcon />
-          </button>
-        </Badge>
-      ) : null}
-    </SidebarMenuItem>
+            <span className={cn("size-1.5 rounded-full", statusColor(run))} />
+          </span>
+
+          {run.children.length > 0 ? (
+            <button
+              type="button"
+              aria-label={`${collapsed ? "Expand" : "Collapse"} ${run.name}`}
+              aria-expanded={!collapsed}
+              onClick={() => onToggle(run.id)}
+              className="absolute top-1/2 left-6 z-10 ms-(--run-indent) -translate-y-1/2 rounded-sm p-0.5 text-sidebar-foreground/50 hover:text-sidebar-foreground"
+            >
+              <ChevronRightIcon
+                className={cn("size-3.5 transition-transform", !collapsed && "rotate-90")}
+              />
+            </button>
+          ) : null}
+
+          <SidebarMenuButton
+            size="sm"
+            isActive={selected}
+            onClick={() => onSelect(run.id)}
+            className="gap-0 pl-11"
+          >
+            <span className="w-(--run-indent) shrink-0" />
+            <span className="min-w-0 flex-1 truncate">{run.name}</span>
+            <span className="sr-only">{statusLabel(run)}</span>
+          </SidebarMenuButton>
+
+          {run.ask ? (
+            <Badge
+              variant="warning"
+              aria-label={`needs you: ${run.ask.prompt}`}
+              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
+            >
+              needs you
+            </Badge>
+          ) : null}
+
+          {carried ? (
+            <Badge variant="warning" asChild className="absolute top-1/2 right-2 -translate-y-1/2">
+              <button
+                type="button"
+                aria-label={`Show ${carried.blocked.name}, which needs you`}
+                onClick={() => onReveal(carried)}
+              >
+                needs you
+                <ChevronRightIcon />
+              </button>
+            </Badge>
+          ) : null}
+        </SidebarMenuItem>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem disabled={!isLive(run)} onSelect={() => actions.stop(run)}>
+          <CircleStopIcon />
+          Stop
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onRename(run)}>
+          <PencilIcon />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => actions.copyDir(run)}>
+          <CopyIcon />
+          Copy directory
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -210,6 +244,7 @@ function DirectoryRow({
 type RunSidebarProps = {
   projects: Project[];
   selectedId: string | undefined;
+  actions: RunActions;
   onSelect: (id: string) => void;
   onNewWorkflow: (dir: string) => void;
   onAddDirectory: () => void;
@@ -220,6 +255,7 @@ type RunSidebarProps = {
 export function RunSidebar({
   projects,
   selectedId,
+  actions,
   onSelect,
   onNewWorkflow,
   onAddDirectory,
@@ -228,6 +264,7 @@ export function RunSidebar({
 }: RunSidebarProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [finished, setFinished] = useState<ReadonlySet<string>>(new Set());
+  const [renaming, setRenaming] = useState<Run | undefined>(undefined);
 
   const toggleRun = (id: string) =>
     setCollapsed((current) => {
@@ -278,6 +315,13 @@ export function RunSidebar({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
+        {actions.error ? (
+          <Alert variant="destructive" className="m-2 w-auto">
+            <TriangleAlertIcon />
+            <AlertTitle>Cannot act on the run</AlertTitle>
+            <AlertDescription>{actions.error}</AlertDescription>
+          </Alert>
+        ) : null}
         {projects.length === 0 ? (
           <Empty>
             <EmptyHeader>
@@ -316,9 +360,11 @@ export function RunSidebar({
                       node={node}
                       selected={node.run.id === selectedId}
                       collapsed={collapsed.has(node.run.id)}
+                      actions={actions}
                       onSelect={onSelect}
                       onToggle={toggleRun}
                       onReveal={reveal}
+                      onRename={setRenaming}
                     />
                   ))}
                 </SidebarMenu>
@@ -327,6 +373,11 @@ export function RunSidebar({
           );
         })}
       </SidebarContent>
+      <RenameRunDialog
+        run={renaming}
+        onClose={() => setRenaming(undefined)}
+        onRename={actions.rename}
+      />
     </Sidebar>
   );
 }

@@ -90,11 +90,13 @@ fn run_folder(runs: PathBuf, id: &str) -> Option<PathBuf> {
     Some(runs.join(id))
 }
 
-fn append_line(dir: &PathBuf, entry: &serde_json::Value) -> std::io::Result<()> {
-    let mut file = File::options()
-        .create(true)
-        .append(true)
-        .open(dir.join("inbox.jsonl"))?;
+/// The instant format every run file line carries.
+fn stamp() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+fn append_line(path: &Path, entry: &serde_json::Value) -> std::io::Result<()> {
+    let mut file = File::options().create(true).append(true).open(path)?;
     writeln!(file, "{entry}")
 }
 
@@ -104,7 +106,51 @@ fn append_inbox(app: tauri::AppHandle, id: String, entry: serde_json::Value) -> 
     let dir = runs_dir(&app)
         .and_then(|runs| run_folder(runs, &id))
         .ok_or_else(|| format!("no inbox for {id}"))?;
-    append_line(&dir, &entry).map_err(|cause| cause.to_string())
+    append_line(&dir.join("inbox.jsonl"), &entry).map_err(|cause| cause.to_string())
+}
+
+/// A `{"name": ...}` note on the run's own file. The newest one is the run's name.
+#[tauri::command]
+fn rename_run(app: tauri::AppHandle, id: String, name: String) -> Result<(), String> {
+    let dir = runs_dir(&app)
+        .and_then(|runs| run_folder(runs, &id))
+        .ok_or_else(|| format!("no run named {id}"))?;
+    let note = serde_json::json!({ "at": stamp(), "name": name });
+    append_line(&dir.join("run.jsonl"), &note).map_err(|cause| cause.to_string())
+}
+
+#[cfg(unix)]
+fn signal_group(pid: i32) -> bool {
+    // The run leads its own group, so this reaches the agents it spawned with it.
+    unsafe { libc::killpg(pid, libc::SIGTERM) == 0 }
+}
+
+#[cfg(not(unix))]
+fn signal_group(_pid: i32) -> bool {
+    false
+}
+
+/// SIGTERM to each run's process group. Callers pass a run and every run inside it, outermost first.
+#[tauri::command]
+fn stop_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let runs = runs_dir(&app).ok_or("no runs directory")?;
+    let mut missed = Vec::new();
+    for id in ids {
+        let pid = run_folder(runs.clone(), &id)
+            .map(|dir| dir.join("run.jsonl"))
+            .as_ref()
+            .and_then(head_pid);
+        match pid {
+            // A run that already left has nothing to stop.
+            Some(pid) if !pid_alive(pid) => {}
+            Some(pid) if signal_group(pid) => {}
+            _ => missed.push(id),
+        }
+    }
+    if missed.is_empty() {
+        return Ok(());
+    }
+    Err(format!("could not stop {}", missed.join(", ")))
 }
 
 fn dirs_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -244,15 +290,12 @@ struct Job<'a> {
 /// A fresh run id, its folder claimed under the runs directory the way the engine claims one.
 fn claim_id(runs: &Path) -> Result<String, String> {
     std::fs::create_dir_all(runs).map_err(|cause| cause.to_string())?;
-    let stamp = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string()
-        .replace(':', "-");
+    let claimed = stamp().replace(':', "-");
     let pid = std::process::id();
-    let mut id = format!("{stamp}-{pid}");
+    let mut id = format!("{claimed}-{pid}");
     let mut extra = 2;
     while runs.join(&id).exists() {
-        id = format!("{stamp}-{pid}-{extra}");
+        id = format!("{claimed}-{pid}-{extra}");
         extra += 1;
     }
     std::fs::create_dir(runs.join(&id)).map_err(|cause| cause.to_string())?;
@@ -345,6 +388,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             read_runs,
             append_inbox,
@@ -352,7 +396,9 @@ pub fn run() {
             write_dirs,
             project_root,
             describe,
-            start_run
+            start_run,
+            rename_run,
+            stop_runs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -434,11 +480,24 @@ mod tests {
     fn an_inbox_line_lands_as_its_own_json_line() {
         let dir = temp("inbox");
         std::fs::create_dir_all(&dir).unwrap();
-        append_line(&dir, &serde_json::json!({ "answer": "yes" })).unwrap();
-        append_line(&dir, &serde_json::json!({ "message": "stop" })).unwrap();
+        let inbox = dir.join("inbox.jsonl");
+        append_line(&inbox, &serde_json::json!({ "answer": "yes" })).unwrap();
+        append_line(&inbox, &serde_json::json!({ "message": "stop" })).unwrap();
 
-        let text = std::fs::read_to_string(dir.join("inbox.jsonl")).unwrap();
+        let text = std::fs::read_to_string(inbox).unwrap();
         assert_eq!(text, "{\"answer\":\"yes\"}\n{\"message\":\"stop\"}\n");
+    }
+
+    #[test]
+    fn a_name_note_lands_on_the_run_file_after_what_it_held() {
+        let dir = temp("rename");
+        let path = run_file(&dir, std::process::id() as i32, &[]);
+        append_line(&path, &serde_json::json!({ "at": stamp(), "name": "ship it" })).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let last: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+        assert_eq!(last["name"], "ship it");
+        assert_eq!(text.lines().count(), 2);
     }
 
     fn real(path: &Path) -> String {

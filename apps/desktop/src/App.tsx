@@ -14,6 +14,7 @@ import { RunSidebar } from "@/components/run-sidebar";
 import { RunTranscript } from "@/components/run-transcript";
 import { useDirectories } from "@/hooks/use-directories";
 import { useInbox } from "@/hooks/use-inbox";
+import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
 import { findRun } from "@/lib/runs";
 
@@ -21,6 +22,7 @@ export function App() {
   const directories = useDirectories();
   const { projects, error } = useRuns(directories.dirs);
   const inbox = useInbox();
+  const actions = useRunActions();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [startingIn, setStartingIn] = useState<string | undefined>(undefined);
   const selected = findRun(projects, selectedId);
@@ -32,6 +34,7 @@ export function App() {
         <RunSidebar
           projects={projects}
           selectedId={selectedId}
+          actions={actions}
           onSelect={setSelectedId}
           onNewWorkflow={setStartingIn}
           onAddDirectory={directories.add}
