@@ -1,27 +1,19 @@
 import { call, workflow } from "penguin";
 import { z } from "zod";
-import commit from "./commit.ts";
+import openPr from "./open-pr.ts";
+import work from "./work.ts";
 
 export default workflow({
-  description: "commit the tree, then push when the user says so",
-  params: z.object({ dir: z.string().optional() }),
+  description:
+    "ticket to open pull request: triage splits the ticket, then plan and implement per task in a worktree, then the pull request",
+  params: z.object({
+    ticket: z.string(),
+    rounds: z.number().int().min(1).default(3),
+  }),
 
   async run(ctx) {
-    const { params, vcs, view } = ctx;
-    const done = await call(ctx, commit, { dir: params.dir });
-    if (!done.committed) return { ...done, pushed: false };
-
-    const head = await vcs.head({ cwd: params.dir });
-    if (!head.ok || head.detached) {
-      await view.show(`not pushing: ${head.detached ? "detached HEAD" : head.reason}`);
-      return { ...done, pushed: false };
-    }
-
-    const answer = await view.ask(`Push ${head.branch} to origin? (yes/no)`, z.enum(["yes", "no"]));
-    if (answer === "no") return { ...done, pushed: false };
-
-    const pushed = await vcs.push(head.branch, { cwd: params.dir });
-    await view.show(pushed.ok ? `pushed ${head.branch}` : `push failed: ${pushed.reason}`);
-    return { ...done, pushed: pushed.ok };
+    const worked = await call(ctx, work, { ticket: ctx.params.ticket, rounds: ctx.params.rounds });
+    if (!worked.done) return { url: "" };
+    return call(ctx, openPr, { dir: worked.path });
   },
 });
