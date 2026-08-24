@@ -1,12 +1,36 @@
 import { useState } from "react";
-import { ChevronRightIcon, FolderIcon, FunnelIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  FunnelIcon,
+  PlusIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+} from "lucide-react";
 
+import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
 import { Badge } from "@workspace/ui/components/badge";
+import { Button } from "@workspace/ui/components/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@workspace/ui/components/context-menu";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@workspace/ui/components/empty";
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
-  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -14,6 +38,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@workspace/ui/components/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@workspace/ui/components/tooltip";
 import { cn } from "@workspace/ui/lib/utils";
 
 import { findBlocked, visibleRuns } from "@/lib/runs";
@@ -40,14 +65,7 @@ type RunRowProps = {
   onReveal: (path: { expand: string[]; blocked: Run }) => void;
 };
 
-function RunRow({
-  node,
-  selected,
-  collapsed,
-  onSelect,
-  onToggle,
-  onReveal,
-}: RunRowProps) {
+function RunRow({ node, selected, collapsed, onSelect, onToggle, onReveal }: RunRowProps) {
   const { run, depth } = node;
   const carried = collapsed && !run.ask ? findBlocked(run) : undefined;
 
@@ -114,13 +132,100 @@ function RunRow({
   );
 }
 
+type DirectoryRowProps = {
+  project: Project;
+  showFinished: boolean;
+  onToggleFinished: (id: string) => void;
+  onNewWorkflow: (dir: string) => void;
+  onRemove: (dir: string) => void;
+};
+
+function DirectoryRow({
+  project,
+  showFinished,
+  onToggleFinished,
+  onNewWorkflow,
+  onRemove,
+}: DirectoryRowProps) {
+  const finishedLabel = `${showFinished ? "Hide" : "Show"} finished runs in ${project.name}`;
+  const newLabel = `New workflow in ${project.name}`;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SidebarGroupLabel className="group/dir gap-1.5">
+          <FolderIcon />
+          <span className="min-w-0 flex-1 truncate">{project.name}</span>
+          <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within/dir:opacity-100 group-hover/dir:opacity-100">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={finishedLabel}
+                  aria-pressed={showFinished}
+                  onClick={() => onToggleFinished(project.id)}
+                  className={cn(!showFinished && "text-sidebar-foreground/50")}
+                >
+                  <FunnelIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{finishedLabel}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={newLabel}
+                  onClick={() => onNewWorkflow(project.dir)}
+                >
+                  <PlusIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{newLabel}</TooltipContent>
+            </Tooltip>
+          </span>
+        </SidebarGroupLabel>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onNewWorkflow(project.dir)}>
+          <PlusIcon />
+          New workflow
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onToggleFinished(project.id)}>
+          <FunnelIcon />
+          {showFinished ? "Hide finished runs" : "Show finished runs"}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={() => onRemove(project.dir)}>
+          <Trash2Icon />
+          Remove directory
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 type RunSidebarProps = {
   projects: Project[];
   selectedId: string | undefined;
   onSelect: (id: string) => void;
+  onNewWorkflow: (dir: string) => void;
+  onAddDirectory: () => void;
+  onRemoveDirectory: (dir: string) => void;
+  error: string | undefined;
 };
 
-export function RunSidebar({ projects, selectedId, onSelect }: RunSidebarProps) {
+export function RunSidebar({
+  projects,
+  selectedId,
+  onSelect,
+  onNewWorkflow,
+  onAddDirectory,
+  onRemoveDirectory,
+  error,
+}: RunSidebarProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [finished, setFinished] = useState<ReadonlySet<string>>(new Set());
 
@@ -149,12 +254,46 @@ export function RunSidebar({ projects, selectedId, onSelect }: RunSidebarProps) 
 
   return (
     <Sidebar>
-      <SidebarHeader className="h-12 justify-center px-4">
+      <SidebarHeader className="h-12 flex-row items-center justify-between gap-2 px-4">
         <div className="text-sm font-semibold">penguin</div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Add a directory"
+              onClick={onAddDirectory}
+            >
+              <FolderPlusIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Add a directory</TooltipContent>
+        </Tooltip>
       </SidebarHeader>
       <SidebarContent>
+        {error ? (
+          <Alert variant="destructive" className="m-2 w-auto">
+            <TriangleAlertIcon />
+            <AlertTitle>Cannot save the directory list</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
         {projects.length === 0 ? (
-          <div className="px-4 py-3 text-sm text-sidebar-foreground/70">No runs yet.</div>
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FolderIcon />
+              </EmptyMedia>
+              <EmptyTitle>No directories</EmptyTitle>
+              <EmptyDescription>Add a project to start a workflow in it.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button variant="outline" size="sm" onClick={onAddDirectory}>
+                <FolderPlusIcon data-icon="inline-start" />
+                Add a directory
+              </Button>
+            </EmptyContent>
+          </Empty>
         ) : null}
         {projects.map((project) => {
           const showFinished = finished.has(project.id);
@@ -162,18 +301,13 @@ export function RunSidebar({ projects, selectedId, onSelect }: RunSidebarProps) 
 
           return (
             <SidebarGroup key={project.id}>
-              <SidebarGroupLabel>
-                <FolderIcon />
-                <span className="ms-1.5 truncate">{project.name}</span>
-              </SidebarGroupLabel>
-              <SidebarGroupAction
-                aria-label={`${showFinished ? "Hide" : "Show"} finished runs in ${project.name}`}
-                aria-pressed={showFinished}
-                onClick={() => toggleFinished(project.id)}
-                className={cn(!showFinished && "text-sidebar-foreground/50")}
-              >
-                <FunnelIcon />
-              </SidebarGroupAction>
+              <DirectoryRow
+                project={project}
+                showFinished={showFinished}
+                onToggleFinished={toggleFinished}
+                onNewWorkflow={onNewWorkflow}
+                onRemove={onRemoveDirectory}
+              />
               <SidebarGroupContent>
                 <SidebarMenu>
                   {rows.map((node) => (
@@ -196,4 +330,3 @@ export function RunSidebar({ projects, selectedId, onSelect }: RunSidebarProps) 
     </Sidebar>
   );
 }
-

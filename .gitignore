@@ -3,3 +3,5 @@ node_modules/
 .eslintcache
 dist/
 apps/docs/public/styles.css
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/engine/

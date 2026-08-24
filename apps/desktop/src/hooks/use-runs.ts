@@ -14,7 +14,7 @@ export type Runs = {
 };
 
 /** Follows every run file, re-reading only the bytes each one has grown by. */
-export function useRuns(): Runs {
+export function useRuns(dirs: string[]): Runs {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -47,7 +47,7 @@ export function useRuns(): Runs {
       }
 
       tracked = next;
-      if (changed) setProjects(toProjects([...next.values()]));
+      if (changed) setProjects(toProjects([...next.values()], dirs));
     };
 
     const loop = async () => {
@@ -65,7 +65,7 @@ export function useRuns(): Runs {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [dirs]);
 
   return { projects, error };
 }

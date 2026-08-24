@@ -228,14 +228,20 @@ function place(file: RunFile): Placed | undefined {
   };
 }
 
-/** The run files as a tree of projects, grouped by each run's git root and linked by parent id. */
-export function toProjects(files: RunFile[]): Project[] {
+/**
+ * The run files as a tree of projects, grouped by each run's git root and linked by parent id.
+ * The directories the user added come through even before they hold a run.
+ */
+export function toProjects(files: RunFile[], dirs: string[]): Project[] {
   const placed = files
     .map(place)
     .filter((entry): entry is Placed => entry !== undefined)
     .sort((a, b) => a.at.localeCompare(b.at));
   const byId = new Map(placed.map((entry) => [entry.run.id, entry]));
   const projects = new Map<string, Project>();
+  for (const dir of dirs) {
+    projects.set(dir, { id: dir, name: baseName(dir), dir, runs: [] });
+  }
 
   for (const entry of placed) {
     const parent = entry.parent === undefined ? undefined : byId.get(entry.parent);

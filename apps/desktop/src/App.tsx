@@ -6,26 +6,43 @@ import { Separator } from "@workspace/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/sidebar";
 import { TooltipProvider } from "@workspace/ui/components/tooltip";
 
+import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
 import { RunActivity } from "@/components/run-activity";
 import { RunBreadcrumb } from "@/components/run-breadcrumb";
 import { RunComposer } from "@/components/run-composer";
 import { RunSidebar } from "@/components/run-sidebar";
 import { RunTranscript } from "@/components/run-transcript";
+import { useDirectories } from "@/hooks/use-directories";
 import { useInbox } from "@/hooks/use-inbox";
 import { useRuns } from "@/hooks/use-runs";
 import { findRun } from "@/lib/runs";
 
 export function App() {
-  const { projects, error } = useRuns();
+  const directories = useDirectories();
+  const { projects, error } = useRuns(directories.dirs);
   const inbox = useInbox();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [startingIn, setStartingIn] = useState<string | undefined>(undefined);
   const selected = findRun(projects, selectedId);
   const run = selected?.run;
 
   return (
     <TooltipProvider>
       <SidebarProvider className="isolate h-svh">
-        <RunSidebar projects={projects} selectedId={selectedId} onSelect={setSelectedId} />
+        <RunSidebar
+          projects={projects}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onNewWorkflow={setStartingIn}
+          onAddDirectory={directories.add}
+          onRemoveDirectory={directories.remove}
+          error={directories.error}
+        />
+        <NewWorkflowDialog
+          dir={startingIn}
+          onClose={() => setStartingIn(undefined)}
+          onStarted={setSelectedId}
+        />
         <SidebarInset className="min-w-0 overflow-hidden">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
