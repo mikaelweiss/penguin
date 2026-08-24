@@ -2,8 +2,8 @@ import { Trash2Icon } from "lucide-react";
 
 import { Button } from "@workspace/ui/components/button";
 import { Field, FieldContent, FieldDescription, FieldTitle } from "@workspace/ui/components/field";
-import { Spinner } from "@workspace/ui/components/spinner";
 
+import { ReadingCatalogs } from "@/components/reading-catalogs";
 import { DefinitionList, SettingsPane, SettingsShell } from "@/components/settings-shell";
 import type { Definition } from "@/components/settings-shell";
 import { useCatalogs } from "@/hooks/use-catalogs";
@@ -53,10 +53,7 @@ export function ProjectSettingsDialog({
 
   const listing = (items: Definition[], empty: string) =>
     reading ? (
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <Spinner />
-        Reading the catalogs
-      </div>
+      <ReadingCatalogs />
     ) : (
       <DefinitionList items={items} empty={empty} />
     );
@@ -68,7 +65,7 @@ export function ProjectSettingsDialog({
       title={project === undefined ? "Project settings" : `${project.name} settings`}
       description="What this project holds, and where it lives."
       lead={
-        <p className="truncate px-2.5 pt-1 font-mono text-xs text-muted-foreground">
+        <p className="truncate px-2 pb-2 font-mono text-xs text-muted-foreground">
           {project?.dir}
         </p>
       }

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
@@ -18,9 +18,20 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@workspace/ui/components/item";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@workspace/ui/components/tabs";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@workspace/ui/components/sidebar";
 
 export type Section = { value: string; label: string };
+
+const Showing = createContext<string | undefined>(undefined);
 
 type SettingsShellProps = {
   open: boolean;
@@ -43,6 +54,8 @@ export function SettingsShell({
   sections,
   children,
 }: SettingsShellProps) {
+  const [showing, setShowing] = useState(sections[0]?.value);
+
   return (
     <Dialog
       open={open}
@@ -55,19 +68,33 @@ export function SettingsShell({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <Tabs orientation="vertical" defaultValue={sections[0]?.value} className="min-h-0 gap-0">
-          <div className="flex w-36 shrink-0 flex-col gap-2 border-r bg-muted/30 p-2 sm:w-44">
-            {lead}
-            <TabsList variant="line" className="w-full items-stretch">
-              {sections.map((section) => (
-                <TabsTrigger key={section.value} value={section.value} className="px-2.5 py-1.5">
-                  {section.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-          {children}
-        </Tabs>
+        <SidebarProvider
+          className="h-full min-h-0 items-start"
+          style={{ "--sidebar-width": "11rem" } as React.CSSProperties}
+        >
+          <Sidebar collapsible="none" className="border-r">
+            <SidebarContent>
+              <SidebarGroup>
+                {lead}
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {sections.map((section) => (
+                      <SidebarMenuItem key={section.value}>
+                        <SidebarMenuButton
+                          isActive={section.value === showing}
+                          onClick={() => setShowing(section.value)}
+                        >
+                          {section.label}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </SidebarContent>
+          </Sidebar>
+          <Showing.Provider value={showing}>{children}</Showing.Provider>
+        </SidebarProvider>
       </DialogContent>
     </Dialog>
   );
@@ -81,8 +108,11 @@ type SettingsPaneProps = {
 };
 
 export function SettingsPane({ value, heading, trouble, children }: SettingsPaneProps) {
+  const showing = useContext(Showing);
+  if (showing !== value) return null;
+
   return (
-    <TabsContent value={value} className="min-w-0 overflow-y-auto p-6">
+    <main className="min-w-0 flex-1 overflow-y-auto p-6 text-sm">
       <h2 className="mb-4 font-semibold">{heading}</h2>
       {trouble === undefined ? null : (
         <Alert variant="destructive" className="mb-4">
@@ -92,7 +122,7 @@ export function SettingsPane({ value, heading, trouble, children }: SettingsPane
         </Alert>
       )}
       {children}
-    </TabsContent>
+    </main>
   );
 }
 
