@@ -129,6 +129,13 @@ export default adapter({
           name: string,
           options?: { ref?: string; from?: string },
         ): Promise<{ ok: boolean; path: string; exists: boolean; reason: string }> {
+          // The note tells frontends where the run's work moved, so the terminal and diff follow.
+          const moved = (dir: string): void => {
+            fs.appendFileSync(
+              path.join(host.run.dir, "run.jsonl"),
+              `${JSON.stringify({ at: new Date().toISOString(), dir })}\n`,
+            );
+          };
           const root = await git(["rev-parse", "--show-toplevel"]);
           const project = path.basename(root.stdout.trim() === "" ? host.cwd : root.stdout.trim());
           const base = host.config("worktrees") ?? path.join(host.home, "worktrees");
@@ -141,6 +148,7 @@ export default adapter({
             if (fetched.code !== 0)
               return { ok: false, path: target, exists: false, reason: fetched.stderr.trim() };
             const done = await git(["worktree", "add", "--detach", target, "FETCH_HEAD"]);
+            if (done.code === 0) moved(target);
             return {
               ok: done.code === 0,
               path: target,
@@ -151,6 +159,7 @@ export default adapter({
           // A local ref, so a worktree can start on a commit that has never reached the remote.
           const start = options?.from === undefined ? [] : [options.from];
           const done = await git(["worktree", "add", "-b", name, target, ...start]);
+          if (done.code === 0) moved(target);
           return { ok: done.code === 0, path: target, exists: false, reason: done.stderr.trim() };
         },
         async remove(target: string, options?: { force?: boolean }): Promise<Done> {

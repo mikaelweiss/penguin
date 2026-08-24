@@ -103,6 +103,23 @@ test("pull refuses to touch diverged work; resetHard is the explicit discard", a
   expect(fs.existsSync(path.join(ours.dir, "ours.txt"))).toBe(false);
 });
 
+test("worktree.add notes the new folder in the run's file", async () => {
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const { dir, host, vcs } = await repo();
+    await commitFile({ dir, host }, "base.txt", "base");
+    const added = await vcs.worktree.add("feature");
+    expect(added.ok).toBe(true);
+    expect(added.path.startsWith(path.join(home, "worktrees"))).toBe(true);
+    const written = fs.readFileSync(path.join(dir, "run.jsonl"), "utf8");
+    const note = JSON.parse(written.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>;
+    expect(note["dir"]).toBe(added.path);
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});
+
 test("pull fast-forwards when histories have not diverged", async () => {
   const bare = tempDir("penguin-bare-");
   await git(hostFor(bare), ["init", "-q", "--bare"]);
