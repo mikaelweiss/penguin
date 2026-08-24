@@ -25,7 +25,6 @@ const MARKERS: Record<OutputLine["kind"], string> = {
   tool: "",
   ask: "?",
   answer: ">",
-  message: ">",
 };
 
 function markerColor(kind: OutputLine["kind"]): string {

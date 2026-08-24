@@ -91,6 +91,7 @@ function RunRow({
       {run.ask ? (
         <Badge
           variant="warning"
+          aria-label={`needs you: ${run.ask.prompt}`}
           className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
         >
           needs you
@@ -152,6 +153,9 @@ export function RunSidebar({ projects, selectedId, onSelect }: RunSidebarProps) 
         <div className="text-sm font-semibold">penguin</div>
       </SidebarHeader>
       <SidebarContent>
+        {projects.length === 0 ? (
+          <div className="px-4 py-3 text-sm text-sidebar-foreground/70">No runs yet.</div>
+        ) : null}
         {projects.map((project) => {
           const showFinished = finished.has(project.id);
           const rows = visibleRuns(project, { collapsed, showFinished });
