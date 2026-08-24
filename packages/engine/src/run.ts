@@ -8,7 +8,7 @@ import { load } from "./catalog/loader.ts";
 import { PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
 import { RUN, type RunHooks } from "./core/workflow.ts";
 import { createHost } from "./host.ts";
-import { runDir } from "./paths.ts";
+import { projectRoot, runDir } from "./paths.ts";
 import { createTrace, openJournal, runId, type Trace } from "./trace.ts";
 
 export { createHost } from "./host.ts";
@@ -40,12 +40,12 @@ export async function run(
   const journal =
     options?.resume === undefined ? undefined : openJournal(options.resume, file, parsed);
   const trace = createTrace(
-    { id, workflow: file, params: parsed, cwd, parent: options?.parent },
+    { id, workflow: file, params: parsed, cwd, root: projectRoot(cwd), parent: options?.parent },
     journal,
   );
-  const host = createHost(cwd, { id, dir: trace.dir });
   const list =
     options?.catalogs === undefined ? roots(cwd) : [...options.catalogs, builtinCatalog()];
+  const host = createHost(cwd, { id, dir: trace.dir }, list);
   const found = await installedIn(list);
   const ctx: Record<PropertyKey, unknown> = { params: parsed };
   for (const role of new Set(found.map((entry) => entry.role))) {

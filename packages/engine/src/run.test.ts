@@ -91,6 +91,7 @@ test("a run writes its file: head, each adapter call, and the outcome", async ()
   if (first === undefined) throw new Error("no run folder");
   const written = fs.readFileSync(path.join(runsDir(), first, "run.jsonl"), "utf8");
   expect(written).toContain('"pid"');
+  expect(written).toContain('"root"');
   expect(written).toContain("echo.say");
   expect(written).toContain('"pending":true');
   expect(written).toContain("hello pip");

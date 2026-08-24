@@ -20,6 +20,8 @@ export type RunInfo = {
   workflow: string;
   params: unknown;
   cwd: string;
+  /** The git project's root, how frontends group worktree runs under their project. */
+  root: string;
   parent?: string | undefined;
 };
 
@@ -108,6 +110,7 @@ export function createTrace(info: RunInfo, journal?: Entry[]): Trace {
     workflow: info.workflow,
     params: safe(info.params),
     cwd: info.cwd,
+    root: info.root,
     ...(info.parent === undefined ? {} : { parent: info.parent }),
   });
 
