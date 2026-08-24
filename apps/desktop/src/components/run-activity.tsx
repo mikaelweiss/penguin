@@ -38,7 +38,7 @@ export function RunActivity({ run }: { run: Run }) {
   const [open, setOpen] = useState(false);
   const now = useSecond();
 
-  const actions = run.output.filter((line) => line.kind === "tool");
+  const actions = run.output.filter((line) => line.kind === "tool" || line.kind === "waiting");
   const latest = actions.at(-1);
   if (run.status !== "running" || run.ask !== undefined || latest === undefined) return null;
 

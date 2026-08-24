@@ -50,11 +50,12 @@ import { cn } from "@workspace/ui/lib/utils";
 import { RenameRunDialog } from "@/components/rename-run-dialog";
 import type { RunActions } from "@/hooks/use-run-actions";
 import type { RunTree } from "@/hooks/use-run-tree";
-import { findBlocked, isLive, visibleRuns } from "@/lib/runs";
+import { findBlocked, isIdle, isLive, visibleRuns } from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
 
 function statusColor(run: Run): string {
   if (run.ask) return "bg-warning";
+  if (isIdle(run)) return "border border-success";
   if (run.status === "running") return "bg-success animate-pulse";
   if (run.status === "done") return "bg-muted-foreground/40";
   return "bg-destructive";
@@ -62,6 +63,7 @@ function statusColor(run: Run): string {
 
 function statusLabel(run: Run): string {
   if (run.ask) return "needs you";
+  if (isIdle(run)) return "waiting";
   return run.status;
 }
 

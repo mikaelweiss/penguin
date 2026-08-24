@@ -3,8 +3,11 @@ import { z } from "zod";
 export type Message = { text: string };
 
 export type ShowOptions = {
-  /** "tool" marks an agent's action line. Frontends render it dimmer and feed the activity line. */
-  kind?: "tool";
+  /**
+   * "tool" marks an agent's action line. Frontends render it dimmer and feed the activity line.
+   * "waiting" says the run idles on an outside event until it shows anything else.
+   */
+  kind?: "tool" | "waiting";
 };
 
 export type Ask = {

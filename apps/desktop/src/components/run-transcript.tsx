@@ -1,4 +1,4 @@
-import { ListTreeIcon } from "lucide-react";
+import { ActivityIcon, ListTreeIcon } from "lucide-react";
 
 import {
   Empty,
@@ -25,6 +25,7 @@ import type { OutputLine, Run } from "@/lib/runs";
 const MARKERS: Record<OutputLine["kind"], string> = {
   show: "",
   tool: "",
+  waiting: "",
   ask: "?",
   answer: ">",
   message: ">",
@@ -48,7 +49,7 @@ function TranscriptLine({ line }: { line: OutputLine }) {
           <span
             className={cn(
               "min-w-0 flex-1 whitespace-pre-wrap",
-              line.kind === "tool" && "ps-4 text-muted-foreground",
+              (line.kind === "tool" || line.kind === "waiting") && "ps-4 text-muted-foreground",
               line.kind === "problem" && "text-destructive",
             )}
           >
@@ -93,6 +94,20 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
   const closing = CLOSING[run.status];
   const reason = run.problem ?? log;
   const lines = [...run.output, ...sent];
+
+  if (lines.length === 0 && run.status === "running") {
+    return (
+      <Empty className="flex-1">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <ActivityIcon />
+          </EmptyMedia>
+          <EmptyTitle>Running</EmptyTitle>
+          <EmptyDescription>No output yet.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
 
   return (
     <MessageScrollerProvider>

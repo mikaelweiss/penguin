@@ -297,7 +297,7 @@ type Workflow&lt;Schema extends z.ZodObject = z.ZodObject, R = unknown&gt; = {
 };
 
 type View = {
-  show(text: string, options?: { kind?: "tool" }): Promise&lt;void&gt;;
+  show(text: string, options?: { kind?: "tool" | "waiting" }): Promise&lt;void&gt;;
   ask: Ask;
   listen(): AsyncIterable&lt;{ text: string }&gt;;
 };

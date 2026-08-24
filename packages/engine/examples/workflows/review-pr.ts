@@ -258,6 +258,7 @@ export default workflow({
           owed = false;
           continue;
         }
+        await view.show(`waiting for changes on PR #${pr.number}`, { kind: "waiting" });
         const change = await inbound;
         inbound = changes.next();
         if (change.kind === "closed") {

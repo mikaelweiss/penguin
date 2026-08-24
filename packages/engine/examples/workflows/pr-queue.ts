@@ -13,6 +13,7 @@ export default workflow({
     const reviewing = new Set<number>();
 
     for (;;) {
+      await view.show("waiting for review requests", { kind: "waiting" });
       const request = await requests.next();
       if (reviewing.has(request.number)) continue;
       reviewing.add(request.number);

@@ -3,7 +3,7 @@ import type { Attachment } from "@/lib/attachments";
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
 
 export type OutputLine = {
-  kind: "show" | "tool" | "ask" | "answer" | "message" | "problem";
+  kind: "show" | "tool" | "waiting" | "ask" | "answer" | "message" | "problem";
   text: string;
   at: string;
   /** What a sent message carried. The run file holds only the paths. */
@@ -48,6 +48,11 @@ export type RunNode = {
 
 export function isLive(run: Run): boolean {
   return run.status === "running" || run.children.some(isLive);
+}
+
+/** The run's last word says it waits on an outside event. */
+export function isIdle(run: Run): boolean {
+  return run.status === "running" && run.ask === undefined && run.output.at(-1)?.kind === "waiting";
 }
 
 /** A run and every run inside it, outermost first, the order stopping sends them in. */
@@ -192,7 +197,9 @@ function outputOf(entries: Entry[], pinned: Entry | undefined): OutputLine[] {
     const at = text(entry["at"]) ?? "";
     if (entry["call"] === "view.show" && entry["pending"] === true) {
       const options = args[1] as { kind?: string } | undefined;
-      lines.push({ kind: options?.kind === "tool" ? "tool" : "show", text: display(args[0]), at });
+      const kind =
+        options?.kind === "tool" || options?.kind === "waiting" ? options.kind : "show";
+      lines.push({ kind, text: display(args[0]), at });
     } else if (entry["call"] === "view.ask" && entry["pending"] === true) {
       lines.push({ kind: "ask", text: display(args[0]), at });
     } else if (entry["call"] === "view.ask" && "outcome" in entry) {
