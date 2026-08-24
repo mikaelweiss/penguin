@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { homeCatalog, projectCatalog, roots, starterCatalog } from "./catalogs.ts";
+import { builtinCatalog, homeCatalog, projectCatalog, roots, starterCatalog } from "./catalogs.ts";
 
 let temps: string[] = [];
 
@@ -29,10 +29,11 @@ test("scans project first, then home, then enabled catalogs, earlier wins", () =
   expect(list[1]).toEqual(homeCatalog());
   expect(list[2]).toEqual({ dir: team, scope: "catalog" });
   expect(list[3]).toEqual(starterCatalog());
-  expect(list).toHaveLength(4);
+  expect(list[4]).toEqual(builtinCatalog());
+  expect(list).toHaveLength(5);
 });
 
-test("no catalogs file means project and home only", () => {
+test("no catalogs file means project, home, and the builtins", () => {
   tempHome();
-  expect(roots("/project")).toHaveLength(2);
+  expect(roots("/project")).toHaveLength(3);
 });
