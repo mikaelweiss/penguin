@@ -6,7 +6,8 @@ import type { Workflow } from "@/lib/workflows";
 
 export type Startable = {
   workflow: Workflow;
-  project: Project;
+  /** Every project that can reach this file. A shared catalog puts many here. */
+  projects: Project[];
 };
 
 export type WorkflowIndex = {
@@ -48,11 +49,21 @@ export function useWorkflowIndex(projects: Project[], wanted: boolean): Workflow
     };
   }, [asked, dirs]);
 
-  const startable = projects.flatMap((project) =>
-    (byDir[project.dir] ?? [])
-      .filter((workflow) => workflow.error === undefined)
-      .map((workflow) => ({ workflow, project })),
-  );
+  return { startable: gather(projects, byDir), reading };
+}
 
-  return { startable, reading };
+/** One row per workflow file, carrying every project that can reach it. */
+function gather(projects: Project[], byDir: Record<string, Workflow[]>): Startable[] {
+  const byFile = new Map<string, Startable>();
+
+  for (const project of projects) {
+    for (const workflow of byDir[project.dir] ?? []) {
+      if (workflow.error !== undefined) continue;
+      const found = byFile.get(workflow.file);
+      if (found === undefined) byFile.set(workflow.file, { workflow, projects: [project] });
+      else found.projects.push(project);
+    }
+  }
+
+  return [...byFile.values()];
 }

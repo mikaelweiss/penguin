@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FolderIcon } from "lucide-react";
 
 import {
   Command,
@@ -10,8 +11,8 @@ import {
   CommandList,
 } from "@workspace/ui/components/command";
 import { Kbd } from "@workspace/ui/components/kbd";
-import { Spinner } from "@workspace/ui/components/spinner";
 
+import { ReadingCatalogs } from "@/components/reading-catalogs";
 import type { Startable, WorkflowIndex } from "@/hooks/use-workflow-index";
 import { visibleRuns } from "@/lib/runs";
 import type { Project, RunNode } from "@/lib/runs";
@@ -30,8 +31,15 @@ function Hint({ children }: { children: React.ReactNode }) {
 const SETTINGS = "open settings";
 
 /** What cmdk matches a workflow row on, and what marks it as the row the cursor starts on. */
-function startValue({ workflow, project }: Startable): string {
-  return `start ${workflow.name} ${project.name} ${project.dir} ${workflow.description ?? ""}`;
+function startValue({ workflow }: Startable): string {
+  return `start ${workflow.name} ${workflow.description ?? ""} ${workflow.file}`;
+}
+
+/** A project workflow belongs to one project, so its row says which. */
+function scopeOf({ workflow, projects }: Startable): string {
+  const only = projects[0];
+  if (workflow.scope !== "project" || only === undefined) return workflow.scope;
+  return `${only.name} · project`;
 }
 
 type CommandPaletteProps = {
@@ -57,69 +65,127 @@ export function CommandPalette({
   const top = index.startable[0];
   const first = top === undefined ? SETTINGS : startValue(top);
   const [cursor, setCursor] = useState(first);
+  const [search, setSearch] = useState("");
+  /** The workflow whose project is still to be picked. */
+  const [picking, setPicking] = useState<Startable | undefined>(undefined);
 
   // The catalogs land after the dialog opens, so the cursor has to move onto them.
-  useEffect(() => setCursor(first), [first]);
+  useEffect(() => {
+    setCursor(picking === undefined ? first : (picking.projects[0]?.dir ?? ""));
+  }, [first, picking]);
+
+  // What was typed to find the workflow is not what filters its projects.
+  useEffect(() => setSearch(""), [picking]);
+
+  const close = () => {
+    onOpenChange(false);
+    setPicking(undefined);
+  };
 
   const pick = (act: () => void) => {
-    onOpenChange(false);
+    close();
     act();
+  };
+
+  const choose = (startable: Startable) => {
+    const only = startable.projects.length === 1 ? startable.projects[0] : undefined;
+    if (only === undefined) {
+      setPicking(startable);
+      return;
+    }
+    pick(() => onStartWorkflow(startable.workflow, only.dir));
   };
 
   return (
     <CommandDialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => {
+        if (!next) close();
+        else onOpenChange(true);
+      }}
       title="Command palette"
       description="Search runs, workflows, and settings."
       className="sm:max-w-lg"
     >
-      <Command value={cursor} onValueChange={setCursor}>
-        <CommandInput placeholder="Runs, workflows, settings" />
+      <Command
+        value={cursor}
+        onValueChange={setCursor}
+        onKeyDown={(event) => {
+          if (event.key !== "Backspace" || search !== "" || picking === undefined) return;
+          event.preventDefault();
+          setPicking(undefined);
+        }}
+      >
+        <CommandInput
+          value={search}
+          onValueChange={setSearch}
+          placeholder={
+            picking === undefined
+              ? "Runs, workflows, settings"
+              : `Run ${picking.workflow.name} in`
+          }
+        />
         <CommandList>
           <CommandEmpty>Nothing matches.</CommandEmpty>
-          {index.reading ? (
-            <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-              <Spinner />
-              Reading the catalogs
-            </div>
-          ) : null}
-          <CommandGroup heading="Workflows">
-            {index.startable.map((startable) => (
-              <CommandItem
-                key={`${startable.project.dir}:${startable.workflow.file}`}
-                value={startValue(startable)}
-                onSelect={() =>
-                  pick(() => onStartWorkflow(startable.workflow, startable.project.dir))
-                }
-              >
-                <span className="min-w-0 flex-1 truncate">
-                  Start {startable.workflow.name} · {startable.project.name}
-                </span>
-                <Hint>{startable.workflow.scope}</Hint>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-          <CommandGroup heading="Settings">
-            <CommandItem value={SETTINGS} onSelect={() => pick(onAppSettings)}>
-              <span className="min-w-0 flex-1 truncate">Open settings</span>
-              <Kbd>⇧⌘,</Kbd>
-            </CommandItem>
-          </CommandGroup>
-          <CommandGroup heading="Runs">
-            {runs.map(({ run, project }) => (
-              <CommandItem
-                key={run.id}
-                value={`${run.name} ${project.name} ${run.id}`}
-                onSelect={() => pick(() => onSelectRun(run.id))}
-              >
-                <span className="min-w-0 flex-1 truncate">
-                  {run.name} · {project.name}
-                </span>
-                <Hint>{run.ask ? "needs you" : run.status}</Hint>
-              </CommandItem>
-            ))}
-          </CommandGroup>
+          {picking !== undefined ? (
+            <CommandGroup heading={`Run ${picking.workflow.name} in`}>
+              {picking.projects.map((project) => (
+                <CommandItem
+                  key={project.dir}
+                  value={project.dir}
+                  onSelect={() => pick(() => onStartWorkflow(picking.workflow, project.dir))}
+                >
+                  <FolderIcon />
+                  <span className="shrink-0">{project.name}</span>
+                  <Hint>{project.dir}</Hint>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : (
+            <>
+              {index.reading ? <ReadingCatalogs /> : null}
+              <CommandGroup heading="Workflows">
+                {index.startable.map((startable) => (
+                  <CommandItem
+                    key={startable.workflow.file}
+                    value={startValue(startable)}
+                    onSelect={() => choose(startable)}
+                    className="items-start"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="truncate">{startable.workflow.name}</span>
+                      {startable.workflow.description === undefined ? null : (
+                        <span className="truncate text-xs text-muted-foreground">
+                          {startable.workflow.description}
+                        </span>
+                      )}
+                    </div>
+                    <Hint>{scopeOf(startable)}</Hint>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+              <CommandGroup heading="Settings">
+                <CommandItem value={SETTINGS} onSelect={() => pick(onAppSettings)}>
+                  <span className="min-w-0 flex-1 truncate">Open settings</span>
+                  <Kbd>⇧⌘,</Kbd>
+                </CommandItem>
+              </CommandGroup>
+              <CommandGroup heading="Runs">
+                {runs.map(({ run, project }) => (
+                  <CommandItem
+                    key={run.id}
+                    value={`${run.name} ${project.name} ${run.id}`}
+                    onSelect={() => pick(() => onSelectRun(run.id))}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {run.name} · {project.name}
+                    </span>
+                    <Hint>{run.ask ? "needs you" : run.status}</Hint>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          )}
         </CommandList>
       </Command>
     </CommandDialog>
