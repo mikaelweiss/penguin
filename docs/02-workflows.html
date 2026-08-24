@@ -53,8 +53,10 @@ export default workflow({
     <pre><code>declare module "penguin" {
   interface Adapters {
     agent: ReturnType&lt;(typeof claude)["build"]&gt;;
+    github: ReturnType&lt;(typeof gh)["build"]&gt;;
+    jira: ReturnType&lt;(typeof jira)["build"]&gt;;
     vcs: ReturnType&lt;(typeof git)["build"]&gt;;
-    view: ReturnType&lt;(typeof view)["build"]&gt;;
+    view: View;
   }
 }</code></pre>
 
@@ -133,7 +135,7 @@ if (answer === "no") return { ...done, pushed: false };</code></pre>
 
     <p>
       The usual use is steering: race the stream against a running agent turn, and act when a
-      message wins. <code>examples/workflows/steer.ts</code> is the whole pattern:
+      message wins. The whole pattern is one race:
     </p>
 
     <pre><code>const messages = view.listen()[Symbol.asyncIterator]();
@@ -202,8 +204,7 @@ if (!state.dirty) {
 }</code></pre>
 
     <p>
-      Parallel children are <code>Promise.all</code> over <code>call</code>. That is the whole of
-      <code>examples/workflows/commit-all.ts</code>:
+      Parallel children are <code>Promise.all</code> over <code>call</code>:
     </p>
 
     <pre><code>const results = await Promise.all(
@@ -214,6 +215,9 @@ if (!state.dirty) {
 );</code></pre>
 
     <p>
+      A child can also run beside its parent instead of in front of it:
+      <code>examples/workflows/pr-queue.ts</code> starts a <code>review-pr</code> child for each
+      arriving review request and goes straight back to watching.
       Every child is its own lane for free. The parent's run file records which children it
       started, each child's file records its own story, and the tree a frontend draws is that
       parent chain. Nothing is announced to a UI and no scoping is threaded through
@@ -243,15 +247,15 @@ if (!state.dirty) {
     </ol>
 
     <p>
-      <code>ship</code> does this across a composition boundary. It calls <code>commit</code>, which
-      reconciles itself, then checks <code>head</code> before pushing rather than trusting the branch
-      it saw earlier:
+      <code>open-pr</code> does this across a composition boundary. Before every push it calls
+      <code>commit</code> again, which reconciles itself against the tree, so a send after an edit
+      or a crash picks up exactly what is missing:
     </p>
 
-    <pre><code>const head = await vcs.head({ cwd: params.dir });
-if (!head.ok || head.detached) {
-  await view.show(`not pushing: ${head.detached ? "detached HEAD" : head.reason}`);
-  return { ...done, pushed: false };
+    <pre><code>async function send(): Promise&lt;{ ok: boolean; reason: string }&gt; {
+  const wrote = await call(ctx, commit, { dir: params.dir });
+  if (!wrote.ok) return { ok: false, reason: wrote.reason };
+  return vcs.push(head.branch, { cwd: params.dir });
 }</code></pre>
 
     <p>
@@ -265,9 +269,11 @@ if (!head.ok || head.detached) {
     <h2>Writing prompts</h2>
 
     <p>
-      Prompts are workflow code. Keep them in the workflow file as a module-level constant, next to
-      the schema they fill. <code>commit.ts</code>'s prompt is a numbered procedure that says what to
-      read, what to decide, and what not to do:
+      The reusable instructions live in a skill, and the turn names it:
+      <code>agent.turn(session, { skill: "commit" }, ...)</code>. The workflow file keeps only the
+      runtime part of the prompt and the schema the answer fills.
+      <code>skills/commit/SKILL.md</code> is a numbered procedure that says what to read, what to
+      decide, and what not to do:
     </p>
 
     <blockquote>
@@ -282,12 +288,13 @@ if (!head.ok || head.detached) {
     <h2>Run it</h2>
 
     <pre><code>bun packages/engine/examples/run.ts \
-  packages/engine/examples/workflows/ship.ts '{"dir":"."}'</code></pre>
+  packages/engine/examples/workflows/commit.ts '{"dir":"."}'</code></pre>
 
     <p>
       The second argument is JSON, parsed and then validated against your <code>params</code> schema.
       Leave it off and the schema is parsed against <code>{}</code>, which succeeds when every field
-      is optional.
+      is optional. The starter catalog installs five <code>agent</code> adapters, so pick one first:
+      write <code>agent claude</code> to <code>~/.penguin/config</code>.
     </p>
   </body>
 </html>

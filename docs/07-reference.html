@@ -149,32 +149,74 @@
             <td>Maps installed roles onto <code>ctx</code> for the type checker.</td>
           </tr>
           <tr>
+            <td><code>examples/helpers/turns.ts</code></td>
+            <td>
+              The session machinery the agent adapters share: open, retry, schema checks, stop,
+              plus <code>narrate</code>/<code>narrated</code> for streaming a turn to the view.
+            </td>
+          </tr>
+          <tr>
+            <td><code>examples/helpers/ticket.ts</code></td>
+            <td>Resolves a Jira key or GitHub issue number to ticket text.</td>
+          </tr>
+          <tr>
             <td><code>examples/adapters/git.ts</code></td>
             <td>role <code>vcs</code>, name <code>git</code></td>
           </tr>
           <tr>
-            <td><code>examples/adapters/claude.ts</code></td>
-            <td>role <code>agent</code>, name <code>claude</code></td>
+            <td><code>examples/adapters/gh.ts</code></td>
+            <td>role <code>github</code>: issues and pull requests through the gh CLI</td>
           </tr>
           <tr>
-            <td><code>examples/skills/commit/SKILL.md</code></td>
-            <td>The instructions the commit workflow's turn runs on.</td>
+            <td><code>examples/adapters/jira.ts</code></td>
+            <td>
+              role <code>jira</code>: Jira Cloud over REST, credentials from the environment or
+              <code>~/.penguin/config</code>
+            </td>
+          </tr>
+          <tr>
+            <td><code>examples/adapters/claude.ts</code>, <code>codex.ts</code>, <code>cursor.ts</code>, <code>opencode.ts</code>, <code>pi.ts</code></td>
+            <td>
+              role <code>agent</code>, five names. Write <code>agent claude</code> to
+              <code>~/.penguin/config</code> to pick one.
+            </td>
+          </tr>
+          <tr>
+            <td><code>examples/skills/</code></td>
+            <td>
+              Fifteen skills the workflows' turns run on. <code>skills/commit/</code> is the model.
+            </td>
           </tr>
           <tr>
             <td><code>examples/workflows/commit.ts</code></td>
             <td>The agent picks files and writes the message; the workflow stages and commits.</td>
           </tr>
           <tr>
-            <td><code>examples/workflows/commit-all.ts</code></td>
-            <td><code>commit</code> across many folders, in parallel.</td>
-          </tr>
-          <tr>
             <td><code>examples/workflows/ship.ts</code></td>
-            <td><code>commit</code>, then push once a person says so.</td>
+            <td>Ticket to open pull request: <code>work</code>, then <code>open-pr</code>.</td>
           </tr>
           <tr>
-            <td><code>examples/workflows/steer.ts</code></td>
-            <td>One agent turn that a user message can stop mid-flight.</td>
+            <td><code>examples/workflows/ship-local.ts</code></td>
+            <td>Ticket to a landed commit: <code>work</code>, then <code>land</code>.</td>
+          </tr>
+          <tr>
+            <td><code>examples/workflows/work.ts</code></td>
+            <td>
+              <code>triage</code> a ticket, then <code>plan</code>, <code>implement</code>, and
+              <code>commit</code> each task in a worktree, against a <code>baseline</code>.
+            </td>
+          </tr>
+          <tr>
+            <td><code>examples/workflows/pr-queue.ts</code></td>
+            <td>Watch the review requests and run <code>review-pr</code> on each arrival.</td>
+          </tr>
+          <tr>
+            <td>
+              <code>examples/workflows/</code>: <code>baseline</code>, <code>triage</code>,
+              <code>plan</code>, <code>implement</code>, <code>review</code>, <code>open-pr</code>,
+              <code>land</code>, <code>review-pr</code>, <code>make-workflow</code>
+            </td>
+            <td>The pieces the chains above compose. Each runs on its own too.</td>
           </tr>
         </tbody>
       </table>

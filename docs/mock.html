@@ -102,9 +102,9 @@
         { id: "w-logbook", name: "logbook-sync", desc: "Pull the month's flights into the logbook.", scope: "project", project: "skyward", fields: [] },
         { id: "w-overnight", name: "overnight", desc: "Work the queue while you sleep.", scope: "home", fields: ["prompt"] },
         { id: "w-commit", name: "commit", desc: "Commit the tree with a generated message.", scope: "starter", fields: [] },
-        { id: "w-commitall", name: "commit-all", desc: "Commit every dirty package.", scope: "starter", fields: [] },
-        { id: "w-ship", name: "ship", desc: "Commit the tree, then push when the user says so.", scope: "starter", fields: [] },
-        { id: "w-steer", name: "steer", desc: "Run one agent turn that a user message can stop mid-flight.", scope: "starter", fields: ["prompt"] },
+        { id: "w-ship", name: "ship", desc: "Ticket to an open pull request.", scope: "starter", fields: ["ticket"] },
+        { id: "w-prqueue", name: "pr-queue", desc: "Review each PR that asks for you.", scope: "starter", fields: [] },
+        { id: "w-implement", name: "implement", desc: "Implement a change and close the review findings.", scope: "starter", fields: ["task"] },
       ];
 
       const SKILLS = [
@@ -139,7 +139,7 @@
         globalDreaming: true,
         globalDreamsUnread: true,
         globalDreams: [
-          { text: "steer follows commit in three projects this week. Chain them into one workflow." },
+          { text: "open-pr follows commit in three projects this week. Chain them into one workflow." },
         ],
         projects: [
           {
@@ -201,8 +201,8 @@
                 ],
               },
               {
-                id: "r-steer",
-                name: "steer",
+                id: "r-overnight",
+                name: "overnight",
                 status: "running",
                 dir: "~/code/penguin",
                 collapsed: false,
@@ -221,8 +221,8 @@
                 children: [],
               },
               {
-                id: "r-commitall",
-                name: "commit-all",
+                id: "r-commit-clean",
+                name: "commit",
                 status: "done",
                 dir: "~/code/penguin",
                 collapsed: false,
@@ -1531,7 +1531,7 @@
       });
 
       const AGENT_LOOPS = {
-        "r-steer": [
+        "r-overnight": [
           "Read packages/engine/src/host.ts",
           "Edit src/host.ts",
           "Bash bun test host",

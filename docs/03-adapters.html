@@ -12,7 +12,9 @@
       description, and a <code>build(host)</code> that returns the functions a workflow calls through
       <code>ctx.&lt;role&gt;</code>. Put a <code>.ts</code> file in a catalog's
       <code>adapters/</code> folder, default-export an <code>adapter(...)</code>, and every workflow
-      can reach it.
+      can reach it. Every file in that folder must be an adapter; shared code lives in the
+      catalog's <code>helpers/</code> folder, imported by relative path, the way the five agent
+      adapters share their session machinery in <code>examples/helpers/turns.ts</code>.
     </p>
 
     <pre><code>import { adapter } from "penguin";
@@ -191,8 +193,8 @@ await git(["commit", "-m", message], options?.cwd);</code></pre>
       </li>
       <li>
         <code>cwd</code> is an option on each call, not state on the adapter, so one adapter serves
-        many folders in one run. An adapter that stored a folder at build time could not run
-        <code>commit-all</code>.
+        many folders in one run. An adapter that stored a folder at build time could not commit
+        inside the worktree <code>work</code> just cut.
       </li>
       <li>
         Related calls nest under a plain object: <code>vcs.branch.create</code>,

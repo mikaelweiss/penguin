@@ -106,13 +106,14 @@ role: "view"    name: "files"      →  ctx.view</code></pre>
     <h2>Run one</h2>
 
     <pre><code>bun packages/engine/examples/run.ts \
-  packages/engine/examples/workflows/ship.ts '{"dir":"."}'</code></pre>
+  packages/engine/examples/workflows/commit.ts '{"dir":"."}'</code></pre>
 
     <p>
       <code>examples/run.ts</code> is the smallest frontend there is. It loads one workflow file,
       parses its params, builds the starter adapters against a host, and awaits
       <code>run(ctx)</code>. Almost everything Penguin does happens in the workflow file, not in the
-      runner.
+      runner. The starter catalog installs five <code>agent</code> adapters, so pick one first:
+      write <code>agent claude</code> to <code>~/.penguin/config</code>.
     </p>
 
     <h2>Where to go next</h2>

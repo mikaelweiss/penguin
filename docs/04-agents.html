@@ -68,8 +68,8 @@ const commit = await turn.value;</code></pre>
       order, project first, so a project can shadow a shared skill. The adapter sends the skill's
       body, then where the skill's files live when it has any, then the <code>prompt</code>. That
       prompt is for runtime data only: the branch name, the file list, what a person typed. A
-      prompt string alone stays right when the whole ask is runtime data, the way
-      <code>steer</code> forwards a user's words.
+      prompt string alone stays right when the whole ask is runtime data: a user's words forwarded
+      mid-conversation.
     </p>
 
     <p>
@@ -97,7 +97,11 @@ const commit = await turn.value;</code></pre>
   if (chunk.kind === "tool") await view.show(`  ${chunk.text}: ${chunk.detail ?? ""}`);
 }</code></pre>
 
-    <p>Thinking is dropped here. Another workflow could show it.</p>
+    <p>
+      Thinking is dropped here. Another workflow could show it. The starter workflows share this
+      loop as <code>narrate</code> and <code>narrated</code> in
+      <code>examples/helpers/turns.ts</code>.
+    </p>
 
     <h2>Typed results</h2>
 
@@ -117,12 +121,13 @@ const commit = await turn.value;</code></pre>
       model sees at the point it fills each field.
     </p>
 
-    <h2>Retry lives in the adapter</h2>
+    <h2>Retry lives in the catalog</h2>
 
     <p>
       A turn runs at most twice. When the first attempt fails, whether the CLI exited non-zero,
-      reported an error, returned no structured output, or returned something the schema rejected, the
-      adapter reruns the prompt with a correction appended:
+      reported an error, returned no structured output, or returned something the schema rejected,
+      the session machinery every agent adapter shares, <code>sessions()</code> in
+      <code>examples/helpers/turns.ts</code>, reruns the prompt with a correction appended:
     </p>
 
     <pre><code>const sent = failure === undefined
@@ -141,9 +146,9 @@ const commit = await turn.value;</code></pre>
       that it should not: a person sent a message, a PR closed, a watch stream fired.
       <code>agent.stop(session)</code> kills the running process; the awaited
       <code>turn.value</code> then rejects with "the turn was stopped", and the session stays open
-      for a corrective turn. <code>examples/workflows/steer.ts</code> races
-      <code>view.listen()</code> against <code>turn.value</code> and stops on the first message,
-      which is the whole pause-and-steer pattern in one file.
+      for a corrective turn. <code>examples/workflows/review-pr.ts</code> races the PR's change
+      stream against <code>turn.value</code>, stops the reviewer when the PR closes, goes to draft,
+      or gains new code, and resumes the same session with what changed.
     </p>
 
     <h2>How the claude adapter drives the CLI</h2>
@@ -185,9 +190,13 @@ const commit = await turn.value;</code></pre>
     <h2>Swapping the agent</h2>
 
     <p>
-      Codex, Gemini, or your own harness is another adapter with role <code>agent</code> and a
-      different <code>name</code>. As long as it answers <code>open</code> and <code>turn</code>, no
-      workflow changes.
+      The starter catalog ships five: <code>claude</code>, <code>codex</code>, <code>cursor</code>,
+      <code>opencode</code>, and <code>pi</code>, all role <code>agent</code>. Each one is a
+      <code>runOnce</code>, one CLI invocation that streams chunks and reports how it ended, handed
+      to the shared <code>sessions()</code> in <code>examples/helpers/turns.ts</code>, which owns
+      opening, retry, schema checks, and stop. Write <code>agent &lt;name&gt;</code> to
+      <code>~/.penguin/config</code> to choose one. Your own harness is one more
+      <code>runOnce</code>, and no workflow changes.
     </p>
   </body>
 </html>
