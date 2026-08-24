@@ -8,7 +8,7 @@ export default [
   },
   ...tseslint.configs.recommended,
   {
-    files: ["**/*.ts"],
+    files: ["**/*.ts", "**/*.tsx"],
     plugins: {
       "@nx": nx,
     },
@@ -23,6 +23,14 @@ export default [
             {
               sourceTag: "scope:engine",
               onlyDependOnLibsWithTags: ["scope:engine"],
+            },
+            {
+              sourceTag: "scope:ui",
+              onlyDependOnLibsWithTags: ["scope:ui"],
+            },
+            {
+              sourceTag: "scope:desktop",
+              onlyDependOnLibsWithTags: ["scope:desktop", "scope:ui", "scope:engine"],
             },
           ],
         },
@@ -94,6 +102,38 @@ export default [
             {
               group: ["**/host*", "**/catalog/**", "**/run*", "**/trace*", "**/config*"],
               message: "builtin adapters depend only on core",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/ui/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@tauri-apps/*", "**/apps/*"],
+              message: "the design system is presentational and platform free",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/packages/*"],
+              message: "import workspace packages by name, not by relative path",
             },
           ],
         },

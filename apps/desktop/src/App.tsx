@@ -1,51 +1,42 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState, type FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { Button } from "@workspace/ui/components/button";
+import { Input } from "@workspace/ui/components/input";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
+export function App() {
   const [name, setName] = useState("");
+  const [greeting, setGreeting] = useState("");
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  async function greet(event: FormEvent) {
+    event.preventDefault();
+    setGreeting(await invoke<string>("greet", { name }));
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <main className="flex min-h-svh flex-col items-center justify-center gap-8 p-6">
+      <div className="flex w-full max-w-sm flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">penguin</h1>
+          <p className="text-muted-foreground text-sm">
+            Run one workflow file as a live process, with any coding agent CLI.
+          </p>
+        </div>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+        <form className="flex flex-col gap-3" onSubmit={greet}>
+          <Input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Enter a name"
+          />
+          <Button type="submit">Greet</Button>
+        </form>
+
+        {greeting ? <p className="text-sm">{greeting}</p> : null}
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <p className="text-muted-foreground font-mono text-xs">
+        Press <kbd>d</kbd> to toggle dark mode
+      </p>
     </main>
   );
 }
-
-export default App;
