@@ -92,7 +92,8 @@
     <ul role="list">
       <li>A sheet to search and pick a workflow.</li>
       <li>Workflows are sorted by catalog.</li>
-      <li>Picking one asks for its params, then starts the run.</li>
+      <li>The run's directory is the project it started from, never a param.</li>
+      <li>Picking a workflow with params asks for them, then starts the run. One without params starts on the pick.</li>
       <li>The sheet's data comes from an engine describe run: each workflow's name, description, and params as JSON Schema, printed as JSON.</li>
     </ul>
 
@@ -117,7 +118,7 @@
     <h2>App settings</h2>
 
     <ul role="list">
-      <li>A sheet with a sidebar of sections, rows of settings. Cmd comma opens it.</li>
+      <li>A sheet with a sidebar of sections, rows of settings. Shift cmd comma opens it.</li>
       <li>Holds the global dreaming toggle.</li>
       <li>Light and dark, with a toggle.</li>
       <li>Holds the worktrees directory. Default <code>~/.penguin/worktrees/&lt;project&gt;/&lt;run&gt;</code>.</li>
@@ -140,6 +141,7 @@
     <ul role="list">
       <li>Switches runs, starts workflows, toggles panels.</li>
       <li>Opens with cmd K, or the button next to the settings button.</li>
+      <li>Workflows, panels, and settings come first; runs sit at the bottom.</li>
     </ul>
   </body>
 </html>
