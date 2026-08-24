@@ -1,32 +1,12 @@
-import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
-import { z } from "zod";
-import { adapter, Channel, issuesOf, PenguinError, type Skill } from "penguin";
+import { adapter } from "penguin";
+import { sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
   model?: string;
   permission?: string;
 };
-
-type Chunk = { kind: "text" | "thinking" | "tool"; text: string; detail?: string };
-
-type Turn<T> = { output: AsyncIterable<Chunk>; value: Promise<T> };
-
-/** What a turn runs on: a catalog skill with an optional prompt for the dynamic part, or a prompt alone. */
-type TurnAsk = string | { skill: string; prompt?: string };
-
-type TurnFn = {
-  (session: string, ask: TurnAsk): Turn<null>;
-  <Shape extends z.ZodObject>(
-    session: string,
-    ask: TurnAsk,
-    options: { result: Shape },
-  ): Turn<z.infer<Shape>>;
-};
-
-type Attempt = { ok: true; value: unknown } | { ok: false; error: string };
 
 type ContentBlock = {
   type?: string;
@@ -43,7 +23,8 @@ type StreamLine = {
   message?: { content?: ContentBlock[] };
 };
 
-const TARGETS = [
+/** Only this adapter knows claude's tool shapes. */
+const target = targetIn([
   "command",
   "file_path",
   "path",
@@ -53,40 +34,7 @@ const TARGETS = [
   "skill",
   "description",
   "prompt",
-];
-
-/** The one value that says what a tool call acts on. Only this adapter knows claude's tool shapes. */
-function target(input: unknown): string | undefined {
-  if (input === null || typeof input !== "object") return undefined;
-  const values = input as Record<string, unknown>;
-  const named = TARGETS.map((field) => values[field]).find(said);
-  if (named !== undefined) return flatten(named as string);
-  const first = Object.values(values).find(said);
-  return first === undefined ? undefined : flatten(first as string);
-}
-
-function said(value: unknown): boolean {
-  return typeof value === "string" && value.trim() !== "";
-}
-
-function flatten(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-function jsonSchema(shape: z.ZodObject): Record<string, unknown> {
-  const schema = z.toJSONSchema(shape) as Record<string, unknown>;
-  delete schema["$schema"];
-  return schema;
-}
-
-/** The skill's instructions, where its files live when it has any, then the prompt. */
-function withSkill(skill: Skill, prompt: string | undefined): string {
-  const parts = [skill.text];
-  const extras = fs.readdirSync(skill.dir).filter((name) => name !== "SKILL.md");
-  if (extras.length > 0) parts.push(`This skill's files live in ${skill.dir}.`);
-  if (prompt !== undefined && prompt.trim() !== "") parts.push(prompt);
-  return parts.join("\n\n");
-}
+]);
 
 export default adapter({
   role: "agent",
@@ -94,20 +42,11 @@ export default adapter({
   description:
     "runs prompts on the claude CLI. A session is one conversation: the first turn opens it, later turns resume it.",
   build: (host) => {
-    const sessions = new Map<string, OpenOptions>();
-    const started = new Set<string>();
-    const running = new Map<string, AbortController>();
-    const stopped = new Set<string>();
-
     async function runOnce(
-      session: string,
-      first: boolean,
-      options: OpenOptions,
-      prompt: string,
-      schema: Record<string, unknown> | undefined,
-      signal: AbortSignal,
+      invocation: Invocation<OpenOptions>,
       emit: (chunk: Chunk) => void,
     ): Promise<Attempt> {
+      const { session, first, options, prompt, schema, signal } = invocation;
       const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
       if (schema !== undefined) argv.push("--json-schema", JSON.stringify(schema));
       argv.push(first ? "--session-id" : "--resume", session);
@@ -178,72 +117,6 @@ export default adapter({
       return { ok: true, value: value ?? null };
     }
 
-    const turn = ((session: string, ask: TurnAsk, options?: { result?: z.ZodObject }) => {
-      const opened = sessions.get(session);
-      if (opened === undefined) {
-        throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
-      }
-      const prompt = typeof ask === "string" ? ask : withSkill(host.skill(ask.skill), ask.prompt);
-      const output = new Channel<Chunk>();
-      const schema = options?.result === undefined ? undefined : jsonSchema(options.result);
-      const value = (async () => {
-        try {
-          stopped.delete(session);
-          let failure: string | undefined;
-          for (let tries = 0; tries < 2; tries++) {
-            const first = !started.has(session);
-            started.add(session);
-            const sent =
-              failure === undefined
-                ? prompt
-                : `${prompt}\n\n# Correction\n\nThe last attempt failed: ${failure}\nDo the turn again and fix that.`;
-            const controller = new AbortController();
-            running.set(session, controller);
-            let attempt: Attempt;
-            try {
-              attempt = await runOnce(session, first, opened, sent, schema, controller.signal, (chunk) =>
-                output.push(chunk),
-              );
-            } finally {
-              running.delete(session);
-            }
-            if (stopped.has(session)) {
-              stopped.delete(session);
-              throw new PenguinError("the turn was stopped");
-            }
-            if (!attempt.ok) {
-              failure = attempt.error;
-              continue;
-            }
-            if (options?.result === undefined) return null;
-            const checked = options.result.safeParse(attempt.value);
-            if (checked.success) return checked.data;
-            failure = issuesOf(checked.error);
-          }
-          throw new PenguinError(`the turn failed twice: ${failure}`);
-        } finally {
-          output.end();
-        }
-      })();
-      value.catch(() => {});
-      return { output, value };
-    }) as TurnFn;
-
-    return {
-      async open(options?: OpenOptions): Promise<string> {
-        const id = crypto.randomUUID();
-        sessions.set(id, options ?? {});
-        return id;
-      },
-      turn,
-      /** Ends the running turn. The session stays open for the next one. */
-      async stop(session: string): Promise<void> {
-        if (!sessions.has(session)) {
-          throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
-        }
-        stopped.add(session);
-        running.get(session)?.abort();
-      },
-    };
+    return sessions(host, runOnce);
   },
 });
