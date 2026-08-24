@@ -17,7 +17,7 @@ export default [
         "error",
         {
           enforceBuildableLibDependency: false,
-          allowCircularSelfDependency: false,
+          allowCircularSelfDependency: true,
           allow: ["penguin"],
           depConstraints: [
             {
