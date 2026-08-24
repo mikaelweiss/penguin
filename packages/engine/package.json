@@ -16,6 +16,10 @@
     "./run": {
       "types": "./src/run.ts",
       "default": "./src/run.ts"
+    },
+    "./describe": {
+      "types": "./src/describe.ts",
+      "default": "./src/describe.ts"
     }
   },
   "files": ["src", "examples"],
