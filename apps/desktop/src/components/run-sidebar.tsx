@@ -8,6 +8,7 @@ import {
   FunnelIcon,
   PencilIcon,
   PlusIcon,
+  SettingsIcon,
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -30,9 +31,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@workspace/ui/components/empty";
+import { Kbd } from "@workspace/ui/components/kbd";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -171,6 +174,7 @@ type DirectoryRowProps = {
   showFinished: boolean;
   onToggleFinished: (id: string) => void;
   onNewWorkflow: (dir: string) => void;
+  onSettings: (project: Project) => void;
   onRemove: (dir: string) => void;
 };
 
@@ -179,10 +183,12 @@ function DirectoryRow({
   showFinished,
   onToggleFinished,
   onNewWorkflow,
+  onSettings,
   onRemove,
 }: DirectoryRowProps) {
   const finishedLabel = `${showFinished ? "Hide" : "Show"} finished runs in ${project.name}`;
   const newLabel = `New workflow in ${project.name}`;
+  const settingsLabel = `Settings for ${project.name}`;
 
   return (
     <ContextMenu>
@@ -219,6 +225,19 @@ function DirectoryRow({
               </TooltipTrigger>
               <TooltipContent>{newLabel}</TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={settingsLabel}
+                  onClick={() => onSettings(project)}
+                >
+                  <SettingsIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{settingsLabel}</TooltipContent>
+            </Tooltip>
           </span>
         </SidebarGroupLabel>
       </ContextMenuTrigger>
@@ -230,6 +249,10 @@ function DirectoryRow({
         <ContextMenuItem onSelect={() => onToggleFinished(project.id)}>
           <FunnelIcon />
           {showFinished ? "Hide finished runs" : "Show finished runs"}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onSettings(project)}>
+          <SettingsIcon />
+          Project settings
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onSelect={() => onRemove(project.dir)}>
@@ -249,6 +272,8 @@ type RunSidebarProps = {
   onNewWorkflow: (dir: string) => void;
   onAddDirectory: () => void;
   onRemoveDirectory: (dir: string) => void;
+  onProjectSettings: (project: Project) => void;
+  onAppSettings: () => void;
   error: string | undefined;
 };
 
@@ -260,6 +285,8 @@ export function RunSidebar({
   onNewWorkflow,
   onAddDirectory,
   onRemoveDirectory,
+  onProjectSettings,
+  onAppSettings,
   error,
 }: RunSidebarProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -350,6 +377,7 @@ export function RunSidebar({
                 showFinished={showFinished}
                 onToggleFinished={toggleFinished}
                 onNewWorkflow={onNewWorkflow}
+                onSettings={onProjectSettings}
                 onRemove={onRemoveDirectory}
               />
               <SidebarGroupContent>
@@ -373,6 +401,17 @@ export function RunSidebar({
           );
         })}
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="sm" onClick={onAppSettings}>
+              <SettingsIcon />
+              <span className="min-w-0 flex-1 truncate">Settings</span>
+              <Kbd>⇧⌘,</Kbd>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
       <RenameRunDialog
         run={renaming}
         onClose={() => setRenaming(undefined)}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
@@ -6,27 +6,44 @@ import { Separator } from "@workspace/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/sidebar";
 import { TooltipProvider } from "@workspace/ui/components/tooltip";
 
+import { AppSettingsDialog } from "@/components/app-settings-dialog";
 import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
+import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { RunActivity } from "@/components/run-activity";
 import { RunBreadcrumb } from "@/components/run-breadcrumb";
 import { RunComposer } from "@/components/run-composer";
 import { RunSidebar } from "@/components/run-sidebar";
 import { RunTranscript } from "@/components/run-transcript";
+import { useConfig } from "@/hooks/use-config";
 import { useDirectories } from "@/hooks/use-directories";
 import { useInbox } from "@/hooks/use-inbox";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
 import { findRun } from "@/lib/runs";
+import type { Project } from "@/lib/runs";
 
 export function App() {
   const directories = useDirectories();
   const { projects, error } = useRuns(directories.dirs);
   const inbox = useInbox();
   const actions = useRunActions();
+  const config = useConfig();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [startingIn, setStartingIn] = useState<string | undefined>(undefined);
+  const [settingProject, setSettingProject] = useState<Project | undefined>(undefined);
+  const [appSettings, setAppSettings] = useState(false);
   const selected = findRun(projects, selectedId);
   const run = selected?.run;
+
+  useEffect(() => {
+    const open = (event: KeyboardEvent) => {
+      if (!event.metaKey || !event.shiftKey || event.key !== ",") return;
+      event.preventDefault();
+      setAppSettings(true);
+    };
+    window.addEventListener("keydown", open);
+    return () => window.removeEventListener("keydown", open);
+  }, []);
 
   return (
     <TooltipProvider>
@@ -39,7 +56,20 @@ export function App() {
           onNewWorkflow={setStartingIn}
           onAddDirectory={directories.add}
           onRemoveDirectory={directories.remove}
+          onProjectSettings={setSettingProject}
+          onAppSettings={() => setAppSettings(true)}
           error={directories.error}
+        />
+        <ProjectSettingsDialog
+          project={settingProject}
+          onClose={() => setSettingProject(undefined)}
+          onRemove={directories.remove}
+        />
+        <AppSettingsDialog
+          open={appSettings}
+          onClose={() => setAppSettings(false)}
+          config={config}
+          directories={directories}
         />
         <NewWorkflowDialog
           dir={startingIn}

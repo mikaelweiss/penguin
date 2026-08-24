@@ -13,8 +13,25 @@ export type Workflow = {
   error?: string;
 };
 
+export type Skill = {
+  name: string;
+  description: string;
+  scope: Scope;
+  dir: string;
+};
+
+export type Adapter = {
+  role: string;
+  name: string;
+  description: string;
+  scope: Scope;
+  file: string;
+};
+
 export type Catalogs = {
   workflows: Workflow[];
+  skills: Skill[];
+  adapters: Adapter[];
   errors: string[];
 };
 

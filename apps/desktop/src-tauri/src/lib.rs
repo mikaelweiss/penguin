@@ -153,6 +153,79 @@ fn stop_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
     Err(format!("could not stop {}", missed.join(", ")))
 }
 
+/// ~/.penguin, the folder the engine reads its config from.
+fn penguin_home(app: &tauri::AppHandle) -> Option<PathBuf> {
+    match std::env::var("PENGUIN_HOME") {
+        Ok(base) if !base.is_empty() => Some(PathBuf::from(base)),
+        _ => app.path().home_dir().ok().map(|home| home.join(".penguin")),
+    }
+}
+
+fn config_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    penguin_home(app)
+        .map(|home| home.join("config"))
+        .ok_or_else(|| "no home folder to read the config from".to_string())
+}
+
+/// Splits "key value" the way the engine's reader does. A line without a space is not a setting.
+fn setting_of(line: &str) -> Option<(&str, &str)> {
+    let text = line.trim();
+    if text.is_empty() || text.starts_with('#') {
+        return None;
+    }
+    let split = text.find(char::is_whitespace)?;
+    Some((&text[..split], text[split..].trim()))
+}
+
+/// ~/.penguin/config, the settings the engine and the app share.
+#[tauri::command]
+fn read_config(app: tauri::AppHandle) -> Result<HashMap<String, String>, String> {
+    let file = config_file(&app)?;
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        return Ok(HashMap::new());
+    };
+    Ok(text
+        .lines()
+        .filter_map(setting_of)
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect())
+}
+
+/// The config with one setting changed, every comment and other line kept. An empty value drops it.
+fn rewrite(text: &str, key: &str, value: &str) -> String {
+    let mut lines: Vec<&str> = Vec::new();
+    let line = format!("{key} {value}");
+    let mut written = false;
+    for old in text.lines() {
+        match setting_of(old) {
+            Some((found, _)) if found == key => {
+                if !written && !value.is_empty() {
+                    lines.push(&line);
+                    written = true;
+                }
+            }
+            _ => lines.push(old),
+        }
+    }
+    if !written && !value.is_empty() {
+        lines.push(&line);
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("{}\n", lines.join("\n"))
+}
+
+/// One setting, rewritten in place so comments and every other line survive. An empty value drops it.
+#[tauri::command]
+fn write_config(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    let file = config_file(&app)?;
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let home = file.parent().ok_or("the config file has no folder")?;
+    std::fs::create_dir_all(home).map_err(|cause| cause.to_string())?;
+    std::fs::write(&file, rewrite(&text, &key, &value)).map_err(|cause| cause.to_string())
+}
+
 fn dirs_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -398,7 +471,9 @@ pub fn run() {
             describe,
             start_run,
             rename_run,
-            stop_runs
+            stop_runs,
+            read_config,
+            write_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -423,6 +498,27 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("penguin-test-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn a_setting_is_rewritten_where_it_already_sat() {
+        let text = "# mine\nagent claude\nworktrees /tmp/w\n";
+        assert_eq!(rewrite(text, "agent", "codex"), "# mine\nagent codex\nworktrees /tmp/w\n");
+    }
+
+    #[test]
+    fn a_setting_the_config_lacks_lands_at_the_end() {
+        assert_eq!(rewrite("agent claude\n", "worktrees", "/tmp/w"), "agent claude\nworktrees /tmp/w\n");
+    }
+
+    #[test]
+    fn an_empty_value_drops_the_line() {
+        assert_eq!(rewrite("# mine\nagent claude\n", "agent", ""), "# mine\n");
+    }
+
+    #[test]
+    fn a_repeated_key_is_left_with_one_line() {
+        assert_eq!(rewrite("agent claude\nagent codex\n", "agent", "gemini"), "agent gemini\n");
     }
 
     #[test]
