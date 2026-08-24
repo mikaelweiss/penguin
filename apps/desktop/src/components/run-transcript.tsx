@@ -18,6 +18,7 @@ import {
 } from "@workspace/ui/components/message-scroller";
 import { cn } from "@workspace/ui/lib/utils";
 
+import { AttachmentRow } from "@/components/attachment-row";
 import type { OutputLine, Run } from "@/lib/runs";
 
 const MARKERS: Record<OutputLine["kind"], string> = {
@@ -35,18 +36,21 @@ function markerColor(kind: OutputLine["kind"]): string {
 function TranscriptLine({ line }: { line: OutputLine }) {
   return (
     <Message>
-      <MessageContent className="flex-row gap-2 font-mono text-[0.8125rem]/6">
-        <span className={cn("w-3 shrink-0 select-none", markerColor(line.kind))}>
-          {MARKERS[line.kind]}
-        </span>
-        <span
-          className={cn(
-            "min-w-0 flex-1 whitespace-pre-wrap",
-            line.kind === "tool" && "ps-4 text-muted-foreground",
-          )}
-        >
-          {line.text}
-        </span>
+      <MessageContent className="gap-1.5 font-mono text-[0.8125rem]/6">
+        <div className="flex flex-row gap-2">
+          <span className={cn("w-3 shrink-0 select-none", markerColor(line.kind))}>
+            {MARKERS[line.kind]}
+          </span>
+          <span
+            className={cn(
+              "min-w-0 flex-1 whitespace-pre-wrap",
+              line.kind === "tool" && "ps-4 text-muted-foreground",
+            )}
+          >
+            {line.text}
+          </span>
+        </div>
+        {line.attachments ? <AttachmentRow files={line.attachments} className="ms-5" /> : null}
       </MessageContent>
     </Message>
   );

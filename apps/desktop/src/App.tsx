@@ -106,7 +106,7 @@ export function App() {
                   key={`${run.id}:${run.ask?.prompt ?? ""}`}
                   run={run}
                   error={inbox.error}
-                  onSend={(entry) => inbox.send(run.id, entry)}
+                  onSend={(entry, files) => inbox.send(run.id, entry, files)}
                 />
               ) : null}
             </>

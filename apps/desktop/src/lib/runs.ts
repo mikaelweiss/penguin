@@ -1,9 +1,13 @@
+import type { Attachment } from "@/lib/attachments";
+
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
 
 export type OutputLine = {
   kind: "show" | "tool" | "ask" | "answer" | "message";
   text: string;
   at: string;
+  /** What a sent message carried. The run file holds only the paths. */
+  attachments?: Attachment[];
 };
 
 export type Ask = {

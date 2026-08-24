@@ -12,6 +12,11 @@ import {
 import { Kbd } from "@workspace/ui/components/kbd";
 import { cn } from "@workspace/ui/lib/utils";
 
+import { AttachmentRow } from "@/components/attachment-row";
+import { useAttachments } from "@/hooks/use-attachments";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { bodyOf } from "@/lib/attachments";
+import type { Attachment } from "@/lib/attachments";
 import type { InboxEntry } from "@/lib/inbox";
 import type { Run } from "@/lib/runs";
 
@@ -24,7 +29,7 @@ function atStart(field: HTMLTextAreaElement): boolean {
 
 type RunComposerProps = {
   run: Run;
-  onSend: (entry: InboxEntry) => void;
+  onSend: (entry: InboxEntry, files: Attachment[]) => void;
   error: string | undefined;
 };
 
@@ -36,12 +41,19 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
   const [text, setText] = useState("");
   const choices = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const group = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const attach = useAttachments(run.id);
+  const hovering = useFileDrop(group, attach.drop);
 
   useEffect(() => {
     if (choices.current !== null) choices.current.focus();
     else field.current?.focus();
   }, []);
+
+  /** A menu choice is the whole answer, so attachments ride only a typed payload. */
+  const carries = menu === undefined || cursor === TEXT;
+  const problem = attach.error ?? error;
 
   const toggle = (index: number) =>
     setPicked((current) => {
@@ -51,24 +63,39 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
     });
 
   function answer(): unknown {
-    if (menu === undefined || cursor === TEXT) return text.trim() === "" ? undefined : text;
+    if (menu === undefined || carries) {
+      const body = bodyOf(attach.files, text);
+      return body === "" ? undefined : body;
+    }
     if (menu.many) {
       return menu.choices.filter((_, index) => picked.has(index)).map((choice) => choice.value);
     }
     return menu.choices[cursor]?.value;
   }
 
+  function send(entry: InboxEntry): void {
+    onSend(entry, carries ? attach.files : []);
+    if (carries) attach.clear();
+    setText("");
+  }
+
   function submit(): void {
     if (run.ask === undefined) {
-      if (text.trim() === "") return;
-      onSend({ message: text });
-      setText("");
+      const message = bodyOf(attach.files, text);
+      if (message === "") return;
+      send({ message });
       return;
     }
     const value = answer();
     if (value === undefined) return;
-    onSend({ answer: value });
-    setText("");
+    send({ answer: value });
+  }
+
+  function onPaste(event: React.ClipboardEvent): void {
+    const pasted = Array.from(event.clipboardData.files);
+    if (pasted.length === 0) return;
+    event.preventDefault();
+    attach.paste(pasted);
   }
 
   function onChoiceKeys(event: React.KeyboardEvent): void {
@@ -102,7 +129,11 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
 
   return (
     <div className="shrink-0 border-t p-3">
-      <InputGroup>
+      <InputGroup
+        ref={group}
+        onPaste={onPaste}
+        className={cn(hovering && "border-ring ring-3 ring-ring/50")}
+      >
         {run.ask ? (
           <InputGroupAddon
             align="block-start"
@@ -167,6 +198,12 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
           </InputGroupAddon>
         ) : null}
 
+        {attach.files.length > 0 ? (
+          <InputGroupAddon align="block-start" className="border-b">
+            <AttachmentRow files={attach.files} onRemove={attach.remove} className="w-full" />
+          </InputGroupAddon>
+        ) : null}
+
         {typing ? (
           <InputGroupTextarea
             ref={field}
@@ -187,8 +224,8 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
         ) : null}
 
         <InputGroupAddon align="block-end" className="border-t">
-          <InputGroupText className={cn("text-xs", error !== undefined && "text-destructive")}>
-            {error ?? (menu ? "arrows move, enter sends" : "enter sends, shift enter adds a line")}
+          <InputGroupText className={cn("text-xs", problem !== undefined && "text-destructive")}>
+            {problem ?? (menu ? "arrows move, enter sends" : "enter sends, shift enter adds a line")}
           </InputGroupText>
           <InputGroupButton variant="default" className="ml-auto" onClick={submit}>
             {run.ask ? "Answer" : "Send"}

@@ -119,6 +119,55 @@ fn rename_run(app: tauri::AppHandle, id: String, name: String) -> Result<(), Str
     append_line(&dir.join("run.jsonl"), &note).map_err(|cause| cause.to_string())
 }
 
+/// A name the directory does not hold yet, so a second paste of `image.png` keeps both.
+fn free_name(dir: &Path, name: &str) -> String {
+    let base = Path::new(name)
+        .file_name()
+        .and_then(|part| part.to_str())
+        .unwrap_or("file");
+    let stem = Path::new(base)
+        .file_stem()
+        .and_then(|part| part.to_str())
+        .unwrap_or("file");
+    let extension = Path::new(base).extension().and_then(|part| part.to_str());
+    let mut candidate = base.to_string();
+    let mut taken = 0;
+    while dir.join(&candidate).exists() {
+        taken += 1;
+        candidate = match extension {
+            Some(extension) => format!("{stem}-{taken}.{extension}"),
+            None => format!("{stem}-{taken}"),
+        };
+    }
+    candidate
+}
+
+/// A pasted file has no path yet, so its bytes land in the run's `files/` directory.
+#[tauri::command]
+fn write_run_file(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let dir = runs_dir(&app)
+        .and_then(|runs| run_folder(runs, &id))
+        .ok_or_else(|| format!("no run named {id}"))?
+        .join("files");
+    std::fs::create_dir_all(&dir).map_err(|cause| cause.to_string())?;
+    let path = dir.join(free_name(&dir, &name));
+    std::fs::write(&path, bytes).map_err(|cause| cause.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The bytes behind an attachment, so a dropped image can draw a thumbnail.
+#[tauri::command]
+fn read_attachment(path: String) -> Result<tauri::ipc::Response, String> {
+    std::fs::read(path)
+        .map(tauri::ipc::Response::new)
+        .map_err(|cause| cause.to_string())
+}
+
 #[cfg(unix)]
 fn signal_group(pid: i32) -> bool {
     // The run leads its own group, so this reaches the agents it spawned with it.
@@ -471,6 +520,8 @@ pub fn run() {
             describe,
             start_run,
             rename_run,
+            write_run_file,
+            read_attachment,
             stop_runs,
             read_config,
             write_config
@@ -594,6 +645,26 @@ mod tests {
         let last: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
         assert_eq!(last["name"], "ship it");
         assert_eq!(text.lines().count(), 2);
+    }
+
+    #[test]
+    fn a_second_paste_of_one_name_keeps_both_files() {
+        let dir = temp("files");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(free_name(&dir, "image.png"), "image.png");
+
+        std::fs::write(dir.join("image.png"), b"one").unwrap();
+        assert_eq!(free_name(&dir, "image.png"), "image-1.png");
+
+        std::fs::write(dir.join("image-1.png"), b"two").unwrap();
+        assert_eq!(free_name(&dir, "image.png"), "image-2.png");
+    }
+
+    #[test]
+    fn a_pasted_name_cannot_reach_out_of_the_run() {
+        let dir = temp("escape");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(free_name(&dir, "../../etc/passwd"), "passwd");
     }
 
     fn real(path: &Path) -> String {
