@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@workspace/ui/components/dialog";
+import { Empty, EmptyHeader, EmptyTitle } from "@workspace/ui/components/empty";
 import {
   Item,
   ItemActions,
@@ -63,7 +64,7 @@ export function SettingsShell({
         if (!next) onClose();
       }}
     >
-      <DialogContent className="h-120 max-h-[calc(100svh---spacing(8))] gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent className="h-120 gap-0 p-0 sm:max-w-2xl">
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -138,7 +139,13 @@ export type Definition = {
 /** What a catalog holds of one kind, each row saying which catalog it came from. */
 export function DefinitionList({ items, empty }: { items: Definition[]; empty: string }) {
   if (items.length === 0) {
-    return <p className="text-muted-foreground">{empty}</p>;
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>{empty}</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+    );
   }
 
   return (

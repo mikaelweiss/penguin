@@ -170,7 +170,7 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
             )}
 
             {run.ask?.problem ? (
-              <InputGroupText className="items-start font-mono text-[0.8125rem]/6 text-destructive">
+              <InputGroupText className="items-start font-mono text-destructive">
                 {run.ask.problem}
               </InputGroupText>
             ) : null}
@@ -197,7 +197,7 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
             }
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onFieldKeys}
-            className="max-h-40 font-mono text-[0.8125rem]/6"
+            className="max-h-40 font-mono"
           />
         ) : null}
 

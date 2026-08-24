@@ -58,7 +58,7 @@ function ParamControl({ id, control, value, invalid, onChange }: ControlProps) {
         value={value}
         aria-invalid={invalid}
         placeholder={control.kind === "lines" ? "one per line" : "JSON"}
-        className={control.kind === "json" ? "font-mono text-[0.8125rem]/6" : undefined}
+        className={control.kind === "json" ? "font-mono" : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
     );

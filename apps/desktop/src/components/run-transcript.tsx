@@ -32,32 +32,39 @@ const MARKERS: Record<OutputLine["kind"], string> = {
   problem: "!",
 };
 
+/** A run reads as a log, so every line is a message with a one-glyph speaker column. */
+const LINE = "gap-2 font-mono text-sm/6";
+
 function markerColor(kind: OutputLine["kind"]): string {
   if (kind === "ask") return "text-warning";
   if (kind === "problem") return "text-destructive";
   return "text-muted-foreground";
 }
 
+function contentStyle(kind: OutputLine["kind"]): string | undefined {
+  if (kind === "problem") return "text-destructive";
+  if (kind === "tool" || kind === "waiting") return "ps-4 text-muted-foreground";
+  return undefined;
+}
+
 function TranscriptLine({ line }: { line: OutputLine }) {
   return (
-    <Message>
-      <MessageContent className="gap-1.5 font-mono text-[0.8125rem]/6">
-        <div className="flex flex-row gap-2">
-          <span className={cn("w-3 shrink-0 select-none", markerColor(line.kind))}>
-            {MARKERS[line.kind]}
-          </span>
-          <span
-            className={cn(
-              "min-w-0 flex-1 whitespace-pre-wrap",
-              (line.kind === "tool" || line.kind === "waiting") && "ps-4 text-muted-foreground",
-              line.kind === "problem" && "text-destructive",
-            )}
-          >
-            {line.text}
-          </span>
-        </div>
-        {line.attachments ? <AttachmentRow files={line.attachments} className="ms-5" /> : null}
+    <Message className={LINE}>
+      <span aria-hidden="true" className={cn("w-3 shrink-0 select-none", markerColor(line.kind))}>
+        {MARKERS[line.kind]}
+      </span>
+      <MessageContent className={cn("gap-1.5", contentStyle(line.kind))}>
+        <span className="whitespace-pre-wrap">{line.text}</span>
+        {line.attachments ? <AttachmentRow files={line.attachments} /> : null}
       </MessageContent>
+    </Message>
+  );
+}
+
+function ClosingLine({ children }: { children: string }) {
+  return (
+    <Message className={LINE}>
+      <MessageContent className="text-muted-foreground">{children}</MessageContent>
     </Message>
   );
 }
@@ -123,10 +130,8 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
               </MessageScrollerItem>
             ))}
             {closing ? (
-              <MessageScrollerItem>
-                <div className="pt-2 font-mono text-[0.8125rem]/6 text-muted-foreground">
-                  {closing}
-                </div>
+              <MessageScrollerItem className="pt-2">
+                <ClosingLine>{closing}</ClosingLine>
               </MessageScrollerItem>
             ) : null}
             {reason === undefined ? null : (
