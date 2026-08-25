@@ -7,7 +7,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::path::BaseDirectory;
-use tauri::Manager;
+use tauri::window::Color;
+use tauri::{Manager, Theme};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -675,9 +676,32 @@ fn died(file: &str, log: &Path) -> String {
     }
 }
 
+/// Matches `--background` in `packages/ui/src/styles/globals.css`.
+const LIGHT_BACKGROUND: Color = Color(0xff, 0xff, 0xff, 0xff);
+const DARK_BACKGROUND: Color = Color(0x0a, 0x0a, 0x0a, 0xff);
+
+/// The longest the window stays hidden when the frontend never asks to be shown.
+const SHOW_DEADLINE: Duration = Duration::from_millis(3000);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let window = app.get_webview_window("main").expect("main window");
+            let background = match window.theme() {
+                Ok(Theme::Dark) => DARK_BACKGROUND,
+                _ => LIGHT_BACKGROUND,
+            };
+            window.set_background_color(Some(background))?;
+
+            let waiting = window.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(SHOW_DEADLINE);
+                let _ = waiting.show();
+            });
+
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())

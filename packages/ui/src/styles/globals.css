@@ -127,6 +127,15 @@
     --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Derived from the theme class so a runtime toggle can never leave it stale. */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
 /* The vendored terminal's scrollbar reads these, mapped onto the app tokens. */
 :root {
   --app-scrollbar-width: 6px;

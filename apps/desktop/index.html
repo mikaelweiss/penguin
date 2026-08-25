@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>penguin</title>
+    <script>
+      // Paints the stored theme before React mounts, so the first frame is never the wrong one.
+      (function () {
+        var system = function () {
+          return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        };
+        var theme;
+        try {
+          var stored = localStorage.getItem("theme");
+          theme = stored === "dark" || stored === "light" ? stored : system();
+        } catch (unreadable) {
+          theme = system();
+        }
+        document.documentElement.classList.add(theme);
+      })();
+    </script>
   </head>
 
   <body>

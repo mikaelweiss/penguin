@@ -28,6 +28,7 @@ import { useInbox } from "@/hooks/use-inbox";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
 import { useRunTree } from "@/hooks/use-run-tree";
+import { useWindowBackground } from "@/hooks/use-window-background";
 import { useWorkflowIndex } from "@/hooks/use-workflow-index";
 import { findRun } from "@/lib/runs";
 import type { Project } from "@/lib/runs";
@@ -40,6 +41,7 @@ type Starting = {
 };
 
 export function App() {
+  useWindowBackground();
   const directories = useDirectories();
   const { projects, error } = useRuns(directories.dirs);
   const inbox = useInbox();
