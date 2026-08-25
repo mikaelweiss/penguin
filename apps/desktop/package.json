@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "icon": "tauri icon app-icon.svg && rm -rf src-tauri/icons/android src-tauri/icons/ios"
   },
   "dependencies": {
     "@mikaelweiss/penguin-engine": "workspace:*",
