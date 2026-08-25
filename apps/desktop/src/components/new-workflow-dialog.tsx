@@ -55,6 +55,8 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [starting, setStarting] = useState(false);
   const claimed = useRef<Promise<string> | undefined>(undefined);
+  /** What a dismissed dialog left to the start still in flight, holding the claim it had. */
+  const parked = useRef<{ held: Promise<string> | undefined } | undefined>(undefined);
 
   /** One folder per dialog, claimed on the first paste. A claim that fails lets the next try. */
   const claim = useCallback(() => {
@@ -84,10 +86,16 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
     );
   }, [dir, preset]);
 
+  const drop = (held: Promise<string> | undefined) => {
+    if (held !== undefined) held.then(discardRun).catch(() => undefined);
+  };
+
   const close = () => {
     const held = claimed.current;
     claimed.current = undefined;
-    if (held !== undefined) held.then(discardRun).catch(() => undefined);
+    // A start in flight owns its folder until it settles, so leaving parks the claim for it.
+    if (starting) parked.current = { held };
+    else drop(held);
     onClose();
     setPicked(undefined);
     setProblems({});
@@ -103,6 +111,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
       .then((id) => startRun(workflow.file, params, dir, id))
       .then(
         (id) => {
+          parked.current = undefined;
           setStarting(false);
           claimed.current = undefined;
           close();
@@ -110,6 +119,13 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
         },
         (cause: unknown) => {
           setStarting(false);
+          const left = parked.current;
+          parked.current = undefined;
+          // Nobody is left to ask again, so the folder the start never used goes now.
+          if (left !== undefined) {
+            drop(left.held);
+            return;
+          }
           setTrouble({ title: `Cannot start ${workflow.name}`, detail: detailOf(cause) });
         },
       );
