@@ -50,6 +50,9 @@ export type Auth = {
   at: string;
 };
 
+/** One plain-text value the run was started with. */
+export type RunInput = { name: string; text: string };
+
 export type Run = {
   id: string;
   name: string;
@@ -62,6 +65,7 @@ export type Run = {
   /** The run is waiting on view.listen, so it can take a message. */
   listening: boolean;
   state?: RunState;
+  input: RunInput[];
   output: TranscriptItem[];
   children: Run[];
 };
@@ -304,6 +308,16 @@ function outputOf(entries: Entry[]): TranscriptItem[] {
   return items;
 }
 
+/** The plain-text values the run started with, in the order its head entry recorded them. */
+function inputOf(head: Entry): RunInput[] {
+  const params = head["params"];
+  if (params === null || typeof params !== "object" || Array.isArray(params)) return [];
+  return Object.entries(params as Record<string, unknown>).flatMap(([name, value]) => {
+    const written = text(value);
+    return written === undefined || written.trim() === "" ? [] : [{ name, text: written }];
+  });
+}
+
 function stateOf(entries: Entry[]): RunState | undefined {
   const latest = entries.findLast(
     (entry) => entry["call"] === "view.status" && entry["pending"] === true,
@@ -358,6 +372,7 @@ function place(file: RunFile): Placed | undefined {
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
       ...(state === undefined ? {} : { state }),
+      input: inputOf(head),
       output: outputOf(file.entries),
       children: [],
     },

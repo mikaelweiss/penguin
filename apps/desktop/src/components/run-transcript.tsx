@@ -36,7 +36,15 @@ import { cn } from "@workspace/ui/lib/utils";
 
 import { AttachmentRow } from "@/components/attachment-row";
 import { useRunLog } from "@/hooks/use-run-log";
-import type { ActionItem, ActionKind, OutputLine, Run, RunState, TranscriptItem } from "@/lib/runs";
+import type {
+  ActionItem,
+  ActionKind,
+  OutputLine,
+  Run,
+  RunInput,
+  RunState,
+  TranscriptItem,
+} from "@/lib/runs";
 
 const MARKERS: Record<OutputLine["kind"], string> = {
   show: "",
@@ -219,6 +227,70 @@ function ActionGroup({ actions, live }: { actions: ActionItem[]; live: boolean }
   );
 }
 
+const FOLD_LINES = 3;
+const FOLD_CHARS = 300;
+
+function folded(value: string): boolean {
+  return value.length > FOLD_CHARS || value.split("\n").length > FOLD_LINES;
+}
+
+function InputValue({ entry, label }: { entry: RunInput; label: boolean }) {
+  const [open, setOpen] = useState(false);
+  const name = label ? (
+    <span className="text-xs text-muted-foreground">{entry.name}</span>
+  ) : null;
+
+  if (!folded(entry.text)) {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        {name}
+        <span className="whitespace-pre-wrap">{entry.text}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <button
+        type="button"
+        className="flex min-w-0 cursor-pointer items-center gap-2 text-start"
+        aria-expanded={open}
+        onClick={() => setOpen((showing) => !showing)}
+      >
+        <ChevronDownIcon
+          className={cn(
+            "size-3 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+        {name}
+        <span className="truncate">{entry.text.split("\n")[0]}</span>
+      </button>
+      {open ? (
+        <div className="max-h-96 overflow-auto whitespace-pre-wrap border-s ps-3 text-muted-foreground">
+          {entry.text}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** What the run was started with, so the prompt outlives the dialog that sent it. */
+function InputBlock({ input }: { input: RunInput[] }) {
+  return (
+    <Message className={LINE}>
+      <span aria-hidden="true" className="w-3 shrink-0 select-none text-muted-foreground">
+        {MARKERS.message}
+      </span>
+      <MessageContent className="gap-2">
+        {input.map((entry) => (
+          <InputValue key={entry.name} entry={entry} label={input.length > 1} />
+        ))}
+      </MessageContent>
+    </Message>
+  );
+}
+
 type Block =
   | { type: "line"; line: OutputLine; key: string }
   | { type: "actions"; actions: ActionItem[]; key: string };
@@ -280,7 +352,12 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
   const acting = running && tail?.type === "action" && tail.status === "running";
   const live = running && !acting ? run.state : undefined;
 
-  if (items.length === 0 && run.status === "running" && live === undefined) {
+  if (
+    items.length === 0 &&
+    run.input.length === 0 &&
+    run.status === "running" &&
+    live === undefined
+  ) {
     return (
       <Empty className="flex-1">
         <EmptyHeader>
@@ -300,6 +377,14 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
       <MessageScroller className="flex-1">
         <MessageScrollerViewport>
           <MessageScrollerContent className="gap-0 p-4">
+            {run.input.length === 0 ? null : (
+              <MessageScrollerItem
+                key={`${run.id}-input`}
+                className={blocks.length > 0 ? "pb-2" : undefined}
+              >
+                <InputBlock input={run.input} />
+              </MessageScrollerItem>
+            )}
             {blocks.map((block, index) => (
               <MessageScrollerItem
                 key={`${run.id}-${block.key}`}
