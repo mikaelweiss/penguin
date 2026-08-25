@@ -1,4 +1,17 @@
-import { ActivityIcon, ListTreeIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  BotIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  EyeIcon,
+  GlobeIcon,
+  ListTreeIcon,
+  SearchIcon,
+  SquarePenIcon,
+  SquareTerminalIcon,
+  WrenchIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -22,7 +35,7 @@ import { cn } from "@workspace/ui/lib/utils";
 
 import { AttachmentRow } from "@/components/attachment-row";
 import { useRunLog } from "@/hooks/use-run-log";
-import type { OutputLine, Run, RunState } from "@/lib/runs";
+import type { ActionItem, ActionKind, OutputLine, Run, RunState, TranscriptItem } from "@/lib/runs";
 
 const MARKERS: Record<OutputLine["kind"], string> = {
   show: "",
@@ -47,9 +60,7 @@ function TranscriptLine({ line }: { line: OutputLine }) {
       <span aria-hidden="true" className={cn("w-3 shrink-0 select-none", markerColor(line.kind))}>
         {MARKERS[line.kind]}
       </span>
-      <MessageContent
-        className={cn("gap-1.5", line.kind === "problem" && "text-destructive")}
-      >
+      <MessageContent className={cn("gap-1.5", line.kind === "problem" && "text-destructive")}>
         <span className="whitespace-pre-wrap">{line.text}</span>
         {line.attachments ? <AttachmentRow files={line.attachments} /> : null}
       </MessageContent>
@@ -99,6 +110,131 @@ function LiveLine({ state }: { state: RunState }) {
   );
 }
 
+const ICONS: Record<ActionKind, LucideIcon> = {
+  run: SquareTerminalIcon,
+  read: EyeIcon,
+  edit: SquarePenIcon,
+  search: SearchIcon,
+  fetch: GlobeIcon,
+  agent: BotIcon,
+};
+
+function ActionRow({ action, spinning }: { action: ActionItem; spinning: boolean }) {
+  const [open, setOpen] = useState(false);
+  const Icon = action.kind === undefined ? WrenchIcon : ICONS[action.kind];
+  const failed = action.status === "failed";
+  const label = (
+    <>
+      {spinning ? (
+        <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <Icon
+          className={cn("size-3.5 shrink-0", failed ? "text-destructive" : "text-muted-foreground")}
+        />
+      )}
+      <span className={cn("truncate", failed ? "text-destructive" : "text-muted-foreground")}>
+        {action.name}
+        {action.target === undefined ? null : <span className="ms-2">{action.target}</span>}
+      </span>
+      {action.output === undefined ? null : (
+        <ChevronDownIcon
+          className={cn(
+            "size-3 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      )}
+    </>
+  );
+
+  return (
+    <Message className={LINE}>
+      <span aria-hidden="true" className="w-3 shrink-0" />
+      <MessageContent className="min-w-0 gap-1">
+        {action.output === undefined ? (
+          <span className="flex min-w-0 items-center gap-2">{label}</span>
+        ) : (
+          <button
+            type="button"
+            className="flex min-w-0 cursor-pointer items-center gap-2 text-start"
+            aria-expanded={open}
+            onClick={() => setOpen((showing) => !showing)}
+          >
+            {label}
+          </button>
+        )}
+        {open && action.output !== undefined ? (
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-s ps-3 text-xs/5 text-muted-foreground">
+            {action.output}
+          </pre>
+        ) : null}
+      </MessageContent>
+    </Message>
+  );
+}
+
+/** Contiguous tool calls fold into one summary row; the newest stays visible while it runs. */
+function ActionGroup({ actions, live }: { actions: ActionItem[]; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const last = actions.at(-1);
+  if (last === undefined) return null;
+  const streaming = live && last.status === "running";
+
+  if (actions.length === 1) return <ActionRow action={last} spinning={streaming} />;
+
+  const failures = actions.filter((action) => action.status === "failed").length;
+  const shown = open ? actions : streaming ? [last] : [];
+  return (
+    <div>
+      <Message className={LINE}>
+        <span aria-hidden="true" className="w-3 shrink-0" />
+        <MessageContent>
+          <button
+            type="button"
+            className="flex cursor-pointer items-center gap-2 text-muted-foreground"
+            aria-expanded={open}
+            onClick={() => setOpen((showing) => !showing)}
+          >
+            <ChevronRightIcon
+              className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
+            />
+            <span>{actions.length} actions</span>
+            {failures > 0 ? <span className="text-destructive">{failures} failed</span> : null}
+          </button>
+        </MessageContent>
+      </Message>
+      {shown.map((action) => (
+        <ActionRow
+          key={action.id}
+          action={action}
+          spinning={streaming && action.id === last.id}
+        />
+      ))}
+    </div>
+  );
+}
+
+type Block =
+  | { type: "line"; line: OutputLine; key: string }
+  | { type: "actions"; actions: ActionItem[]; key: string };
+
+function toBlocks(items: TranscriptItem[]): Block[] {
+  const blocks: Block[] = [];
+  items.forEach((item, index) => {
+    if (item.type === "action") {
+      const tail = blocks.at(-1);
+      if (tail?.type === "actions") {
+        tail.actions.push(item);
+        return;
+      }
+      blocks.push({ type: "actions", actions: [item], key: `actions-${item.id}` });
+      return;
+    }
+    blocks.push({ type: "line", line: item.line, key: `line-${index}` });
+  });
+  return blocks;
+}
+
 const CLOSING: Partial<Record<Run["status"], string>> = {
   done: "run finished",
   failed: "run failed",
@@ -130,10 +266,16 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
 
   const closing = CLOSING[run.status];
   const reason = run.problem ?? log;
-  const lines = [...run.output, ...sent];
-  const live = run.status === "running" && run.ask === undefined ? run.state : undefined;
+  const items: TranscriptItem[] = [
+    ...run.output,
+    ...sent.map((line): TranscriptItem => ({ type: "line", line })),
+  ];
+  const running = run.status === "running" && run.ask === undefined;
+  const tail = items.at(-1);
+  const acting = running && tail?.type === "action" && tail.status === "running";
+  const live = running && !acting ? run.state : undefined;
 
-  if (lines.length === 0 && run.status === "running" && live === undefined) {
+  if (items.length === 0 && run.status === "running" && live === undefined) {
     return (
       <Empty className="flex-1">
         <EmptyHeader>
@@ -147,17 +289,22 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
     );
   }
 
+  const blocks = toBlocks(items);
   return (
     <MessageScrollerProvider>
       <MessageScroller className="flex-1">
         <MessageScrollerViewport>
           <MessageScrollerContent className="gap-0 p-4">
-            {lines.map((line, index) => (
+            {blocks.map((block, index) => (
               <MessageScrollerItem
-                key={`${run.id}-${index}`}
-                scrollAnchor={live === undefined && index === lines.length - 1}
+                key={`${run.id}-${block.key}`}
+                scrollAnchor={live === undefined && index === blocks.length - 1}
               >
-                <TranscriptLine line={line} />
+                {block.type === "line" ? (
+                  <TranscriptLine line={block.line} />
+                ) : (
+                  <ActionGroup actions={block.actions} live={running} />
+                )}
               </MessageScrollerItem>
             ))}
             {closing ? (
@@ -171,7 +318,7 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
               </MessageScrollerItem>
             )}
             {live === undefined ? null : (
-              <MessageScrollerItem scrollAnchor className={lines.length > 0 ? "pt-2" : undefined}>
+              <MessageScrollerItem scrollAnchor className={blocks.length > 0 ? "pt-2" : undefined}>
                 <LiveLine state={live} />
               </MessageScrollerItem>
             )}

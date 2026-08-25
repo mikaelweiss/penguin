@@ -18,6 +18,22 @@ export type RunState = {
   idle: boolean;
 };
 
+export type ActionKind = "run" | "read" | "edit" | "search" | "fetch" | "agent";
+
+/** One tool call the run made, updated in place as its view.act calls arrive. */
+export type ActionItem = {
+  type: "action";
+  id: string;
+  name: string;
+  kind?: ActionKind;
+  status: "running" | "done" | "failed";
+  target?: string;
+  output?: string;
+  at: string;
+};
+
+export type TranscriptItem = { type: "line"; line: OutputLine } | ActionItem;
+
 export type Ask = {
   prompt: string;
   /** The JSON Schema the workflow asked with, when it named one. */
@@ -37,7 +53,7 @@ export type Run = {
   /** The run is waiting on view.listen, so it can take a message. */
   listening: boolean;
   state?: RunState;
-  output: OutputLine[];
+  output: TranscriptItem[];
   children: Run[];
 };
 
@@ -196,20 +212,71 @@ function problemOf(entries: Entry[], waiting: Entry): string | undefined {
   return refused === undefined ? undefined : text(refused["problem"]);
 }
 
-function outputOf(entries: Entry[]): OutputLine[] {
-  const lines: OutputLine[] = [];
+const KINDS: ReadonlySet<string> = new Set(["run", "read", "edit", "search", "fetch", "agent"]);
+
+function kindOf(value: unknown): ActionKind | undefined {
+  return typeof value === "string" && KINDS.has(value) ? (value as ActionKind) : undefined;
+}
+
+function statusOf(value: unknown): ActionItem["status"] {
+  return value === "done" || value === "failed" ? value : "running";
+}
+
+function actionOf(entry: Entry, actions: Map<string, ActionItem>): ActionItem | undefined {
+  const sent = argsOf(entry)[0];
+  if (sent === null || typeof sent !== "object") return undefined;
+  const call = sent as Record<string, unknown>;
+  const id = text(call["id"]);
+  const name = text(call["name"]);
+  if (id === undefined || name === undefined) return undefined;
+
+  const kind = kindOf(call["kind"]);
+  const target = text(call["target"]);
+  const output = text(call["output"]);
+  const known = actions.get(id);
+  if (known !== undefined) {
+    known.name = name;
+    known.status = statusOf(call["status"]);
+    if (kind !== undefined) known.kind = kind;
+    if (target !== undefined) known.target = target;
+    if (output !== undefined) known.output = output;
+    return undefined;
+  }
+  const action: ActionItem = {
+    type: "action",
+    id,
+    name,
+    status: statusOf(call["status"]),
+    at: text(entry["at"]) ?? "",
+    ...(kind === undefined ? {} : { kind }),
+    ...(target === undefined ? {} : { target }),
+    ...(output === undefined ? {} : { output }),
+  };
+  actions.set(id, action);
+  return action;
+}
+
+function outputOf(entries: Entry[]): TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  const actions = new Map<string, ActionItem>();
+  const line = (kind: OutputLine["kind"], value: string, at: string): void => {
+    items.push({ type: "line", line: { kind, text: value, at } });
+  };
   for (const entry of entries) {
     const args = argsOf(entry);
     const at = text(entry["at"]) ?? "";
     if (entry["call"] === "view.show" && entry["pending"] === true && args[1] === undefined) {
-      lines.push({ kind: "show", text: display(args[0]), at });
+      line("show", display(args[0]), at);
+    } else if (entry["call"] === "view.act" && entry["pending"] === true) {
+      const action = actionOf(entry, actions);
+      if (action !== undefined) items.push(action);
     } else if (entry["call"] === "view.ask" && entry["pending"] === true) {
-      lines.push({ kind: "ask", text: display(args[0]), at });
+      line("ask", display(args[0]), at);
     } else if (entry["call"] === "view.ask" && "outcome" in entry) {
-      lines.push({ kind: "answer", text: display(entry["outcome"]), at });
+      line("answer", display(entry["outcome"]), at);
     }
   }
-  return lines;
+  return items;
 }
 
 function stateOf(entries: Entry[]): RunState | undefined {
