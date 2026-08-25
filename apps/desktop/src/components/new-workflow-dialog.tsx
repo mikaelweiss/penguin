@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
@@ -25,9 +25,10 @@ import { cn } from "@workspace/ui/lib/utils";
 
 import { ReadingCatalogs } from "@/components/reading-catalogs";
 import { WorkflowParams } from "@/components/workflow-params";
-import { fill, initialValues, paramsOf } from "@/lib/params";
+import { useParamAttachments } from "@/hooks/use-param-attachments";
+import { fill, initialValues, paramsOf, withAttachments } from "@/lib/params";
 import type { Values } from "@/lib/params";
-import { describe, shelves, startRun } from "@/lib/workflows";
+import { claimRun, describe, discardRun, shelves, startRun } from "@/lib/workflows";
 import type { Workflow } from "@/lib/workflows";
 
 type Trouble = { title: string; detail: string };
@@ -53,6 +54,17 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
   const [values, setValues] = useState<Values>({});
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [starting, setStarting] = useState(false);
+  const claimed = useRef<Promise<string> | undefined>(undefined);
+
+  /** One folder per dialog, claimed on the first paste. A claim that fails lets the next try. */
+  const claim = useCallback(() => {
+    claimed.current ??= claimRun().catch((cause: unknown) => {
+      claimed.current = undefined;
+      throw cause;
+    });
+    return claimed.current;
+  }, []);
+  const attach = useParamAttachments(claim);
 
   useEffect(() => {
     if (dir === undefined || preset !== undefined) return;
@@ -73,26 +85,34 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
   }, [dir, preset]);
 
   const close = () => {
+    const held = claimed.current;
+    claimed.current = undefined;
+    if (held !== undefined) held.then(discardRun).catch(() => undefined);
     onClose();
     setPicked(undefined);
     setProblems({});
     setTrouble(undefined);
+    attach.reset();
   };
 
   const start = (workflow: Workflow, params: Record<string, unknown>) => {
     if (dir === undefined) return;
     setStarting(true);
-    startRun(workflow.file, params, dir).then(
-      (id) => {
-        setStarting(false);
-        close();
-        onStarted(id);
-      },
-      (cause: unknown) => {
-        setStarting(false);
-        setTrouble({ title: `Cannot start ${workflow.name}`, detail: detailOf(cause) });
-      },
-    );
+    const folder = claimed.current?.catch(() => undefined) ?? Promise.resolve(undefined);
+    folder
+      .then((id) => startRun(workflow.file, params, dir, id))
+      .then(
+        (id) => {
+          setStarting(false);
+          claimed.current = undefined;
+          close();
+          onStarted(id);
+        },
+        (cause: unknown) => {
+          setStarting(false);
+          setTrouble({ title: `Cannot start ${workflow.name}`, detail: detailOf(cause) });
+        },
+      );
   };
 
   const choose = (workflow: Workflow) => {
@@ -104,6 +124,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
     setValues(initialValues(params));
     setProblems({});
     setTrouble(undefined);
+    attach.reset();
     setPicked(workflow);
   };
 
@@ -114,7 +135,8 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
 
   const submit = () => {
     if (picked === undefined) return;
-    const filled = fill(paramsOf(picked.params), values);
+    const params = paramsOf(picked.params);
+    const filled = fill(params, withAttachments(params, values, attach.files));
     if ("problems" in filled) {
       setProblems(filled.problems);
       return;
@@ -123,11 +145,17 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
     start(picked, filled.params);
   };
 
-  const alert = trouble ? (
+  const problem =
+    trouble ??
+    (attach.error === undefined
+      ? undefined
+      : { title: "Cannot attach the file", detail: attach.error });
+
+  const alert = problem ? (
     <Alert variant="destructive">
       <TriangleAlertIcon />
-      <AlertTitle>{trouble.title}</AlertTitle>
-      <AlertDescription>{trouble.detail}</AlertDescription>
+      <AlertTitle>{problem.title}</AlertTitle>
+      <AlertDescription>{problem.detail}</AlertDescription>
     </Alert>
   ) : null;
 
@@ -157,7 +185,10 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
                 params={paramsOf(picked.params)}
                 values={values}
                 problems={problems}
+                attachments={attach.files}
                 onChange={(name, value) => setValues((current) => ({ ...current, [name]: value }))}
+                onPaste={attach.paste}
+                onRemove={attach.remove}
               />
             </DialogBody>
             {alert}
@@ -229,7 +260,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
                 ))}
               </CommandList>
             </Command>
-            {trouble ? <div className="border-t p-3">{alert}</div> : null}
+            {problem ? <div className="border-t p-3">{alert}</div> : null}
           </>
         )}
       </DialogContent>

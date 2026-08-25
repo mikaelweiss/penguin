@@ -502,6 +502,30 @@ fn claim_id(runs: &Path) -> Result<String, String> {
     Ok(id)
 }
 
+/// A run folder before the run exists, so a pasted file has somewhere to land.
+#[tauri::command]
+fn claim_run(app: tauri::AppHandle) -> Result<String, String> {
+    let runs = runs_dir(&app).ok_or("no runs directory")?;
+    claim_id(&runs)
+}
+
+/// A claimed folder the dialog never started. One holding a run file is left alone.
+fn discard(folder: &Path) -> std::io::Result<()> {
+    if !folder.exists() || folder.join("run.jsonl").exists() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(folder)
+}
+
+/// Drops a folder claimed for a run that never started.
+#[tauri::command]
+fn discard_run(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let folder = runs_dir(&app)
+        .and_then(|runs| run_folder(runs, &id))
+        .ok_or_else(|| format!("no run named {id}"))?;
+    discard(&folder).map_err(|cause| cause.to_string())
+}
+
 #[cfg(unix)]
 fn detach(command: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -527,12 +551,24 @@ async fn start_run(
     file: String,
     params: serde_json::Value,
     dir: String,
+    id: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let engine = engine(&app)?;
         let runs = runs_dir(&app).ok_or("no runs directory")?;
-        let id = claim_id(&runs)?;
-        let folder = runs.join(&id);
+        let (id, folder) = match id {
+            Some(claimed) => {
+                let folder = run_folder(runs, &claimed)
+                    .ok_or_else(|| format!("no run named {claimed}"))?;
+                std::fs::create_dir_all(&folder).map_err(|cause| cause.to_string())?;
+                (claimed, folder)
+            }
+            None => {
+                let fresh = claim_id(&runs)?;
+                let folder = runs.join(&fresh);
+                (fresh, folder)
+            }
+        };
         let job = serde_json::to_string(&Job {
             file: &file,
             params: &params,
@@ -653,6 +689,8 @@ pub fn run() {
             write_dirs,
             project_root,
             describe,
+            claim_run,
+            discard_run,
             start_run,
             rename_run,
             write_run_file,
@@ -844,6 +882,28 @@ mod tests {
         assert_ne!(first, second);
         assert!(runs.join(&first).is_dir());
         assert!(runs.join(&second).is_dir());
+    }
+
+    #[test]
+    fn a_claimed_folder_that_never_ran_is_dropped() {
+        let dir = temp("claimed");
+        std::fs::create_dir_all(dir.join("files")).unwrap();
+        std::fs::write(dir.join("files").join("image.png"), b"one").unwrap();
+        discard(&dir).unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_folder_holding_a_run_survives_a_discard() {
+        let dir = temp("started");
+        run_file(&dir, std::process::id() as i32, &[]);
+        discard(&dir).unwrap();
+        assert!(dir.join("run.jsonl").exists());
+    }
+
+    #[test]
+    fn discarding_a_folder_that_is_gone_is_no_trouble() {
+        assert!(discard(&temp("never")).is_ok());
     }
 
     #[test]

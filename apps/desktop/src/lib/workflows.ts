@@ -40,9 +40,24 @@ export function describe(dir: string): Promise<Catalogs> {
   return invoke<Catalogs>("describe", { dir });
 }
 
+/** A run folder before the run exists, so a pasted file has somewhere to land. */
+export function claimRun(): Promise<string> {
+  return invoke<string>("claim_run");
+}
+
+/** Drops a claimed folder that never became a run. One holding a run file is left alone. */
+export function discardRun(id: string): Promise<void> {
+  return invoke("discard_run", { id });
+}
+
 /** Starts a workflow as its own run and settles with the id its files live under. */
-export function startRun(file: string, params: unknown, dir: string): Promise<string> {
-  return invoke<string>("start_run", { file, params, dir });
+export function startRun(
+  file: string,
+  params: unknown,
+  dir: string,
+  id: string | undefined,
+): Promise<string> {
+  return invoke<string>("start_run", { file, params, dir, id });
 }
 
 const ORDER: Scope[] = ["project", "home", "catalog", "starter", "builtin"];

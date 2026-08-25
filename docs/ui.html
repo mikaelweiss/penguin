@@ -80,6 +80,9 @@
       <li>Attachments preview in a row above the input: a thumbnail for an image, an icon and the file name for anything else.</li>
       <li>Each preview has a button that removes it.</li>
       <li>A pasted image has no path yet, so the app writes it into the run's <code>files/</code> directory.</li>
+      <li>A text or multi-line param in the new workflow form takes a paste the same way, and previews it under that field.</li>
+      <li>The run's folder is claimed on that first paste, so the bytes have somewhere to land before the run starts.</li>
+      <li>Closing the form without starting drops a folder that never became a run.</li>
       <li>A dropped file keeps the path it already has. Nothing is copied.</li>
       <li>The message sends paths, never bytes: one path per line, then the typed text. The agent opens the files itself.</li>
       <li>The transcript shows a sent message with the same previews.</li>
@@ -110,6 +113,7 @@
       <li>Workflows are sorted by catalog.</li>
       <li>The run's directory is the project it started from, never a param.</li>
       <li>Picking a workflow with params asks for them, then starts the run. One without params starts on the pick.</li>
+      <li>Pasting a file onto a text or multi-line param attaches it. The path rides the value, one path per line, then the typed text.</li>
       <li>The sheet's data comes from an engine describe run: each workflow's name, description, and params as JSON Schema, printed as JSON.</li>
     </ul>
 

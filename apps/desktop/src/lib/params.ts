@@ -1,3 +1,6 @@
+import { bodyOf } from "@/lib/attachments";
+import type { Attachment } from "@/lib/attachments";
+
 export type Control =
   | { kind: "text" }
   | { kind: "number" }
@@ -76,6 +79,27 @@ export function paramsOf(schema: Record<string, unknown> | undefined): Param[] {
 
 export function initialValues(params: Param[]): Values {
   return Object.fromEntries(params.map((param) => [param.name, param.initial]));
+}
+
+/** A pasted path reads as a value only where a line of text is one. */
+export function canAttach(control: Control): boolean {
+  return control.kind === "text" || control.kind === "lines";
+}
+
+/** The pasted paths ride the value, so no field ever shows a path a person did not type. */
+export function withAttachments(
+  params: Param[],
+  values: Values,
+  attachments: Record<string, Attachment[]>,
+): Values {
+  const merged: Values = { ...values };
+  for (const param of params) {
+    const files = attachments[param.name] ?? [];
+    if (!canAttach(param.control) || files.length === 0) continue;
+    const typed = values[param.name];
+    merged[param.name] = bodyOf(files, typeof typed === "string" ? typed : "");
+  }
+  return merged;
 }
 
 export type Filled = { params: Record<string, unknown> } | { problems: Record<string, string> };
