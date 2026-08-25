@@ -158,13 +158,12 @@ export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentA
   };
 }
 
-/** Shows a turn's stream as it arrives: the agent's words plain, its actions as tool lines. */
+/** Shows a turn's stream as it arrives: the agent's words as story, its actions as status. */
 export function narrate(view: View, output: AsyncIterable<Chunk>): Promise<void> {
   return (async () => {
     for await (const chunk of output) {
       if (chunk.kind === "text") await view.show(chunk.text);
-      if (chunk.kind === "tool")
-        await view.show(`${chunk.text}: ${chunk.detail ?? ""}`, { kind: "tool" });
+      if (chunk.kind === "tool") await view.status(`${chunk.text}: ${chunk.detail ?? ""}`);
     }
   })();
 }

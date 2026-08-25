@@ -3,11 +3,19 @@ import type { Attachment } from "@/lib/attachments";
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
 
 export type OutputLine = {
-  kind: "show" | "tool" | "waiting" | "ask" | "answer" | "message" | "problem";
+  kind: "show" | "ask" | "answer" | "message" | "problem";
   text: string;
   at: string;
   /** What a sent message carried. The run file holds only the paths. */
   attachments?: Attachment[];
+};
+
+/** What the run does right now, from its last view.status call. */
+export type RunState = {
+  text: string;
+  at: string;
+  /** The run waits on an outside event, not on its own work. */
+  idle: boolean;
 };
 
 export type Ask = {
@@ -28,6 +36,7 @@ export type Run = {
   problem?: string;
   /** The run is waiting on view.listen, so it can take a message. */
   listening: boolean;
+  state?: RunState;
   output: OutputLine[];
   children: Run[];
 };
@@ -50,9 +59,8 @@ export function isLive(run: Run): boolean {
   return run.status === "running" || run.children.some(isLive);
 }
 
-/** The run's last word says it waits on an outside event. */
 export function isIdle(run: Run): boolean {
-  return run.status === "running" && run.ask === undefined && run.output.at(-1)?.kind === "waiting";
+  return run.status === "running" && run.ask === undefined && run.state?.idle === true;
 }
 
 /** A run and every run inside it, outermost first, the order stopping sends them in. */
@@ -193,11 +201,8 @@ function outputOf(entries: Entry[]): OutputLine[] {
   for (const entry of entries) {
     const args = argsOf(entry);
     const at = text(entry["at"]) ?? "";
-    if (entry["call"] === "view.show" && entry["pending"] === true) {
-      const options = args[1] as { kind?: string } | undefined;
-      const kind =
-        options?.kind === "tool" || options?.kind === "waiting" ? options.kind : "show";
-      lines.push({ kind, text: display(args[0]), at });
+    if (entry["call"] === "view.show" && entry["pending"] === true && args[1] === undefined) {
+      lines.push({ kind: "show", text: display(args[0]), at });
     } else if (entry["call"] === "view.ask" && entry["pending"] === true) {
       lines.push({ kind: "ask", text: display(args[0]), at });
     } else if (entry["call"] === "view.ask" && "outcome" in entry) {
@@ -205,6 +210,20 @@ function outputOf(entries: Entry[]): OutputLine[] {
     }
   }
   return lines;
+}
+
+function stateOf(entries: Entry[]): RunState | undefined {
+  const latest = entries.findLast(
+    (entry) => entry["call"] === "view.status" && entry["pending"] === true,
+  );
+  if (latest === undefined) return undefined;
+  const args = argsOf(latest);
+  const options = args[1] as { idle?: boolean } | undefined;
+  return {
+    text: display(args[0]),
+    at: text(latest["at"]) ?? "",
+    idle: options?.idle === true,
+  };
 }
 
 type Placed = {
@@ -233,6 +252,7 @@ function place(file: RunFile): Placed | undefined {
   const waiting = status === "running" ? waitingAsk(file.entries) : undefined;
   const ask = waiting === undefined ? undefined : askOf(file.entries, waiting);
   const listening = status === "running" && heard?.["listening"] === true;
+  const state = status === "running" ? stateOf(file.entries) : undefined;
 
   return {
     run: {
@@ -243,6 +263,7 @@ function place(file: RunFile): Placed | undefined {
       ...(ask === undefined ? {} : { ask }),
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
+      ...(state === undefined ? {} : { state }),
       output: outputOf(file.entries),
       children: [],
     },

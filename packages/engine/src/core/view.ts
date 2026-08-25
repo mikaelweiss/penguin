@@ -2,12 +2,9 @@ import { z } from "zod";
 
 export type Message = { text: string };
 
-export type ShowOptions = {
-  /**
-   * "tool" marks an agent's action line. Frontends render it dimmer and feed the activity line.
-   * "waiting" says the run idles on an outside event until it shows anything else.
-   */
-  kind?: "tool" | "waiting";
+export type StatusOptions = {
+  /** The run waits on an outside event, not on its own work. */
+  idle?: boolean;
 };
 
 export type Ask = {
@@ -17,7 +14,10 @@ export type Ask = {
 
 /** The one way a workflow reaches the person watching. */
 export type View = {
-  show(text: string, options?: ShowOptions): Promise<void>;
+  /** Appends to the run's story. */
+  show(text: string): Promise<void>;
+  /** Replaces what the run does right now. */
+  status(text: string, options?: StatusOptions): Promise<void>;
   ask: Ask;
   listen(): AsyncIterable<Message>;
 };

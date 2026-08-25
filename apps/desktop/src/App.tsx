@@ -16,7 +16,6 @@ import { AppSettingsDialog } from "@/components/app-settings-dialog";
 import { CommandPalette } from "@/components/command-palette";
 import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
-import { RunActivity } from "@/components/run-activity";
 import { RunBreadcrumb } from "@/components/run-breadcrumb";
 import { RunComposer } from "@/components/run-composer";
 import { RunSidebar } from "@/components/run-sidebar";
@@ -172,7 +171,6 @@ export function App() {
                     run={run}
                     sent={run === undefined ? [] : (inbox.sent[run.id] ?? [])}
                   />
-                  {run ? <RunActivity run={run} /> : null}
                   {run !== undefined && (run.ask !== undefined || run.listening) ? (
                     <RunComposer
                       key={`${run.id}:${run.ask?.prompt ?? ""}`}

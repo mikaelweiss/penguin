@@ -96,9 +96,11 @@ function consume(watched: Watched, entry: Record<string, unknown>): void {
   if (entry["listening"] === false) watched.listening = false;
   const args = Array.isArray(entry["args"]) ? (entry["args"] as unknown[]) : [];
   if (entry["call"] === "view.show" && entry["pending"] === true) {
-    const kind = (args[1] as { kind?: string } | undefined)?.kind;
-    const indent = kind === "tool" ? "  " : "";
-    out.write(`${prefix(watched)}${indent}${String(args[0])}\n`);
+    out.write(`${prefix(watched)}${String(args[0])}\n`);
+    return;
+  }
+  if (entry["call"] === "view.status" && entry["pending"] === true) {
+    out.write(`${prefix(watched)}  ${String(args[0])}\n`);
     return;
   }
   if (entry["call"] === "view.ask" && entry["pending"] === true && typeof entry["id"] === "string") {

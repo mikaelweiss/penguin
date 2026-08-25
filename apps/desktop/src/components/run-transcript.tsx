@@ -1,4 +1,5 @@
 import { ActivityIcon, ListTreeIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import {
   Empty,
@@ -16,16 +17,15 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@workspace/ui/components/message-scroller";
+import { Spinner } from "@workspace/ui/components/spinner";
 import { cn } from "@workspace/ui/lib/utils";
 
 import { AttachmentRow } from "@/components/attachment-row";
 import { useRunLog } from "@/hooks/use-run-log";
-import type { OutputLine, Run } from "@/lib/runs";
+import type { OutputLine, Run, RunState } from "@/lib/runs";
 
 const MARKERS: Record<OutputLine["kind"], string> = {
   show: "",
-  tool: "",
-  waiting: "",
   ask: "?",
   answer: ">",
   message: ">",
@@ -41,19 +41,15 @@ function markerColor(kind: OutputLine["kind"]): string {
   return "text-muted-foreground";
 }
 
-function contentStyle(kind: OutputLine["kind"]): string | undefined {
-  if (kind === "problem") return "text-destructive";
-  if (kind === "tool" || kind === "waiting") return "ps-4 text-muted-foreground";
-  return undefined;
-}
-
 function TranscriptLine({ line }: { line: OutputLine }) {
   return (
     <Message className={LINE}>
       <span aria-hidden="true" className={cn("w-3 shrink-0 select-none", markerColor(line.kind))}>
         {MARKERS[line.kind]}
       </span>
-      <MessageContent className={cn("gap-1.5", contentStyle(line.kind))}>
+      <MessageContent
+        className={cn("gap-1.5", line.kind === "problem" && "text-destructive")}
+      >
         <span className="whitespace-pre-wrap">{line.text}</span>
         {line.attachments ? <AttachmentRow files={line.attachments} /> : null}
       </MessageContent>
@@ -65,6 +61,40 @@ function ClosingLine({ children }: { children: string }) {
   return (
     <Message className={LINE}>
       <MessageContent className="text-muted-foreground">{children}</MessageContent>
+    </Message>
+  );
+}
+
+function elapsed(since: string, now: number): string {
+  const started = Date.parse(since);
+  if (Number.isNaN(started)) return "";
+  const seconds = Math.max(0, Math.round((now - started) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+function useSecond(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+function LiveLine({ state }: { state: RunState }) {
+  const now = useSecond();
+  return (
+    <Message className={LINE}>
+      <span aria-hidden="true" className="flex w-3 shrink-0 items-center">
+        <Spinner className="size-3 text-muted-foreground" />
+      </span>
+      <MessageContent className="flex-row items-baseline gap-2 text-muted-foreground">
+        <span className="min-w-0 truncate">{state.text}</span>
+        <span className="shrink-0 tabular-nums">{elapsed(state.at, now)}</span>
+      </MessageContent>
     </Message>
   );
 }
@@ -101,8 +131,9 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
   const closing = CLOSING[run.status];
   const reason = run.problem ?? log;
   const lines = [...run.output, ...sent];
+  const live = run.status === "running" && run.ask === undefined ? run.state : undefined;
 
-  if (lines.length === 0 && run.status === "running") {
+  if (lines.length === 0 && run.status === "running" && live === undefined) {
     return (
       <Empty className="flex-1">
         <EmptyHeader>
@@ -124,7 +155,7 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
             {lines.map((line, index) => (
               <MessageScrollerItem
                 key={`${run.id}-${index}`}
-                scrollAnchor={index === lines.length - 1}
+                scrollAnchor={live === undefined && index === lines.length - 1}
               >
                 <TranscriptLine line={line} />
               </MessageScrollerItem>
@@ -137,6 +168,11 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
             {reason === undefined ? null : (
               <MessageScrollerItem>
                 <TranscriptLine line={{ kind: "problem", text: reason, at: "" }} />
+              </MessageScrollerItem>
+            )}
+            {live === undefined ? null : (
+              <MessageScrollerItem scrollAnchor className={lines.length > 0 ? "pt-2" : undefined}>
+                <LiveLine state={live} />
               </MessageScrollerItem>
             )}
           </MessageScrollerContent>

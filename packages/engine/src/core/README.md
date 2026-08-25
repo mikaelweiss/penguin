@@ -96,14 +96,17 @@ a role is installed, the user picks a default.
 ## The view is an adapter
 
 The person watching a run is one outside thing, so they get one adapter: role
-`view`. Its starter API is two functions.
+`view`. Its starter API is a handful of functions.
 
 ```ts
 await view.show("staged 3 files");
+await view.status("waiting for CI", { idle: true });
 const branch = await view.ask("Which branch?", z.string());
 ```
 
-`show` sends something to whoever is watching. `ask` sends a question and
+`show` appends to the run's story. `status` replaces what the run does right
+now, one mutable line a frontend draws with a spinner and a timer; `{ idle:
+true }` marks a run parked on an outside event. `ask` sends a question and
 resolves when a person answers, validated against the shape when one is given.
 The shape is the whole input system: a bool, an enum, an array of enums, an
 object; a frontend renders whatever control fits it. Each call is its own

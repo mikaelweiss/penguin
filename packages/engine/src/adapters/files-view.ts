@@ -118,6 +118,9 @@ export function createFilesView(dir: string): View {
     async show(): Promise<void> {
       // The trace records the call; nothing else to do.
     },
+    async status(): Promise<void> {
+      // The trace records the call; nothing else to do.
+    },
     ask: ((_question: string, shape?: z.ZodType) => asked(shape)) as Ask,
     listen,
   };
