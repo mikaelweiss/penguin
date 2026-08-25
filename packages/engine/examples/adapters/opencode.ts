@@ -129,7 +129,7 @@ export default adapter({
       emit: (chunk: Chunk) => void,
     ): Promise<Attempt> {
       const { session, options, prompt, schema, signal } = invocation;
-      const argv = ["opencode", "run", "--format", "json"];
+      const argv = ["opencode", "run", "--auto", "--format", "json"];
       const id = opened.get(session);
       if (id !== undefined) argv.push("--session", id);
       if (options.model !== undefined) argv.push("--model", options.model);

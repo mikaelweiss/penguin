@@ -82,8 +82,8 @@ export default adapter({
       if (schema !== undefined) argv.push("--json-schema", JSON.stringify(schema));
       argv.push(first ? "--session-id" : "--resume", session);
       if (options.model !== undefined) argv.push("--model", options.model);
-      // A run has no one to ask, so a denied edit costs the turn. `permission` overrides it.
-      argv.push("--permission-mode", options.permission ?? "acceptEdits");
+      // A run has no one to ask, so any prompt is a denial. `permission` overrides it.
+      argv.push("--permission-mode", options.permission ?? "bypassPermissions");
 
       let buffer = "";
       let value: unknown;

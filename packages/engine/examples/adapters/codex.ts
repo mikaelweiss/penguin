@@ -218,7 +218,8 @@ export default adapter({
       if (thread !== undefined) argv.push("resume", thread);
       argv.push("--json", "--skip-git-repo-check");
       if (options.model !== undefined) argv.push("-c", `model="${options.model}"`);
-      argv.push("-c", `sandbox_mode="${options.sandbox ?? "workspace-write"}"`);
+      // A run has no one to ask, and workspace-write blocks .git writes and the network.
+      argv.push("-c", `sandbox_mode="${options.sandbox ?? "danger-full-access"}"`);
       const dir =
         schema === undefined ? undefined : fs.mkdtempSync(path.join(os.tmpdir(), "penguin-codex-"));
 
