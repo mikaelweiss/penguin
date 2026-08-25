@@ -90,7 +90,7 @@ export function App() {
   }, [hasRun]);
 
   return (
-    <TooltipProvider>
+    <TooltipProvider delayDuration={2000} skipDelayDuration={0}>
       <SidebarProvider className="isolate h-svh">
         <RunSidebar
           projects={projects}
