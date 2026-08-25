@@ -19,6 +19,8 @@ function fakeHost(
     state: "/tmp",
     run: { id: "test", dir: "/tmp" },
     config: () => undefined,
+    secret: async () => undefined,
+    note: () => {},
     skill:
       skill ??
       (() => {

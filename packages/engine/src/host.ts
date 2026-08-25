@@ -1,4 +1,6 @@
+import { secrets } from "bun";
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { readConfig } from "./config.ts";
 import type { CommandResult, ExecOptions, Host, RunLocation, Skill } from "./core/adapter.ts";
@@ -17,6 +19,11 @@ export function createHost(cwd: string, location: RunLocation, skill: SkillLooku
     state: stateRoot(),
     run: location,
     config: (key) => settings.get(key),
+    secret: (name) => readSecret(name),
+    note: (entry) => {
+      const line = JSON.stringify({ at: new Date().toISOString(), ...entry });
+      fs.appendFileSync(path.join(location.dir, "run.jsonl"), `${line}\n`);
+    },
     skill,
     shell: (cmd, options) => run(cmd, undefined, resolve(options?.cwd), options),
     exec: (argv, options) => {
@@ -25,6 +32,15 @@ export function createHost(cwd: string, location: RunLocation, skill: SkillLooku
       return run(cmd, args, resolve(options?.cwd), options);
     },
   };
+}
+
+/** The keystore item store-secret.ts writes, read by the same binary that wrote it. */
+async function readSecret(name: string): Promise<string | undefined> {
+  try {
+    return (await secrets.get({ service: "penguin", name })) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function run(

@@ -1,10 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
 import { adapter } from "penguin";
 
 const TOKENS = "https://id.atlassian.com/manage-profile/security/api-tokens";
 const FIELDS = ["summary", "description", "status", "issuetype", "assignee"];
 
 /** Jira answers a wrong site, login, or token with one of these, and 404 hides a missing right. */
-const REFUSED = new Set([401, 403, 404]);
+const HINTED = new Set([401, 403, 404]);
+
+/** Only a definite refusal pauses for new credentials. 404 can also mean a missing issue. */
+const REFUSING = new Set([401, 403]);
 
 type Creds = { site: string; email: string; token: string };
 
@@ -122,30 +127,117 @@ export default adapter({
   name: "cloud",
   description: "Jira Cloud issues over the REST API: read, search, create, comment, and transition",
   build: (host) => {
-    /** Environment first, then ~/.penguin/config. The token is a secret: prefer the environment. */
-    function creds(): Creds | { missing: string } {
-      const read = (env: string, key: string): string | undefined => {
-        const fromEnv = process.env[env];
-        if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
-        return host.config(key);
-      };
-      const site = read("JIRA_SITE", "jira-site");
-      const email = read("JIRA_EMAIL", "jira-email");
-      const token = read("JIRA_API_TOKEN", "jira-token");
-      if (site === undefined || email === undefined || token === undefined) {
-        return {
-          missing:
-            `Jira needs credentials. Set JIRA_SITE, JIRA_EMAIL, and JIRA_API_TOKEN, or write ` +
-            `"jira-site <your site>", "jira-email <your email>", and "jira-token <a token>" to ` +
-            `${host.home}/config. Make a token at ${TOKENS}.`,
-        };
+    const epoch = path.join(host.state, "auth", "jira");
+    const refused = new Set<string>();
+    let refusal: string | undefined;
+    let waiting: Promise<void> | undefined;
+
+    const keyOf = (held: Creds): string => JSON.stringify([held.site, held.email, held.token]);
+
+    const whole = (held: Partial<Creds>): Creds | undefined =>
+      held.site !== undefined && held.email !== undefined && held.token !== undefined
+        ? { site: held.site, email: held.email, token: held.token }
+        : undefined;
+
+    /** The keychain item the penguin app saves, one JSON of site, email, and token. */
+    async function stored(): Promise<Partial<Creds>> {
+      const raw = await host.secret("jira");
+      if (raw === undefined) return {};
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return {};
       }
-      return { site, email, token };
+      const text = (value: unknown): string | undefined =>
+        typeof value === "string" && value !== "" ? value : undefined;
+      return { site: text(parsed["site"]), email: text(parsed["email"]), token: text(parsed["token"]) };
     }
 
+    /** Environment first, then the keychain, then ~/.penguin/config. Refused tuples wait their turn out. */
+    async function creds(): Promise<Creds | { reason: string }> {
+      const saved = await stored();
+      const layered = (env: string, kept: string | undefined, key: string): string | undefined => {
+        const fromEnv = process.env[env];
+        if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
+        return kept ?? host.config(key);
+      };
+      const merged: Partial<Creds> = {
+        site: layered("JIRA_SITE", saved.site, "jira-site"),
+        email: layered("JIRA_EMAIL", saved.email, "jira-email"),
+        token: layered("JIRA_API_TOKEN", saved.token, "jira-token"),
+      };
+      const config: Partial<Creds> = {
+        site: host.config("jira-site"),
+        email: host.config("jira-email"),
+        token: host.config("jira-token"),
+      };
+      const candidates = [merged, saved, config]
+        .map(whole)
+        .filter((held): held is Creds => held !== undefined);
+      for (const held of candidates) {
+        if (!refused.has(keyOf(held))) return held;
+      }
+      if (candidates.length > 0) {
+        return { reason: refusal ?? "Jira refused the credentials: enter new ones" };
+      }
+      return {
+        reason:
+          `Jira needs credentials: a site, an email, and an API token. ` +
+          `Enter them in the penguin app, or set JIRA_SITE, JIRA_EMAIL, and JIRA_API_TOKEN. ` +
+          `Make a token at ${TOKENS}.`,
+      };
+    }
+
+    const epochValue = (): string => {
+      try {
+        return fs.readFileSync(epoch, "utf8");
+      } catch {
+        return "";
+      }
+    };
+
+    /** Notes the pause once, then every caller waits for the app to save new credentials. */
+    function authPause(reason: string): Promise<void> {
+      if (waiting !== undefined) return waiting;
+      const since = epochValue();
+      host.note({ auth: { role: "jira", reason } });
+      waiting = new Promise<void>((resolve) => {
+        const check = (): void => {
+          if (epochValue() === since) return;
+          fs.unwatchFile(epoch, check);
+          resolve();
+        };
+        fs.watchFile(epoch, { interval: 500 }, check);
+        check();
+      }).then(() => {
+        // A save wipes the shelf, so re-entered credentials get one retry too.
+        refused.clear();
+        host.note({ auth: { role: "jira", resolved: true } });
+        waiting = undefined;
+      });
+      return waiting;
+    }
+
+    /** A refusal shelves the tuple and tries the next. The pause comes when nothing is left. */
     async function call(method: string, route: string, body?: unknown): Promise<Reply> {
-      const held = creds();
-      if ("missing" in held) return { ok: false, status: 0, body: null, reason: held.missing, base: "" };
+      for (;;) {
+        const held = await creds();
+        if ("reason" in held) {
+          await authPause(held.reason);
+          continue;
+        }
+        const reply = await request(held, method, route, body);
+        if (REFUSING.has(reply.status)) {
+          refused.add(keyOf(held));
+          refusal = reply.reason;
+          continue;
+        }
+        return reply;
+      }
+    }
+
+    async function request(held: Creds, method: string, route: string, body?: unknown): Promise<Reply> {
       const base = siteUrl(held.site);
       const auth = Buffer.from(`${held.email}:${held.token}`).toString("base64");
       try {
@@ -168,7 +260,7 @@ export default adapter({
         let reason = "";
         if (!response.ok) {
           reason = `${response.status} ${response.statusText}${detail(parsed, text)}`;
-          if (REFUSED.has(response.status)) {
+          if (HINTED.has(response.status)) {
             reason += `. Jira refused the credentials: check the site, the email, and the token.`;
           }
         }

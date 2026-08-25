@@ -50,11 +50,11 @@ import { cn } from "@workspace/ui/lib/utils";
 import { RenameRunDialog } from "@/components/rename-run-dialog";
 import type { RunActions } from "@/hooks/use-run-actions";
 import type { RunTree } from "@/hooks/use-run-tree";
-import { findBlocked, isIdle, isLive, visibleRuns } from "@/lib/runs";
+import { findBlocked, isIdle, isLive, needsYou, visibleRuns } from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
 
 function statusColor(run: Run): string {
-  if (run.ask) return "bg-warning";
+  if (needsYou(run)) return "bg-warning";
   if (isIdle(run)) return "border border-success";
   if (run.status === "running") return "bg-success animate-pulse";
   if (run.status === "done") return "bg-muted-foreground/40";
@@ -62,7 +62,7 @@ function statusColor(run: Run): string {
 }
 
 function statusLabel(run: Run): string {
-  if (run.ask) return "needs you";
+  if (needsYou(run)) return "needs you";
   if (isIdle(run)) return "waiting";
   return run.status;
 }
@@ -87,7 +87,7 @@ function RunRow({
   onRename,
 }: RunRowProps) {
   const { run, depth } = node;
-  const carried = collapsed && !run.ask ? findBlocked(run) : undefined;
+  const carried = collapsed && !needsYou(run) ? findBlocked(run) : undefined;
 
   return (
     <ContextMenu>
@@ -127,10 +127,10 @@ function RunRow({
             <span className="sr-only">{statusLabel(run)}</span>
           </SidebarMenuButton>
 
-          {run.ask ? (
+          {needsYou(run) ? (
             <Badge
               variant="warning"
-              aria-label={`needs you: ${run.ask.prompt}`}
+              aria-label={`needs you: ${run.ask?.prompt ?? run.auth?.reason ?? ""}`}
               className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
             >
               needs you

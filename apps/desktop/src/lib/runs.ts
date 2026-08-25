@@ -42,12 +42,21 @@ export type Ask = {
   problem: string | undefined;
 };
 
+/** The credentials a run's adapter waits on, from its unresolved auth note. */
+export type Auth = {
+  role: string;
+  /** Why the adapter paused: missing credentials, or the service's refusal. */
+  reason: string;
+  at: string;
+};
+
 export type Run = {
   id: string;
   name: string;
   status: RunStatus;
   dir: string;
   ask?: Ask;
+  auth?: Auth;
   /** Why the run ended badly, when its own file says. */
   problem?: string;
   /** The run is waiting on view.listen, so it can take a message. */
@@ -76,7 +85,7 @@ export function isLive(run: Run): boolean {
 }
 
 export function isIdle(run: Run): boolean {
-  return run.status === "running" && run.ask === undefined && run.state?.idle === true;
+  return run.status === "running" && !needsYou(run) && run.state?.idle === true;
 }
 
 /** A run and every run inside it, outermost first, the order stopping sends them in. */
@@ -85,9 +94,14 @@ export function subtree(run: Run): string[] {
 }
 
 /** The first run inside this one waiting on an answer, and the ids to expand to reach it. */
+/** The run cannot move until a person answers or authenticates. */
+export function needsYou(run: Run): boolean {
+  return run.ask !== undefined || run.auth !== undefined;
+}
+
 export function findBlocked(run: Run): { expand: string[]; blocked: Run } | undefined {
   for (const child of run.children) {
-    if (child.ask) return { expand: [run.id], blocked: child };
+    if (needsYou(child)) return { expand: [run.id], blocked: child };
     const deeper = findBlocked(child);
     if (deeper) return { expand: [run.id, ...deeper.expand], blocked: deeper.blocked };
   }
@@ -206,6 +220,17 @@ function askOf(entries: Entry[], waiting: Entry): Ask {
   };
 }
 
+/** The credentials request the run is stuck on, when the last auth note is unresolved. */
+function authOf(notes: Entry[]): Auth | undefined {
+  const last = notes.findLast((note) => note["auth"] !== undefined);
+  const auth = last?.["auth"];
+  if (auth === null || typeof auth !== "object") return undefined;
+  const asked = auth as Record<string, unknown>;
+  const role = text(asked["role"]);
+  if (asked["resolved"] === true || role === undefined) return undefined;
+  return { role, reason: text(asked["reason"]) ?? "", at: text(last?.["at"]) ?? "" };
+}
+
 /** The engine's complaint about the last answer, when it came after this question. */
 function problemOf(entries: Entry[], waiting: Entry): string | undefined {
   const refused = entries.slice(entries.indexOf(waiting)).findLast((entry) => "rejected" in entry);
@@ -318,6 +343,7 @@ function place(file: RunFile): Placed | undefined {
   // A run that is no longer running cannot take an answer or a message, whatever its notes say.
   const waiting = status === "running" ? waitingAsk(file.entries) : undefined;
   const ask = waiting === undefined ? undefined : askOf(file.entries, waiting);
+  const auth = status === "running" ? authOf(notes) : undefined;
   const listening = status === "running" && heard?.["listening"] === true;
   const state = status === "running" ? stateOf(file.entries) : undefined;
 
@@ -328,6 +354,7 @@ function place(file: RunFile): Placed | undefined {
       status,
       dir: text(moved?.["dir"]) ?? cwd,
       ...(ask === undefined ? {} : { ask }),
+      ...(auth === undefined ? {} : { auth }),
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
       ...(state === undefined ? {} : { state }),

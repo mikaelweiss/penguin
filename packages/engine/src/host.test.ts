@@ -93,6 +93,27 @@ test("an unknown skill throws and names the installed ones", () => {
   expect(() => host.skill("missing")).toThrow("no skill named missing. Installed: greet");
 });
 
+test("note appends a stamped line to the run file", () => {
+  const dir = tempDir();
+  const host = hostFor(dir);
+  host.note({ auth: { role: "jira", reason: "needs credentials" } });
+  host.note({ auth: { role: "jira", resolved: true } });
+  const lines = fs
+    .readFileSync(path.join(dir, "run.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(lines).toHaveLength(2);
+  expect(lines[0]?.["auth"]).toEqual({ role: "jira", reason: "needs credentials" });
+  expect(lines[1]?.["auth"]).toEqual({ role: "jira", resolved: true });
+  expect(typeof lines[0]?.["at"]).toBe("string");
+});
+
+test("secret is undefined for a name the keystore lacks", async () => {
+  const host = hostFor(tempDir());
+  expect(await host.secret("penguin-test-never-stored")).toBeUndefined();
+});
+
 test("aborting the signal kills the process", async () => {
   const host = hostFor(tempDir());
   const controller = new AbortController();

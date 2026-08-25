@@ -18,15 +18,19 @@ struct RunUpdate {
     alive: bool,
 }
 
-fn runs_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+fn state_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
     match std::env::var("XDG_STATE_HOME") {
-        Ok(base) if !base.is_empty() => Some(PathBuf::from(base).join("penguin").join("runs")),
+        Ok(base) if !base.is_empty() => Some(PathBuf::from(base).join("penguin")),
         _ => app
             .path()
             .home_dir()
             .ok()
-            .map(|home| home.join(".local").join("state").join("penguin").join("runs")),
+            .map(|home| home.join(".local").join("state").join("penguin")),
     }
+}
+
+fn runs_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    state_dir(app).map(|state| state.join("runs"))
 }
 
 #[cfg(unix)]
@@ -288,6 +292,65 @@ fn write_config(app: tauri::AppHandle, key: String, value: String) -> Result<(),
     let home = file.parent().ok_or("the config file has no folder")?;
     std::fs::create_dir_all(home).map_err(|cause| cause.to_string())?;
     std::fs::write(&file, rewrite(&text, &key, &value)).map_err(|cause| cause.to_string())
+}
+
+/// A secret name names one keychain account and one epoch file. Anything else is refused.
+fn secret_name(name: &str) -> Option<&str> {
+    let fine = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    fine.then_some(name)
+}
+
+/// Credentials go to the engine's own bun, which puts them in the OS keystore.
+/// The value travels over stdin, never through a file or an argv. The epoch
+/// file tells every paused run to read the item again.
+#[tauri::command]
+async fn store_auth_secret(
+    app: tauri::AppHandle,
+    name: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = secret_name(&name).ok_or("not a secret name")?.to_string();
+        let saved_at = stamp();
+        let mut held = value;
+        held.as_object_mut()
+            .ok_or("a secret is a JSON object")?
+            .insert("savedAt".into(), serde_json::Value::String(saved_at.clone()));
+
+        let engine = engine(&app)?;
+        let mut child = Command::new(&engine.bun)
+            .arg(engine.dir.join("src").join("store-secret.ts"))
+            .arg(&name)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|cause| format!("{} could not run: {cause}", engine.bun.display()))?;
+        {
+            let mut stdin = child.stdin.take().ok_or("the secret writer took no stdin")?;
+            stdin
+                .write_all(held.to_string().as_bytes())
+                .map_err(|cause| cause.to_string())?;
+        }
+        let done = child.wait_with_output().map_err(|cause| cause.to_string())?;
+        if !done.status.success() {
+            let said = String::from_utf8_lossy(&done.stderr).trim().to_string();
+            return Err(if said.is_empty() {
+                "the keystore write failed".into()
+            } else {
+                said
+            });
+        }
+
+        let dir = state_dir(&app).ok_or("no state directory")?.join("auth");
+        std::fs::create_dir_all(&dir).map_err(|cause| cause.to_string())?;
+        std::fs::write(dir.join(&name), saved_at).map_err(|cause| cause.to_string())
+    })
+    .await
+    .map_err(|cause| cause.to_string())?
 }
 
 fn dirs_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -598,6 +661,7 @@ pub fn run() {
             stop_runs,
             read_config,
             write_config,
+            store_auth_secret,
             terminal_host
         ])
         .run(tauri::generate_context!())
@@ -801,6 +865,15 @@ mod tests {
 
         std::fs::write(dir.join("start.log"), "bun: out of memory\n").unwrap();
         assert_eq!(start_log(&dir), "bun: out of memory\n");
+    }
+
+    #[test]
+    fn a_secret_name_is_plain_or_refused() {
+        assert_eq!(secret_name("jira"), Some("jira"));
+        assert_eq!(secret_name("jira-2"), Some("jira-2"));
+        assert_eq!(secret_name(""), None);
+        assert_eq!(secret_name("../jira"), None);
+        assert_eq!(secret_name("Jira token"), None);
     }
 
     #[test]
