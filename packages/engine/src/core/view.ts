@@ -7,6 +7,22 @@ export type StatusOptions = {
   idle?: boolean;
 };
 
+export type ActionKind = "run" | "read" | "edit" | "search" | "fetch" | "agent";
+
+/** One tool call an agent makes. The same id sent again updates the earlier action. */
+export type Action = {
+  /** Unique within the run, so updates land on their row. */
+  id: string;
+  name: string;
+  kind?: ActionKind;
+  /** "running" means started and not yet seen to finish. Some CLIs never report the finish. */
+  status: "running" | "done" | "failed";
+  /** What the call acts on: a command, a path, a query. */
+  target?: string;
+  /** What the call returned, when the CLI reports it. */
+  output?: string;
+};
+
 export type Ask = {
   (question: string): Promise<string>;
   <Shape extends z.ZodType>(question: string, shape: Shape): Promise<z.infer<Shape>>;
@@ -18,6 +34,8 @@ export type View = {
   show(text: string): Promise<void>;
   /** Replaces what the run does right now. */
   status(text: string, options?: StatusOptions): Promise<void>;
+  /** Appends a tool call to the story, or updates it when the id was already sent. */
+  act(action: Action): Promise<void>;
   ask: Ask;
   listen(): AsyncIterable<Message>;
 };

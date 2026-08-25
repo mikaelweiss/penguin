@@ -4,7 +4,16 @@ export { Channel } from "./channel.ts";
 export { PenguinError, RunCrashed, RunStopped, issuesOf, messageOf } from "./errors.ts";
 export { candidates, menuOf, menuOfSchema } from "./view.ts";
 export type { Adapters, CallOptions, Ctx, Workflow } from "./workflow.ts";
-export type { Ask, Choice, Menu, Message, StatusOptions, View } from "./view.ts";
+export type {
+  Action,
+  ActionKind,
+  Ask,
+  Choice,
+  Menu,
+  Message,
+  StatusOptions,
+  View,
+} from "./view.ts";
 export type {
   Adapter,
   CommandResult,

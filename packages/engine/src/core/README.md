@@ -106,7 +106,10 @@ const branch = await view.ask("Which branch?", z.string());
 
 `show` appends to the run's story. `status` replaces what the run does right
 now, one mutable line a frontend draws with a spinner and a timer; `{ idle:
-true }` marks a run parked on an outside event. `ask` sends a question and
+true }` marks a run parked on an outside event. `act` appends a tool call to
+the story: an id, a name, a status, and what the call acted on; sending the
+same id again updates that call in place, which is how a call moves from
+running to done or failed and picks up its output. `ask` sends a question and
 resolves when a person answers, validated against the shape when one is given.
 The shape is the whole input system: a bool, an enum, an array of enums, an
 object; a frontend renders whatever control fits it. Each call is its own
