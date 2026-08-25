@@ -47,6 +47,13 @@
         },
         "cache": true
       },
+      "test": {
+        "command": "bun test",
+        "options": {
+          "cwd": "{projectRoot}"
+        },
+        "cache": true
+      },
       "serve": {
         "command": "tauri dev",
         "options": {

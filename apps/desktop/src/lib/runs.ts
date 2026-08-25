@@ -145,6 +145,40 @@ export function findRun(projects: Project[], id: string | undefined): RunNode | 
   return undefined;
 }
 
+/** The parent the view sits on, and the children it already had when the view arrived. */
+export type Follow = { parent: string; known: ReadonlySet<string> };
+
+export type ViewMove = { select: string; follow: Follow | undefined };
+
+/** Where the output area belongs after this tick, or undefined to leave it where it is. */
+export function nextView(
+  before: Project[],
+  after: Project[],
+  selectedId: string | undefined,
+  follow: Follow | undefined,
+): ViewMove | undefined {
+  const node = findRun(after, selectedId);
+  if (node === undefined) return undefined;
+
+  if (follow !== undefined && follow.parent === selectedId) {
+    const seen = follow.known;
+    const born = node.run.children.find((child) => !seen.has(child.id));
+    if (born !== undefined) return { select: born.id, follow: undefined };
+  }
+
+  if (findRun(before, selectedId)?.run.status !== "running") return undefined;
+  if (node.run.status !== "done") return undefined;
+  const parent = node.ancestors.at(-1);
+  if (parent === undefined) return undefined;
+
+  // The children as of the tick the watched run still ran, so a same-tick spawn counts as new.
+  const known = findRun(before, parent.id)?.run.children ?? parent.children;
+  return {
+    select: parent.id,
+    follow: { parent: parent.id, known: new Set(known.map((child) => child.id)) },
+  };
+}
+
 export type Entry = Record<string, unknown>;
 
 export type RunFile = {

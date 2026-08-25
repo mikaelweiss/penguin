@@ -24,6 +24,7 @@ import { RunTranscript } from "@/components/run-transcript";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { useConfig } from "@/hooks/use-config";
 import { useDirectories } from "@/hooks/use-directories";
+import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
@@ -61,10 +62,15 @@ export function App() {
   const showTerminal = terminal && run !== undefined;
   const fullTerminal = terminalFull && showTerminal;
 
-  const select = (id: string) => {
+  const show = (id: string) => {
     const node = findRun(projects, id);
     if (node !== undefined) tree.reveal(node);
     setSelectedId(id);
+  };
+  const clearFollow = useFollow(projects, selectedId, fullTerminal, show);
+  const select = (id: string) => {
+    clearFollow();
+    show(id);
   };
 
   const hasRun = run !== undefined;
