@@ -190,6 +190,7 @@ export default workflow({
         }
         if (change.kind === "ready") continue;
         if (change.kind === "dequeued") continue;
+        if (change.kind === "reviewed") continue;
         await stopTurn();
         let update: string;
         if (change.kind === "commits") {

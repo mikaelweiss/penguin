@@ -43,7 +43,7 @@ type Requested = {
 
 type Written = { author?: { login?: string }; createdAt?: string; body?: string };
 
-type Judged = { author?: { login?: string }; state?: string };
+type Judged = { author?: { login?: string }; state?: string; body?: string };
 
 type Watched = {
   state: string;
@@ -61,6 +61,7 @@ type Place = { owner: string; repo: string; number: string };
 type Change =
   | { kind: "closed"; state: string }
   | { kind: "approved" }
+  | { kind: "reviewed"; author: string; state: string; body: string }
   | { kind: "draft" }
   | { kind: "ready" }
   | { kind: "queued" }
@@ -105,7 +106,8 @@ function queueRead(place: Place): string[] {
   ];
 }
 
-function changedBetween(last: Watched, snap: Watched, me: string): Change[] {
+/** Yours and theirs part ways here: your approval ends a review, theirs is feedback to answer. */
+export function changedBetween(last: Watched, snap: Watched, me: string): Change[] {
   const found: Change[] = [];
   if (snap.state !== last.state && snap.state !== "OPEN") {
     found.push({ kind: "closed", state: snap.state });
@@ -114,13 +116,25 @@ function changedBetween(last: Watched, snap: Watched, me: string): Change[] {
   if (signed.some((one) => one.state === "APPROVED" && one.author?.login === me)) {
     found.push({ kind: "approved" });
   }
+  for (const one of signed) {
+    if (one.author?.login === me) continue;
+    found.push({
+      kind: "reviewed",
+      author: one.author?.login ?? "",
+      state: one.state ?? "",
+      body: (one.body ?? "").trim(),
+    });
+  }
   if (snap.isDraft && !last.isDraft) found.push({ kind: "draft" });
   if (!snap.isDraft && last.isDraft) found.push({ kind: "ready" });
   if (snap.isInMergeQueue && !last.isInMergeQueue) found.push({ kind: "queued" });
   if (!snap.isInMergeQueue && last.isInMergeQueue) found.push({ kind: "dequeued" });
   if (snap.headRefOid !== last.headRefOid) found.push({ kind: "commits" });
   if (snap.body !== last.body) found.push({ kind: "description", body: snap.body });
-  const fresh = (snap.comments ?? []).slice((last.comments ?? []).length);
+  // What the run itself writes is not news to it.
+  const fresh = (snap.comments ?? [])
+    .slice((last.comments ?? []).length)
+    .filter((one) => one.author?.login !== me);
   if (fresh.length > 0) found.push({ kind: "comments", comments: fresh.map(written) });
   return found;
 }

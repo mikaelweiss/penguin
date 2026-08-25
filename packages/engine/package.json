@@ -35,6 +35,15 @@
     "zod": "^4.4.3"
   },
   "nx": {
-    "tags": ["scope:engine"]
+    "tags": ["scope:engine"],
+    "targets": {
+      "test": {
+        "command": "bun test",
+        "options": {
+          "cwd": "{projectRoot}"
+        },
+        "cache": true
+      }
+    }
   }
 }

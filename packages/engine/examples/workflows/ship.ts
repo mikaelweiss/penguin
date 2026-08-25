@@ -5,7 +5,7 @@ import work from "./work.ts";
 
 export default workflow({
   description:
-    "ticket to open pull request: triage splits the ticket, then plan and implement per task in a worktree, then the pull request",
+    "ticket to merged pull request: triage splits the ticket, then plan and implement per task in a worktree, then open the pull request and answer its feedback until it lands",
   params: z.object({
     ticket: z.string().describe("the ticket to work, as an id, a url, or the text itself"),
     rounds: z
@@ -18,7 +18,7 @@ export default workflow({
 
   async run(ctx) {
     const worked = await call(ctx, work, { ticket: ctx.params.ticket, rounds: ctx.params.rounds });
-    if (!worked.done) return { url: "" };
+    if (!worked.done) return { url: "", state: "", rounds: 0 };
     return call(ctx, openPr, {}, { cwd: worked.path });
   },
 });

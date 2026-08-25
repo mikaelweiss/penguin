@@ -6,30 +6,78 @@ import commit from "./commit.ts";
 const Ack = z.union([z.enum(["ok"]), z.string()]);
 const Confirm = z.union([z.enum(["ok", "stop"]), z.string()]);
 const Retry = z.union([z.enum(["retry", "stop"]), z.string()]);
-const Feedback = z.union([z.enum(["address-feedback", "done"]), z.string()]);
+const Go = z.union([z.enum(["go", "skip"]), z.string()]);
+const Send = z.union([z.enum(["push", "hold"]), z.string()]);
+
 const Description = z.object({
   title: z.string().describe("the pull request title, one line"),
   body: z.string().describe("the pull request body, markdown, empty when the title says it all"),
 });
 
+const Assessment = z.object({
+  issues: z
+    .array(
+      z.object({
+        title: z.string().describe("the issue in one short line, in plain words"),
+        where: z.string().describe("the file and lines it lands on, empty when it names no code"),
+        holds: z.boolean().describe("true when the code confirms the issue"),
+        why: z.string().describe("one or two plain sentences on what the code actually does"),
+        action: z
+          .enum(["change", "reply"])
+          .describe("change the code, or reply to the thread and leave the code alone"),
+        plan: z
+          .string()
+          .describe("exactly what changes, file by file, or exactly what the reply says"),
+      }),
+    )
+    .describe("one entry per issue, empty when nothing is left open"),
+});
+
+type Assessment = z.infer<typeof Assessment>;
+
+const REVIEWS: Record<string, string> = {
+  APPROVED: "approved it",
+  CHANGES_REQUESTED: "asked for changes",
+  COMMENTED: "left comments",
+  DISMISSED: "had a review dismissed",
+};
+
+function worded(state: string): string {
+  return REVIEWS[state] ?? `left a ${state.toLowerCase().replace(/_/g, " ")} review`;
+}
+
+/** The assessment as the person reads it, so the gate shows the same thing the agent will do. */
+function proposal(assessment: Assessment): string {
+  return assessment.issues
+    .map((issue, index) => {
+      const place = issue.where === "" ? "" : `\n\n${issue.where}`;
+      const verdict = issue.holds ? "This holds." : "This does not hold.";
+      const doing = issue.action === "change" ? "Change" : "Reply";
+      return `### ${index + 1}. ${issue.title}${place}\n\n${verdict} ${issue.why}\n\n**${doing}:** ${issue.plan}`;
+    })
+    .join("\n\n");
+}
+
 export default workflow({
-  description: "open the pull request and answer its review feedback",
+  description:
+    "open the pull request, then watch it: assess every piece of feedback against the code, and answer what you approve until it merges",
   params: z.object({}),
 
   async run(ctx) {
     const { agent, github, vcs, view } = ctx;
+    const nowhere = { url: "", state: "", rounds: 0 };
 
     const head = await vcs.head();
     if (!head.ok) {
       await view.ask(`The checkout did not read: ${head.reason}`, Ack);
-      return { url: "" };
+      return nowhere;
     }
     if (head.detached) {
       await view.ask(
         "The checkout is detached, so there is no branch to push. Check out a branch, then run open-pr again.",
         Ack,
       );
-      return { url: "" };
+      return nowhere;
     }
     const base = await vcs.defaultBranch();
     if (base.ok && head.branch === base.branch) {
@@ -38,8 +86,17 @@ export default workflow({
           `The checkout is on ${head.branch}, the repository's default branch. Reply ok to open the pull request from it anyway, or stop.`,
           Confirm,
         );
-        if (answer === "stop") return { url: "" };
+        if (answer === "stop") return nowhere;
         if (answer === "ok") break;
+      }
+    }
+
+    // What blocks a send is often a person's to fix, so the ask retries instead of ending the run.
+    async function again(reason: string): Promise<boolean> {
+      for (;;) {
+        const answer = await view.ask(`${reason}\n\nFix it and reply retry, or stop.`, Retry);
+        if (answer === "stop") return false;
+        if (answer === "retry") return true;
       }
     }
 
@@ -50,59 +107,212 @@ export default workflow({
       return vcs.push(head.branch);
     }
 
-    // What blocks a send is often a person's to fix, so the ask retries instead of ending the run.
     async function delivered(): Promise<boolean> {
       for (;;) {
         const sent = await send();
         if (sent.ok) return true;
-        for (;;) {
-          const answer = await view.ask(
-            `The branch did not reach the remote: ${sent.reason}\n\nFix it and reply retry, or stop.`,
-            Retry,
-          );
-          if (answer === "stop") return false;
-          if (answer === "retry") break;
-        }
+        if (!(await again(`The branch did not reach the remote: ${sent.reason}`))) return false;
       }
     }
 
-    if (!(await delivered())) return { url: "" };
+    /** The gated push: the commit is already written and a person has already seen it. */
+    async function pushed(): Promise<boolean> {
+      for (;;) {
+        const sent = await vcs.push(head.branch);
+        if (sent.ok) return true;
+        if (!(await again(`The branch did not reach the remote: ${sent.reason}`))) return false;
+      }
+    }
+
+    if (!(await delivered())) return nowhere;
 
     const writer = await agent.open();
     const written = await narrated(
       view,
       agent.turn(writer, { skill: "open-pr" }, { result: Description }),
     );
-    let pr = await github.pr.create({ title: written.title, body: written.body });
-    while (!pr.ok) {
-      for (;;) {
-        const answer = await view.ask(
-          `No pull request: ${pr.reason}\n\nFix it and reply retry, or stop.`,
-          Retry,
-        );
-        if (answer === "stop") return { url: "" };
-        if (answer === "retry") break;
-      }
-      pr = await github.pr.create({ title: written.title, body: written.body });
+    let made = await github.pr.create({ title: written.title, body: written.body });
+    while (!made.ok) {
+      if (!(await again(`No pull request: ${made.reason}`))) return nowhere;
+      made = await github.pr.create({ title: written.title, body: written.body });
     }
 
-    for (;;) {
-      const answer = await view.ask(
-        `PR is up: ${pr.url}\n\nReply done to end the run, address-feedback to answer the review threads, or say what to change.`,
-        Feedback,
-      );
-      if (answer === "done") break;
-      const asked = answer === "address-feedback" ? "Answer the open review threads." : answer;
-      const helper = await agent.open();
+    const found = await github.pr.get(made.url);
+    if (!found.ok || found.pr === null) {
+      await view.ask(`The pull request did not read: ${found.reason}`, Ack);
+      return { url: made.url, state: "", rounds: 0 };
+    }
+    const pr = found.pr;
+    if (pr.state !== "OPEN") {
+      await view.show(`PR #${pr.number} is ${pr.state}, nothing to watch`);
+      return { url: pr.url, state: pr.state, rounds: 0 };
+    }
+    await view.show(`PR is up: ${pr.url}`);
+
+    const changes = github.pr.changes(String(pr.number));
+    let inbound = changes.next();
+    const typed = view.listen()[Symbol.asyncIterator]();
+    let heard = typed.next();
+    let listening = true;
+    let session = "";
+    let inDraft = pr.isDraft;
+    let paused = pr.isInMergeQueue;
+    let state = pr.state;
+    let rounds = 0;
+    // The watch's first poll is only a baseline, so a pull request that was already open
+    // carries threads nothing would ever report. The first round reads them instead.
+    let pending: string[] = made.existed
+      ? ["The pull request was already open before this run. Take whatever its threads still leave open."]
+      : [];
+
+    const opened = async (): Promise<string> => {
+      if (session === "") session = await agent.open();
+      return session;
+    };
+
+    const assessed = async (who: string, prompt: string): Promise<Assessment> =>
+      narrated(view, agent.turn(who, { skill: "assess-feedback", prompt }, { result: Assessment }));
+
+    const applied = async (who: string, heading: string, what: string): Promise<void> => {
       await narrated(
         view,
-        agent.turn(helper, {
+        agent.turn(who, {
           skill: "address-feedback",
-          prompt: `# Pull request\n\n${pr.url}\n\n# What to do\n\n${asked}`,
+          prompt: `# Pull request\n\n${pr.url}\n\n# ${heading}\n\n${what}`,
         }),
       );
-      if (!(await delivered())) return { url: pr.url };
+    };
+
+    /** One round: assess, gate the plan, apply it, commit, gate the push. False ends the run. */
+    const round = async (asks: string[]): Promise<boolean> => {
+      const who = await opened();
+      let plan = await assessed(
+        who,
+        `# Pull request\n\n${pr.url}\n\n# What arrived\n\n${asks.join("\n\n")}`,
+      );
+
+      for (;;) {
+        if (plan.issues.length === 0) {
+          await view.show(`Nothing on PR #${pr.number} is left to answer`);
+          return true;
+        }
+        const answer = await view.ask(
+          `${proposal(plan)}\n\nReply go to do this, skip to leave it, or say what to change about the plan.`,
+          Go,
+        );
+        if (answer === "skip") {
+          await view.show(`Round ${rounds} stays unanswered`);
+          return true;
+        }
+        if (answer === "go") break;
+        plan = await assessed(
+          who,
+          `The user says:\n\n${answer}\n\nAnswer it, adjust the assessment where the user is right, and return the whole thing again.`,
+        );
+      }
+
+      await applied(who, "The approved plan", proposal(plan));
+
+      // A fix asked for at the push gate writes another commit, so the gate keeps
+      // the last title it wrote and asks again rather than dropping an unpushed commit.
+      let message = "";
+      for (;;) {
+        const wrote = await call(ctx, commit, {});
+        if (!wrote.ok) {
+          await view.ask(`The commit failed: ${wrote.reason}`, Ack);
+          return true;
+        }
+        if (wrote.committed) message = wrote.message.split("\n")[0] ?? "";
+        else if (message === "") {
+          await view.show("No code changed, so nothing goes up");
+          return true;
+        }
+        const answer = await view.ask(
+          `Committed: ${message}\n\nCheck it, then reply push to send it to PR #${pr.number}, hold to leave it here, or say what to fix first.`,
+          Send,
+        );
+        if (answer === "push") return pushed();
+        if (answer === "hold") {
+          await view.show("The commit stays local. The next push carries it up.");
+          return true;
+        }
+        await applied(who, "What to fix", answer);
+      }
+    };
+
+    try {
+      for (;;) {
+        if (pending.length > 0 && !inDraft && !paused) {
+          rounds += 1;
+          await view.show(`feedback round ${rounds}`);
+          const asks = pending;
+          pending = [];
+          if (!(await round(asks))) break;
+          continue;
+        }
+
+        await view.status(`watching PR #${pr.number}`, { idle: true });
+        const first = listening
+          ? await Promise.race([
+              inbound.then(() => "change" as const),
+              heard.then(() => "said" as const),
+            ])
+          : await inbound.then(() => "change" as const);
+
+        if (first === "said") {
+          const message = await heard;
+          if (message.done === true) {
+            listening = false;
+            continue;
+          }
+          heard = typed.next();
+          pending.push(`The user says:\n\n${message.value.text}`);
+          continue;
+        }
+
+        const change = await inbound;
+        inbound = changes.next();
+        if (change.kind === "closed") {
+          state = change.state;
+          await view.show(`PR #${pr.number} is ${change.state}`);
+          break;
+        }
+        if (change.kind === "reviewed") {
+          if (change.state === "APPROVED") {
+            await view.show(`${change.author} approved PR #${pr.number}`);
+            if (change.body === "") continue;
+          }
+          const said = change.body === "" ? "" : `:\n\n${change.body}`;
+          pending.push(`${change.author} ${worded(change.state)}${said}`);
+          continue;
+        }
+        if (change.kind === "comments") {
+          pending.push(
+            ...change.comments.map((note) => `${note.author} commented:\n\n${note.body}`),
+          );
+          continue;
+        }
+        if (change.kind === "draft") {
+          inDraft = true;
+          await view.show(`PR #${pr.number} went to draft, the watch holds`);
+        }
+        if (change.kind === "ready") {
+          inDraft = false;
+          await view.show(`PR #${pr.number} is ready for review again`);
+        }
+        if (change.kind === "queued") {
+          paused = true;
+          await view.show(`PR #${pr.number} is queued to merge, the watch holds`);
+        }
+        if (change.kind === "dequeued") {
+          paused = false;
+          await view.show(`PR #${pr.number} left the merge queue`);
+        }
+      }
+    } finally {
+      await typed.return?.(undefined);
     }
-    return { url: pr.url };
+
+    return { url: pr.url, state, rounds };
   },
 });
