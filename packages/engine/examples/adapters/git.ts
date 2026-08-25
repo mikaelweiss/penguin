@@ -90,8 +90,10 @@ export default adapter({
         const done = await git(["reset", "--hard", ref], options?.cwd);
         return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
       },
-      async push(branch: string, options?: { cwd?: string }): Promise<Done> {
-        const done = await git(["push", "-u", "origin", branch], options?.cwd);
+      /** `force` uses --force-with-lease, so a rebased branch pushes without clobbering unseen work. */
+      async push(branch: string, options?: { cwd?: string; force?: boolean }): Promise<Done> {
+        const how = options?.force === true ? ["--force-with-lease"] : [];
+        const done = await git(["push", "-u", ...how, "origin", branch], options?.cwd);
         return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
       },
       async merge(
@@ -159,8 +161,22 @@ export default adapter({
           // A local ref, so a worktree can start on a commit that has never reached the remote.
           const start = options?.from === undefined ? [] : [options.from];
           const done = await git(["worktree", "add", "-b", name, target, ...start]);
-          if (done.code === 0) moved(target);
-          return { ok: done.code === 0, path: target, exists: false, reason: done.stderr.trim() };
+          if (done.code === 0) {
+            moved(target);
+            return { ok: true, path: target, exists: false, reason: "" };
+          }
+          // The branch already exists when a prior run made it; the worktree checks it out instead.
+          if (/already exists/.test(done.stderr)) {
+            const reused = await git(["worktree", "add", target, name]);
+            if (reused.code === 0) moved(target);
+            return {
+              ok: reused.code === 0,
+              path: target,
+              exists: false,
+              reason: reused.stderr.trim(),
+            };
+          }
+          return { ok: false, path: target, exists: false, reason: done.stderr.trim() };
         },
         async remove(target: string, options?: { force?: boolean }): Promise<Done> {
           const force = options?.force === true ? ["--force"] : [];
