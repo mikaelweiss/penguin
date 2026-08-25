@@ -1,0 +1,12 @@
+{
+  "name": "@t3tools/contracts",
+  "private": true,
+  "description": "type-only stand-in for the t3code contracts the vendored terminal files import",
+  "type": "module",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    }
+  }
+}

@@ -10,13 +10,14 @@ Never run npm, pnpm, or yarn.
 | `apps/desktop`    | `@mikaelweiss/penguin-desktop` | Tauri + Vite + React. Screens and Tauri IPC.          |
 | `apps/docs`       | `@mikaelweiss/penguin-docs`    | Bun server for `docs/*.html`. Its own Tailwind build.  |
 | `packages/engine` | `@mikaelweiss/penguin-engine`  | Workflow engine. No DOM, no React.                     |
+| `packages/terminal` | `@workspace/terminal`        | Terminal emulator vendored from t3code. Never hand-edited. |
 | `packages/ui`     | `@workspace/ui`                | shadcn primitives and theme tokens. No Tauri.          |
 
 ## Commands
 
     bun install
     bun run check                  # root tsc, then nx typecheck, then eslint
-    nx run-many -t typecheck       # apps/desktop and packages/ui
+    nx run-many -t typecheck       # apps/desktop, packages/terminal, packages/ui
     eslint .
     bun run desktop                # tauri dev, from anywhere
     nx serve docs

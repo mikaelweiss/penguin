@@ -4,7 +4,14 @@ import tseslint from "typescript-eslint";
 export default [
   ...nx.configs["flat/base"],
   {
-    ignores: ["**/node_modules/**", "**/dist/**", "**/src-tauri/target/**", "**/src-tauri/engine/**"],
+    ignores: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/src-tauri/target/**",
+      "**/src-tauri/engine/**",
+      // Vendored from t3code plus its verbatim shims; synced by scripts/sync-t3-terminal.sh.
+      "packages/terminal/src/**",
+    ],
   },
   ...tseslint.configs.recommended,
   {
@@ -29,8 +36,12 @@ export default [
               onlyDependOnLibsWithTags: ["scope:ui"],
             },
             {
+              sourceTag: "scope:terminal",
+              onlyDependOnLibsWithTags: ["scope:terminal"],
+            },
+            {
               sourceTag: "scope:desktop",
-              onlyDependOnLibsWithTags: ["scope:desktop", "scope:ui", "scope:engine"],
+              onlyDependOnLibsWithTags: ["scope:desktop", "scope:ui", "scope:engine", "scope:terminal"],
             },
           ],
         },

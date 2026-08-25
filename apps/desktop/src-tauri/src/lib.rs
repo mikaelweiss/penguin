@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::path::BaseDirectory;
@@ -508,6 +509,62 @@ async fn start_run(
     .map_err(|cause| cause.to_string())?
 }
 
+/// The running pty host. Its piped stdin doubles as the shutdown signal:
+/// dropping the child, or the app exiting, closes the pipe and the host quits.
+struct TerminalHost {
+    child: Child,
+    port: u16,
+}
+
+struct TerminalHostState(Mutex<Option<TerminalHost>>);
+
+/// The pty host's port, spawning the host on the bundled bun the first time.
+#[tauri::command]
+async fn terminal_host(app: tauri::AppHandle) -> Result<u16, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<TerminalHostState>();
+        let mut held = state.0.lock().map_err(|_| "the terminal host state is poisoned")?;
+        if let Some(host) = held.as_mut() {
+            if matches!(host.child.try_wait(), Ok(None)) {
+                return Ok(host.port);
+            }
+        }
+        let engine = engine(&app)?;
+        let mut child = Command::new(&engine.bun)
+            .arg(engine.dir.join("src").join("terminal-host.ts"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|cause| format!("{} could not run: {cause}", engine.bun.display()))?;
+        let stdout = child.stdout.take().ok_or("the terminal host has no stdout")?;
+        let mut line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut line)
+            .map_err(|cause| cause.to_string())?;
+        let port = serde_json::from_str::<serde_json::Value>(&line)
+            .ok()
+            .and_then(|said| said.get("port").and_then(serde_json::Value::as_u64))
+            .ok_or_else(|| {
+                let mut said = String::new();
+                if let Some(mut stderr) = child.stderr.take() {
+                    let _ = stderr.read_to_string(&mut said);
+                }
+                match said.trim() {
+                    "" => "the terminal host printed no port".to_string(),
+                    problem => problem.to_string(),
+                }
+            })?;
+        *held = Some(TerminalHost {
+            child,
+            port: port as u16,
+        });
+        Ok(port as u16)
+    })
+    .await
+    .map_err(|cause| cause.to_string())?
+}
+
 fn died(file: &str, log: &Path) -> String {
     let name = Path::new(file)
         .file_name()
@@ -525,6 +582,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(TerminalHostState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             read_runs,
             append_inbox,
@@ -539,7 +597,8 @@ pub fn run() {
             read_run_log,
             stop_runs,
             read_config,
-            write_config
+            write_config,
+            terminal_host
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

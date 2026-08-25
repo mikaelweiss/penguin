@@ -5,6 +5,7 @@
 
 @custom-variant dark (&:is(.dark *));
 @source "../../../../apps/desktop/src/**/*.{ts,tsx}";
+@source "../../../terminal/src/**/*.ts";
 @source "../**/*.{ts,tsx}";
 
 @theme inline {
@@ -123,6 +124,18 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* The vendored terminal's scrollbar reads these, mapped onto the app tokens. */
+:root {
+  --app-scrollbar-width: 6px;
+  --app-scrollbar-thumb: color-mix(in oklab, var(--foreground) 18%, transparent);
+  --app-scrollbar-thumb-hover: color-mix(in oklab, var(--foreground) 30%, transparent);
+}
+
+.dark {
+  --app-scrollbar-thumb: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --app-scrollbar-thumb-hover: color-mix(in oklab, var(--foreground) 22%, transparent);
 }
 
 @layer base {

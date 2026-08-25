@@ -50,11 +50,13 @@ function stageEngine(): void {
     filter: (from) => !from.endsWith(".test.ts"),
   });
   fs.cpSync(path.join(engine, "examples"), path.join(target, "examples"), { recursive: true });
-  fs.cpSync(
-    path.join(repo, "node_modules", "zod"),
-    path.join(target, "node_modules", "zod"),
-    { recursive: true, dereference: true },
-  );
+  for (const dependency of ["zod", "bun-pty"]) {
+    fs.cpSync(
+      path.join(repo, "node_modules", dependency),
+      path.join(target, "node_modules", dependency),
+      { recursive: true, dereference: true },
+    );
+  }
   console.log(`staged ${engine}`);
 }
 

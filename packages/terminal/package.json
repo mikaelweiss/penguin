@@ -1,0 +1,40 @@
+{
+  "name": "@workspace/terminal",
+  "private": true,
+  "description": "terminal emulator on libghostty-vt, vendored from t3code",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./surface": {
+      "types": "./types/surface.d.ts",
+      "default": "./src/terminal/ghostty/surface.ts"
+    },
+    "./core": {
+      "types": "./types/core.d.ts",
+      "default": "./src/terminal/ghostty/core.ts"
+    },
+    "./state": {
+      "types": "./types/state.d.ts",
+      "default": "./src/state/terminalSession.ts"
+    }
+  },
+  "dependencies": {
+    "@t3tools/contracts": "file:./contracts-shim"
+  },
+  "devDependencies": {
+    "typescript": "^5.9"
+  },
+  "nx": {
+    "name": "terminal",
+    "tags": ["scope:terminal"],
+    "targets": {
+      "typecheck": {
+        "command": "tsc --noEmit",
+        "options": {
+          "cwd": "{projectRoot}"
+        },
+        "cache": true
+      }
+    }
+  }
+}

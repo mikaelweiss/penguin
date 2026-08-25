@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
-import { TriangleAlertIcon } from "lucide-react";
+import { SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
+import { Button } from "@workspace/ui/components/button";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@workspace/ui/components/resizable";
 import { Separator } from "@workspace/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/sidebar";
 import { TooltipProvider } from "@workspace/ui/components/tooltip";
@@ -15,6 +21,7 @@ import { RunBreadcrumb } from "@/components/run-breadcrumb";
 import { RunComposer } from "@/components/run-composer";
 import { RunSidebar } from "@/components/run-sidebar";
 import { RunTranscript } from "@/components/run-transcript";
+import { TerminalPanel } from "@/components/terminal-panel";
 import { useConfig } from "@/hooks/use-config";
 import { useDirectories } from "@/hooks/use-directories";
 import { useInbox } from "@/hooks/use-inbox";
@@ -44,9 +51,13 @@ export function App() {
   const [settingProject, setSettingProject] = useState<Project | undefined>(undefined);
   const [appSettings, setAppSettings] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [terminal, setTerminal] = useState(false);
+  const [terminalFull, setTerminalFull] = useState(false);
   const index = useWorkflowIndex(projects, palette);
   const selected = findRun(projects, selectedId);
   const run = selected?.run;
+  const showTerminal = terminal && run !== undefined;
+  const fullTerminal = terminalFull && showTerminal;
 
   const select = (id: string) => {
     const node = findRun(projects, id);
@@ -54,8 +65,17 @@ export function App() {
     setSelectedId(id);
   };
 
+  const hasRun = run !== undefined;
   useEffect(() => {
     const open = (event: KeyboardEvent) => {
+      if (event.ctrlKey && !event.metaKey && event.key === "/") {
+        event.preventDefault();
+        if (hasRun) {
+          setTerminal((showing) => !showing);
+          setTerminalFull(false);
+        }
+        return;
+      }
       if (!event.metaKey) return;
       if (event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -67,7 +87,7 @@ export function App() {
     };
     window.addEventListener("keydown", open);
     return () => window.removeEventListener("keydown", open);
-  }, []);
+  }, [hasRun]);
 
   return (
     <TooltipProvider>
@@ -126,6 +146,17 @@ export function App() {
                 {selected.run.dir}
               </div>
             ) : null}
+            <span className="flex-1" />
+            <Button
+              variant={terminal ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label="Toggle terminal"
+              aria-pressed={terminal}
+              disabled={run === undefined}
+              onClick={() => setTerminal((showing) => !showing)}
+            >
+              <SquareTerminalIcon />
+            </Button>
           </header>
           {error ? (
             <Alert variant="destructive" className="m-4 w-auto">
@@ -134,18 +165,45 @@ export function App() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : (
-            <>
-              <RunTranscript run={run} sent={run === undefined ? [] : (inbox.sent[run.id] ?? [])} />
-              {run ? <RunActivity run={run} /> : null}
-              {run !== undefined && (run.ask !== undefined || run.listening) ? (
-                <RunComposer
-                  key={`${run.id}:${run.ask?.prompt ?? ""}`}
-                  run={run}
-                  error={inbox.error}
-                  onSend={(entry, files) => inbox.send(run.id, entry, files)}
-                />
+            <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+              {fullTerminal ? null : (
+                <ResizablePanel key="output" minSize={160} className="flex min-h-0 flex-col">
+                  <RunTranscript
+                    run={run}
+                    sent={run === undefined ? [] : (inbox.sent[run.id] ?? [])}
+                  />
+                  {run ? <RunActivity run={run} /> : null}
+                  {run !== undefined && (run.ask !== undefined || run.listening) ? (
+                    <RunComposer
+                      key={`${run.id}:${run.ask?.prompt ?? ""}`}
+                      run={run}
+                      error={inbox.error}
+                      onSend={(entry, files) => inbox.send(run.id, entry, files)}
+                    />
+                  ) : null}
+                </ResizablePanel>
+              )}
+              {showTerminal && !fullTerminal ? <ResizableHandle key="handle" /> : null}
+              {showTerminal ? (
+                <ResizablePanel
+                  key="terminal"
+                  defaultSize={224}
+                  minSize={120}
+                  className="flex min-h-0 flex-col"
+                >
+                  <TerminalPanel
+                    runId={run.id}
+                    dir={run.dir}
+                    full={fullTerminal}
+                    onToggleFull={() => setTerminalFull((filling) => !filling)}
+                    onClose={() => {
+                      setTerminal(false);
+                      setTerminalFull(false);
+                    }}
+                  />
+                </ResizablePanel>
               ) : null}
-            </>
+            </ResizablePanelGroup>
           )}
         </SidebarInset>
       </SidebarProvider>

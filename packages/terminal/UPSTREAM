@@ -1,0 +1,14 @@
+https://github.com/pingdotgg/t3code
+e67074f80933a27bd3cdc4e24f486358407690fb
+apps/web/src/terminal/ghostty/core.ts -> src/terminal/ghostty/core.ts
+apps/web/src/terminal/ghostty/surface.ts -> src/terminal/ghostty/surface.ts
+apps/web/src/terminal/ghostty/renderer.ts -> src/terminal/ghostty/renderer.ts
+apps/web/src/terminal/ghostty/keyCodes.ts -> src/terminal/ghostty/keyCodes.ts
+apps/web/src/terminal/ghostty/runtime.ts -> src/terminal/ghostty/runtime.ts
+apps/web/src/terminal/ghostty/vendor/ghostty-vt.wasm -> src/terminal/ghostty/vendor/ghostty-vt.wasm
+apps/web/src/terminal/ghostty/vendor/ghostty-write-pty.wasm -> src/terminal/ghostty/vendor/ghostty-write-pty.wasm
+apps/web/src/terminal/ghostty/fonts/SymbolsNerdFontMono-Regular.woff2 -> src/terminal/ghostty/fonts/SymbolsNerdFontMono-Regular.woff2
+apps/web/src/terminal/ghostty/fonts/LICENSE -> src/terminal/ghostty/fonts/LICENSE
+apps/web/src/terminal-links.ts -> src/terminal-links.ts
+packages/client-runtime/src/state/terminalSession.ts -> src/state/terminalSession.ts
+LICENSE -> LICENSE.t3code
