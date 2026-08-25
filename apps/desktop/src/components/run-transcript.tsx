@@ -21,6 +21,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@workspace/ui/components/empty";
+import { Markdown } from "@workspace/ui/components/markdown";
 import { Message, MessageContent } from "@workspace/ui/components/message";
 import {
   MessageScroller,
@@ -61,7 +62,11 @@ function TranscriptLine({ line }: { line: OutputLine }) {
         {MARKERS[line.kind]}
       </span>
       <MessageContent className={cn("gap-1.5", line.kind === "problem" && "text-destructive")}>
-        <span className="whitespace-pre-wrap">{line.text}</span>
+        {line.kind === "show" ? (
+          <Markdown>{line.text}</Markdown>
+        ) : (
+          <span className="whitespace-pre-wrap">{line.text}</span>
+        )}
         {line.attachments ? <AttachmentRow files={line.attachments} /> : null}
       </MessageContent>
     </Message>
