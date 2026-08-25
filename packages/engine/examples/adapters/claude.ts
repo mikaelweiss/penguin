@@ -1,6 +1,7 @@
+import crypto from "node:crypto";
 import path from "node:path";
-import { adapter } from "penguin";
-import { sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import { adapter, type Action, type ActionKind } from "penguin";
+import { clip, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -12,8 +13,12 @@ type ContentBlock = {
   type?: string;
   text?: string;
   thinking?: string;
+  id?: string;
   name?: string;
   input?: unknown;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
 };
 type StreamLine = {
   type?: string;
@@ -36,6 +41,32 @@ const target = targetIn([
   "prompt",
 ]);
 
+const KINDS: Record<string, ActionKind> = {
+  Bash: "run",
+  BashOutput: "run",
+  Read: "read",
+  NotebookRead: "read",
+  Edit: "edit",
+  MultiEdit: "edit",
+  Write: "edit",
+  NotebookEdit: "edit",
+  Grep: "search",
+  Glob: "search",
+  WebFetch: "fetch",
+  WebSearch: "fetch",
+  Task: "agent",
+  Agent: "agent",
+};
+
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block: ContentBlock) => (block?.type === "text" ? (block.text ?? "") : ""))
+    .filter((text) => text !== "")
+    .join("\n");
+}
+
 export default adapter({
   role: "agent",
   name: "claude",
@@ -57,6 +88,7 @@ export default adapter({
       let buffer = "";
       let value: unknown;
       let failed: string | undefined;
+      const calls = new Map<string, Action>();
       const handle = (line: string): void => {
         if (line.trim() === "") return;
         let event: StreamLine;
@@ -74,8 +106,34 @@ export default adapter({
               emit({ kind: "thinking", text: block.thinking });
             }
             if (block.type === "tool_use" && block.name !== undefined) {
-              emit({ kind: "tool", text: block.name, detail: target(block.input) });
+              const kind = KINDS[block.name];
+              const acted = target(block.input);
+              const call: Action = {
+                id: block.id ?? crypto.randomUUID(),
+                name: block.name,
+                status: "running",
+                ...(kind === undefined ? {} : { kind }),
+                ...(acted === undefined ? {} : { target: acted }),
+              };
+              calls.set(call.id, call);
+              emit({ kind: "tool", call });
             }
+          }
+        }
+        if (event.type === "user") {
+          for (const block of event.message?.content ?? []) {
+            if (block.type !== "tool_result" || block.tool_use_id === undefined) continue;
+            const call = calls.get(block.tool_use_id);
+            if (call === undefined) continue;
+            const output = clip(resultText(block.content).trim());
+            emit({
+              kind: "tool",
+              call: {
+                ...call,
+                status: block.is_error === true ? "failed" : "done",
+                ...(output === "" ? {} : { output }),
+              },
+            });
           }
         }
         if (event.type === "result") {

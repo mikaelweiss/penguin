@@ -1,8 +1,9 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { adapter } from "penguin";
-import { flatten, said, sessions, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import { adapter, type Action, type ActionKind } from "penguin";
+import { clip, flatten, said, sessions, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -13,9 +14,12 @@ type OpenOptions = {
 type Item = {
   id?: string;
   type?: string;
+  status?: string;
   text?: string;
   message?: string;
   command?: string;
+  aggregated_output?: string;
+  exit_code?: number;
   changes?: { path?: string }[];
   server?: string;
   tool?: string;
@@ -39,10 +43,31 @@ const TOOLS: Record<string, string> = {
   web_search: "search",
 };
 
+const KINDS: Record<string, ActionKind> = {
+  command_execution: "run",
+  file_change: "edit",
+  web_search: "fetch",
+  collab_tool_call: "agent",
+};
+
 function toolName(item: Item): string | undefined {
   if (item.type === "mcp_tool_call") return `${item.server ?? "mcp"}.${item.tool ?? "call"}`;
   if (item.type === "collab_tool_call") return `collab.${item.tool ?? "call"}`;
   return TOOLS[item.type ?? ""];
+}
+
+function act(item: Item, name: string, id: string, status: Action["status"]): Action {
+  const kind = KINDS[item.type ?? ""];
+  const acted = target(item);
+  const output = said(item.aggregated_output) ? clip(item.aggregated_output.trim()) : undefined;
+  return {
+    id,
+    name,
+    status,
+    ...(kind === undefined ? {} : { kind }),
+    ...(acted === undefined ? {} : { target: acted }),
+    ...(status === "running" || output === undefined ? {} : { output }),
+  };
 }
 
 /** The one value that says what a tool call acts on. Only this adapter knows codex item shapes. */
@@ -208,7 +233,6 @@ export default adapter({
         let buffer = "";
         let message: string | undefined;
         let failed: string | undefined;
-        const seen = new Set<string>();
         const handle = (line: string): void => {
           const parsed = readJson(line);
           if (!isObject(parsed)) return;
@@ -232,11 +256,15 @@ export default adapter({
           }
           const name = toolName(item);
           if (name === undefined) return;
-          if (said(item.id)) {
-            if (seen.has(item.id)) return;
-            seen.add(item.id);
+          if (event.type === "item.started" && said(item.id)) {
+            emit({ kind: "tool", call: act(item, name, item.id, "running") });
           }
-          emit({ kind: "tool", text: name, detail: target(item) });
+          if (event.type === "item.completed") {
+            const broke =
+              item.status === "failed" || (item.exit_code !== undefined && item.exit_code !== 0);
+            const id = said(item.id) ? item.id : crypto.randomUUID();
+            emit({ kind: "tool", call: act(item, name, id, broke ? "failed" : "done") });
+          }
         };
 
         const done = await host.exec(argv, {

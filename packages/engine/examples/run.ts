@@ -103,6 +103,13 @@ function consume(watched: Watched, entry: Record<string, unknown>): void {
     out.write(`${prefix(watched)}  ${String(args[0])}\n`);
     return;
   }
+  if (entry["call"] === "view.act" && entry["pending"] === true) {
+    const action = args[0] as { name?: string; status?: string; target?: string } | undefined;
+    if (action?.status !== "running") return;
+    const acted = action.target === undefined ? "" : `: ${action.target}`;
+    out.write(`${prefix(watched)}  ${String(action.name)}${acted}\n`);
+    return;
+  }
   if (entry["call"] === "view.ask" && entry["pending"] === true && typeof entry["id"] === "string") {
     const schema = args[1] as Record<string, unknown> | undefined;
     prompts.push({

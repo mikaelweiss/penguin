@@ -1,9 +1,17 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { z } from "zod";
-import { Channel, issuesOf, PenguinError, type Host, type Skill, type View } from "penguin";
+import {
+  Channel,
+  issuesOf,
+  PenguinError,
+  type Action,
+  type Host,
+  type Skill,
+  type View,
+} from "penguin";
 
-export type Chunk = { kind: "text" | "thinking" | "tool"; text: string; detail?: string };
+export type Chunk = { kind: "text" | "thinking"; text: string } | { kind: "tool"; call: Action };
 
 /** What a turn runs on: a catalog skill with an optional prompt for the dynamic part, or a prompt alone. */
 export type TurnAsk = string | { skill: string; prompt?: string };
@@ -64,6 +72,12 @@ export function said(value: unknown): value is string {
 
 export function flatten(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** Caps a tool output so a chatty call cannot flood the run file. */
+export function clip(text: string, limit = 4000): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}\n… ${text.length - limit} more characters`;
 }
 
 /** The one value that says what a tool call acts on, read off the fields the CLI is known to use. */
@@ -158,12 +172,12 @@ export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentA
   };
 }
 
-/** Shows a turn's stream as it arrives: the agent's words as story, its actions as status. */
+/** Shows a turn's stream as it arrives: the agent's words as story, its tool calls as actions. */
 export function narrate(view: View, output: AsyncIterable<Chunk>): Promise<void> {
   return (async () => {
     for await (const chunk of output) {
       if (chunk.kind === "text") await view.show(chunk.text);
-      if (chunk.kind === "tool") await view.status(`${chunk.text}: ${chunk.detail ?? ""}`);
+      if (chunk.kind === "tool") await view.act(chunk.call);
     }
   })();
 }

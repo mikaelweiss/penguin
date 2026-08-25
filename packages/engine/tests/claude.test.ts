@@ -47,8 +47,14 @@ test("streams chunks and returns the schema-checked value", async () => {
       message: {
         content: [
           { type: "text", text: "picking files" },
-          { type: "tool_use", name: "Bash", input: { command: "git  status" } },
+          { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "git  status" } },
         ],
+      },
+    });
+    emit(call, {
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "clean tree" }],
       },
     });
     emit(call, { type: "result", structured_output: { n: 1 } });
@@ -62,7 +68,21 @@ test("streams chunks and returns the schema-checked value", async () => {
   expect(await turn.value).toEqual({ n: 1 });
   expect(chunks).toEqual([
     { kind: "text", text: "picking files" },
-    { kind: "tool", text: "Bash", detail: "git status" },
+    {
+      kind: "tool",
+      call: { id: "toolu_1", name: "Bash", kind: "run", status: "running", target: "git status" },
+    },
+    {
+      kind: "tool",
+      call: {
+        id: "toolu_1",
+        name: "Bash",
+        kind: "run",
+        status: "done",
+        target: "git status",
+        output: "clean tree",
+      },
+    },
   ]);
 });
 

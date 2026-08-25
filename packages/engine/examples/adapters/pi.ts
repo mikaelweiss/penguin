@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { adapter } from "penguin";
+import { adapter, type ActionKind } from "penguin";
 import { sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
@@ -32,6 +33,17 @@ const RESULT_TOOL = "penguin_result";
 
 /** Only this adapter knows pi's tool shapes. */
 const target = targetIn(["command", "pattern", "path", "url", "query", "description", "prompt"]);
+
+const KINDS: Record<string, ActionKind> = {
+  bash: "run",
+  read: "read",
+  list: "read",
+  edit: "edit",
+  write: "edit",
+  grep: "search",
+  glob: "search",
+  fetch: "fetch",
+};
 
 /** pi takes a result schema as a tool, so the schema of one turn rides in as an extension file. */
 function extension(schema: Record<string, unknown>): string {
@@ -115,7 +127,18 @@ export default adapter({
               value = block.arguments;
               continue;
             }
-            emit({ kind: "tool", text: block.name, detail: target(block.arguments) });
+            const kind = KINDS[block.name];
+            const acted = target(block.arguments);
+            emit({
+              kind: "tool",
+              call: {
+                id: crypto.randomUUID(),
+                name: block.name,
+                status: "running",
+                ...(kind === undefined ? {} : { kind }),
+                ...(acted === undefined ? {} : { target: acted }),
+              },
+            });
           }
         }
         if (message.stopReason === "error") fail(message.errorMessage);

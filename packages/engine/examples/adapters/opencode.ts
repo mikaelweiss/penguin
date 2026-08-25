@@ -1,6 +1,7 @@
+import crypto from "node:crypto";
 import path from "node:path";
-import { adapter } from "penguin";
-import { said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import { adapter, type Action, type ActionKind } from "penguin";
+import { clip, said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -11,8 +12,11 @@ type OpenOptions = {
 type ToolState = {
   status?: string;
   input?: unknown;
+  output?: string;
+  error?: unknown;
 };
 type Part = {
+  id?: string;
   type?: string;
   text?: string;
   tool?: string;
@@ -44,6 +48,41 @@ function reason(error: unknown): string {
   const values = error as { message?: unknown; data?: { message?: unknown } };
   const message = values.message ?? values.data?.message;
   return said(message) ? message : JSON.stringify(error);
+}
+
+const KINDS: Record<string, ActionKind> = {
+  bash: "run",
+  shell: "run",
+  read: "read",
+  list: "read",
+  edit: "edit",
+  write: "edit",
+  patch: "edit",
+  apply_patch: "edit",
+  grep: "search",
+  glob: "search",
+  webfetch: "fetch",
+  websearch: "fetch",
+  task: "agent",
+};
+
+function act(part: Part, id: string): Action {
+  const state = part.state;
+  const status =
+    state?.status === "error" ? "failed" : state?.status === "completed" ? "done" : "running";
+  const kind = KINDS[part.tool ?? ""];
+  const acted = target(state?.input);
+  const returned = state?.output;
+  const raw = status === "failed" ? reason(state?.error) : said(returned) ? returned : "";
+  const output = status === "running" ? "" : clip(raw.trim());
+  return {
+    id,
+    name: part.tool ?? "tool",
+    status,
+    ...(kind === undefined ? {} : { kind }),
+    ...(acted === undefined ? {} : { target: acted }),
+    ...(output === "" ? {} : { output }),
+  };
 }
 
 /** Every JSON the reply could hold, last block first: a model often shows an example before the answer. */
@@ -119,7 +158,7 @@ export default adapter({
           emit({ kind: "thinking", text: body });
         }
         if (event.type === "tool_use" && part?.tool !== undefined) {
-          emit({ kind: "tool", text: part.tool, detail: target(part.state?.input) });
+          emit({ kind: "tool", call: act(part, part.id ?? crypto.randomUUID()) });
         }
         if (event.type === "error") failed = reason(event.error);
       };

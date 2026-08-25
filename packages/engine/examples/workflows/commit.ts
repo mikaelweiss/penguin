@@ -1,5 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { narrated } from "../helpers/turns.ts";
 
 const Commit = z.object({
   files: z
@@ -24,12 +25,10 @@ export default workflow({
     }
 
     const session = await agent.open();
-    const turn = agent.turn(session, { skill: "commit" }, { result: Commit });
-    for await (const chunk of turn.output) {
-      if (chunk.kind === "text") await view.show(chunk.text);
-      if (chunk.kind === "tool") await view.status(`${chunk.text}: ${chunk.detail ?? ""}`);
-    }
-    const written = await turn.value;
+    const written = await narrated(
+      view,
+      agent.turn(session, { skill: "commit" }, { result: Commit }),
+    );
     if (written.files.length === 0) {
       await view.show("nothing worth committing");
       return {

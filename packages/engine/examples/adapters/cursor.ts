@@ -1,5 +1,6 @@
+import crypto from "node:crypto";
 import path from "node:path";
-import { adapter } from "penguin";
+import { adapter, type Action, type ActionKind } from "penguin";
 import { flatten, said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
@@ -81,6 +82,21 @@ function toolName(call: Record<string, ToolCall>): string | undefined {
   return key.endsWith("ToolCall") ? key.slice(0, -"ToolCall".length) : key;
 }
 
+const KINDS: Record<string, ActionKind> = {
+  shell: "run",
+  bash: "run",
+  read: "read",
+  ls: "read",
+  edit: "edit",
+  write: "edit",
+  delete: "edit",
+  grep: "search",
+  glob: "search",
+  search: "search",
+  fetch: "fetch",
+  task: "agent",
+};
+
 export default adapter({
   role: "agent",
   name: "cursor",
@@ -103,7 +119,7 @@ export default adapter({
           ? invocation.prompt
           : `${invocation.prompt}\n\n${ASK}\n${JSON.stringify(schema)}\n`;
 
-      const called = new Set<string>();
+      const called = new Map<string, Action>();
       let buffer = "";
       let answer = "";
       let failed: string | undefined;
@@ -126,11 +142,24 @@ export default adapter({
           }
         }
         if (event.type === "tool_call" && event.tool_call !== undefined) {
-          const id = said(event.call_id) ? event.call_id : undefined;
+          const id = said(event.call_id) ? event.call_id : crypto.randomUUID();
           const name = toolName(event.tool_call);
-          if (name !== undefined && (id === undefined || !called.has(id))) {
-            if (id !== undefined) called.add(id);
-            emit({ kind: "tool", text: name, detail: target(Object.values(event.tool_call)[0]?.args) });
+          const started = called.get(id);
+          // The stream repeats a call_id when the call finishes, and says no more than that.
+          if (started !== undefined) {
+            emit({ kind: "tool", call: { ...started, status: "done" } });
+          } else if (name !== undefined) {
+            const kind = KINDS[name];
+            const acted = target(Object.values(event.tool_call)[0]?.args);
+            const call: Action = {
+              id,
+              name,
+              status: "running",
+              ...(kind === undefined ? {} : { kind }),
+              ...(acted === undefined ? {} : { target: acted }),
+            };
+            called.set(id, call);
+            emit({ kind: "tool", call });
           }
         }
         if (event.type === "result") {
