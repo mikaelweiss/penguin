@@ -57,7 +57,7 @@ export default workflow({
           task: answer,
           acceptance: worked.acceptance,
           baseline: worked.gates,
-          base: worked.from,
+          base: rebased.base,
           rounds: params.rounds,
         },
         { cwd: worked.path },

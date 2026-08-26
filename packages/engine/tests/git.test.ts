@@ -187,3 +187,50 @@ test("worktree.add starts the branch at the ref it is given", async () => {
     delete process.env["PENGUIN_HOME"];
   }
 });
+
+test("sha names the commit a ref points at, and refuses one that does not resolve", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "base.txt", "base");
+  const head = await vcs.head();
+
+  const named = await vcs.sha(head.branch);
+  expect(named.ok).toBe(true);
+  expect(named.sha).toBe(head.sha);
+
+  const missing = await vcs.sha("origin/nothing");
+  expect(missing.ok).toBe(false);
+  expect(missing.sha).toBe("");
+});
+
+test("a base ahead of origin takes the branch only when the branch rebased onto the base itself", async () => {
+  const bare = tempDir("penguin-bare-");
+  await git(hostFor(bare), ["init", "-q", "--bare"]);
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const ours = await repo();
+    await commitFile(ours, "base.txt", "base");
+    await git(ours.host, ["remote", "add", "origin", bare]);
+    const base = (await ours.vcs.head()).branch;
+    await git(ours.host, ["push", "-q", "-u", "origin", base]);
+    // A land that never pushed leaves the local base ahead of origin's copy of it.
+    await commitFile(ours, "landed.txt", "landed");
+
+    const added = await ours.vcs.worktree.add("feature", { from: `origin/${base}` });
+    expect(added.ok).toBe(true);
+    fs.writeFileSync(path.join(added.path, "feature.txt"), "feature\n");
+    await ours.vcs.stage(["feature.txt"], { cwd: added.path });
+    await ours.vcs.commit("test: feature", { cwd: added.path });
+
+    const off = await ours.vcs.merge("feature", { ffOnly: true });
+    expect(off.ok).toBe(false);
+
+    const onto = await ours.vcs.rebase.onto(base, { cwd: added.path });
+    expect(onto.ok).toBe(true);
+    const merged = await ours.vcs.merge("feature", { ffOnly: true });
+    expect(merged.ok).toBe(true);
+    expect((await ours.vcs.head()).sha).toBe((await ours.vcs.head({ cwd: added.path })).sha);
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});

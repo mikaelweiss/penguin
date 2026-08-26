@@ -20,6 +20,8 @@ export default workflow({
       .string()
       .default("")
       .describe("the branch it rebases onto, empty to take the one origin calls default"),
+    /** The base lives only in this clone, so the branch lands on the branch and not on origin's copy. */
+    local: z.boolean().default(false).meta({ internal: true }),
     /** The worktree that rebases, which is not the checkout the run started from. */
     dir: z.string().optional().meta({ internal: true }),
     passes: z.number().int().min(1).default(3).meta({ internal: true }),
@@ -30,7 +32,7 @@ export default workflow({
     const { params, agent, vcs, view } = ctx;
     const cwd = params.dir;
     const folder = cwd ?? "The checkout";
-    const nowhere = (reason: string) => ({ rebased: false, sha: "", reason });
+    const nowhere = (reason: string) => ({ rebased: false, sha: "", base: "", reason });
     let turns = 0;
     let clean = false;
 
@@ -51,6 +53,7 @@ export default workflow({
 
     const base = await resolveBase(ctx, params.base);
     if (base === "") return nowhere("no base branch");
+    const onto = params.local ? base : `origin/${base}`;
 
     for (let pass = 1; pass <= params.passes && !clean; pass++) {
       await view.show(`pass ${pass} of ${params.passes}`);
@@ -60,7 +63,7 @@ export default workflow({
         return nowhere(fetched.reason);
       }
 
-      let state = await vcs.rebase.onto(`origin/${base}`, { cwd });
+      let state = await vcs.rebase.onto(onto, { cwd });
       const conflicted = state.conflicted;
       while (state.conflicted) {
         if (turns === params.resolutions) {
@@ -78,7 +81,7 @@ export default workflow({
             fixer,
             {
               skill: "resolve-conflicts",
-              prompt: `The rebase onto origin/${base} stopped on these files:\n\n${listed(state.files)}`,
+              prompt: `The rebase onto ${onto} stopped on these files:\n\n${listed(state.files)}`,
             },
             { result: Resolved },
           ),
@@ -97,7 +100,7 @@ export default workflow({
       }
 
       if (!state.ok) {
-        await view.ask(`The rebase onto origin/${base} failed: ${state.reason}`, Ack);
+        await view.ask(`The rebase onto ${onto} failed: ${state.reason}`, Ack);
         return nowhere(state.reason);
       }
       // Conflicts take time, and the base can move while they are resolved, so a pass that hit
@@ -110,8 +113,10 @@ export default workflow({
       return nowhere("the pass bound ran out");
     }
 
+    // The caller reviews the branch against what it now sits on, so the ref it landed under is pinned here.
+    const landed = await vcs.sha(onto, { cwd });
     const rebased = await vcs.head({ cwd });
-    await view.show(`${head.branch} is on origin/${base} at ${rebased.sha}`);
-    return { rebased: true, sha: rebased.sha, reason: "" };
+    await view.show(`${head.branch} is on ${onto} at ${rebased.sha}`);
+    return { rebased: true, sha: rebased.sha, base: landed.sha, reason: "" };
   },
 });

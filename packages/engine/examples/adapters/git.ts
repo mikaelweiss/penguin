@@ -65,6 +65,11 @@ export default adapter({
           reason: (branch.stderr + sha.stderr).trim(),
         };
       },
+      /** The commit a ref names. A ref that does not resolve answers not ok, never a guess. */
+      async sha(ref: string, options?: { cwd?: string }): Promise<Done & { sha: string }> {
+        const done = await git(["rev-parse", "--short", "--verify", `${ref}^{commit}`], options?.cwd);
+        return { ok: done.code === 0, sha: done.stdout.trim(), reason: done.stderr.trim() };
+      },
       /** The branch origin calls its default. Unset origin/HEAD answers not ok, never a guess. */
       async defaultBranch(options?: { cwd?: string }): Promise<Done & { branch: string }> {
         const done = await git(

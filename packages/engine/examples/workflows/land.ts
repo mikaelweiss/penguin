@@ -26,15 +26,8 @@ export default workflow({
       return nowhere(`the checkout is on ${checkout.branch}`);
     }
 
-    const rebased = await call(ctx, rebase, {
-      base: params.onto,
-      dir: params.dir,
-      passes: params.passes,
-      resolutions: params.resolutions,
-    });
-    if (!rebased.rebased) return nowhere(rebased.reason);
-
-    // The branch sits on origin, so the local target carries what origin sent before it moves.
+    // The branch lands on the local target, which a run that never pushed has already moved ahead
+    // of origin, so the target takes what origin sent and then the branch rebases onto the target.
     const advanced = await vcs.pull(params.onto);
     if (!advanced.ok) {
       await view.ask(
@@ -43,6 +36,15 @@ export default workflow({
       );
       return nowhere(advanced.reason);
     }
+
+    const rebased = await call(ctx, rebase, {
+      base: params.onto,
+      local: true,
+      dir: params.dir,
+      passes: params.passes,
+      resolutions: params.resolutions,
+    });
+    if (!rebased.rebased) return nowhere(rebased.reason);
 
     const merged = await vcs.merge(params.branch, { ffOnly: true });
     if (!merged.ok) {
