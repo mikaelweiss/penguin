@@ -506,7 +506,7 @@ fn untracked_patch(dir: &str, room: usize) -> String {
 
 /// Everything the run changed in dir. A worktree reads from where it forked, a checkout from HEAD.
 #[tauri::command]
-fn run_diff(dir: String) -> Result<Option<RunDiff>, String> {
+fn run_diff(dir: String, ignore_whitespace: bool) -> Result<Option<RunDiff>, String> {
     if git_line(&dir, &["rev-parse", "--show-toplevel"]).is_none() {
         return Ok(None);
     }
@@ -520,6 +520,9 @@ fn run_diff(dir: String) -> Result<Option<RunDiff>, String> {
         "--no-textconv",
         "--minimal",
     ];
+    if ignore_whitespace {
+        against.push("--ignore-all-space");
+    }
     match forked.as_deref() {
         Some(branch) => {
             against.push("--merge-base");
@@ -1009,13 +1012,13 @@ mod tests {
     fn a_folder_outside_any_repository_has_no_diff_to_read() {
         let dir = temp("plain");
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(run_diff(text_of(dir)).unwrap().is_none());
+        assert!(run_diff(text_of(dir), false).unwrap().is_none());
     }
 
     #[test]
     fn a_clean_checkout_reads_an_empty_patch_against_head() {
         let dir = repo("clean");
-        let found = run_diff(text_of(dir)).unwrap().unwrap();
+        let found = run_diff(text_of(dir), false).unwrap().unwrap();
         assert_eq!(found.base, "HEAD");
         assert_eq!(found.patch, "");
     }
@@ -1025,7 +1028,7 @@ mod tests {
         let dir = repo("dirty");
         std::fs::write(dir.join("kept.txt"), "one\nthree\n").unwrap();
         std::fs::write(dir.join("fresh.txt"), "new\n").unwrap();
-        let found = run_diff(text_of(dir)).unwrap().unwrap();
+        let found = run_diff(text_of(dir), false).unwrap().unwrap();
         assert!(found.patch.contains("kept.txt"), "the edit is missing: {}", found.patch);
         assert!(found.patch.contains("fresh.txt"), "the new file is missing: {}", found.patch);
         assert!(found.patch.contains("+three"));
@@ -1037,10 +1040,18 @@ mod tests {
         let dir = repo("ignored");
         std::fs::write(dir.join(".gitignore"), "hidden.txt\n").unwrap();
         std::fs::write(dir.join("hidden.txt"), "secret\n").unwrap();
-        let found = run_diff(text_of(dir)).unwrap().unwrap();
+        let found = run_diff(text_of(dir), false).unwrap().unwrap();
         // The ignore file itself is new, so it lands. Only the file it names must stay out.
         assert!(found.patch.contains("b/.gitignore"), "{}", found.patch);
         assert!(!found.patch.contains("b/hidden.txt"), "{}", found.patch);
+    }
+
+    #[test]
+    fn indenting_a_line_shows_only_while_whitespace_counts() {
+        let dir = repo("spaces");
+        std::fs::write(dir.join("kept.txt"), "one\n    two\n").unwrap();
+        assert!(run_diff(text_of(dir.clone()), false).unwrap().unwrap().patch.contains("+    two"));
+        assert_eq!(run_diff(text_of(dir), true).unwrap().unwrap().patch, "");
     }
 
     #[test]
@@ -1049,7 +1060,7 @@ mod tests {
         let path = text_of(dir.clone());
         std::fs::write(dir.join("kept.txt"), "one\nthree\n").unwrap();
         git(&path, &["commit", "-qam", "second"]).unwrap();
-        assert_eq!(run_diff(path).unwrap().unwrap().patch, "");
+        assert_eq!(run_diff(path, false).unwrap().unwrap().patch, "");
     }
 
     #[test]
@@ -1070,7 +1081,7 @@ mod tests {
         git(&branch, &["commit", "-qam", "on the branch"]).unwrap();
         std::fs::write(side.join("kept.txt"), "one\nfour\n").unwrap();
 
-        let found = run_diff(branch).unwrap().unwrap();
+        let found = run_diff(branch, false).unwrap().unwrap();
         assert_eq!(found.base, "origin/main");
         // The commit and the edit on top of it both measure from the fork, not from HEAD.
         assert!(found.patch.contains("+four"), "{}", found.patch);

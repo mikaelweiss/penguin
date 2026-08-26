@@ -31,6 +31,7 @@ import { RemoveProjectDialog } from "@/components/remove-project-dialog";
 import { RunTranscript } from "@/components/run-transcript";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { useConfig } from "@/hooks/use-config";
+import { useDiffView } from "@/hooks/use-diff-view";
 import { useDirectories } from "@/hooks/use-directories";
 import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
@@ -70,6 +71,7 @@ export function App() {
   const selected = findRun(projects, selectedId);
   const run = selected?.run;
   const panels = usePanels(run?.id);
+  const diffView = useDiffView();
   const showTerminal = panels.open("terminal") && run !== undefined;
   const showDiff = panels.open("diff") && run !== undefined;
   const fullTerminal = panels.full === "terminal" && showTerminal;
@@ -254,6 +256,7 @@ export function App() {
                           <DiffPanel
                             dir={run.dir}
                             wrote={wrote}
+                            view={diffView}
                             full={fullDiff}
                             onToggleFull={() => panels.toggleFull("diff")}
                             onClose={() => panels.close("diff")}

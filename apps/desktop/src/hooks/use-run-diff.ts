@@ -24,7 +24,11 @@ export type DiffState = {
  * The run's patch, re-read once its output settles. Reading on every appended line would run git
  * against the whole worktree several times a second.
  */
-export function useRunDiff(dir: string | undefined, wrote: number): DiffState {
+export function useRunDiff(
+  dir: string | undefined,
+  wrote: number,
+  ignoreWhitespace: boolean,
+): DiffState {
   const [diff, setDiff] = useState<RunDiff | undefined>(undefined);
   const [plain, setPlain] = useState(false);
   const [reading, setReading] = useState(false);
@@ -52,7 +56,7 @@ export function useRunDiff(dir: string | undefined, wrote: number): DiffState {
       read.current = dir;
       setReading(true);
       try {
-        const found = await invoke<RunDiff | null>("run_diff", { dir });
+        const found = await invoke<RunDiff | null>("run_diff", { dir, ignoreWhitespace });
         if (dropped || latest.current !== ticket) return;
         setPlain(found === null);
         setDiff(found ?? undefined);
@@ -71,7 +75,7 @@ export function useRunDiff(dir: string | undefined, wrote: number): DiffState {
       dropped = true;
       window.clearTimeout(timer);
     };
-  }, [dir, wrote, asked]);
+  }, [dir, wrote, asked, ignoreWhitespace]);
 
   return { diff, plain, reading, error, reread };
 }
