@@ -281,10 +281,11 @@ if (!state.dirty) {
       or a crash picks up exactly what is missing:
     </p>
 
-    <pre><code>async function send(): Promise&lt;{ ok: boolean; reason: string }&gt; {
+    <pre><code>async function send(): Promise&lt;{ ok: boolean; reason: string; from: "commit" | "push" }&gt; {
   const wrote = await call(ctx, commit, {});
-  if (!wrote.ok) return { ok: false, reason: wrote.reason };
-  return vcs.push(head.branch);
+  if (!wrote.ok) return { ok: false, reason: wrote.reason, from: "commit" };
+  const sent = await vcs.push(head.branch);
+  return { ok: sent.ok, reason: sent.reason, from: "push" };
 }</code></pre>
 
     <p>

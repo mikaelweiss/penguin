@@ -14,6 +14,16 @@ const Description = z.object({
   body: z.string().describe("the pull request body, markdown, empty when the title says it all"),
 });
 
+const Fix = z.object({
+  fixed: z.boolean().describe("true when the cause is cleared and the push is worth another try"),
+  changed: z
+    .boolean()
+    .describe("true when the fix touched files that belong in a commit before the push"),
+  notes: z
+    .string()
+    .describe("what stopped the push, and what a person has to do when it is not fixed"),
+});
+
 const Assessment = z.object({
   issues: z
     .array(
@@ -61,10 +71,12 @@ function proposal(assessment: Assessment): string {
 export default workflow({
   description:
     "open the pull request, then watch it: assess every piece of feedback against the code, and answer what you approve until it merges",
-  params: z.object({}),
+  params: z.object({
+    fixes: z.number().int().min(1).default(3).meta({ internal: true }),
+  }),
 
   async run(ctx) {
-    const { agent, github, vcs, view } = ctx;
+    const { agent, github, params, vcs, view } = ctx;
     const nowhere = { url: "", state: "", rounds: 0 };
 
     const head = await vcs.head();
@@ -100,27 +112,71 @@ export default workflow({
       }
     }
 
+    let fixer = "";
+
+    /**
+     * A failed push goes to the agent before the person, because most of what stops one is the
+     * agent's to clear. The bound keeps a fix it only thinks it made from spinning unattended.
+     */
+    async function cleared(
+      reason: string,
+      tries: number,
+    ): Promise<{ retry: boolean; reason: string }> {
+      if (tries > params.fixes) return { retry: false, reason };
+      if (fixer === "") fixer = await agent.open();
+      const fix = await narrated(
+        view,
+        agent.turn(
+          fixer,
+          { skill: "fix-push", prompt: `The push of ${head.branch} failed. git said:\n\n${reason}` },
+          { result: Fix },
+        ),
+      );
+      if (!fix.fixed) return { retry: false, reason: fix.notes };
+      // A fix left in the tree pushes nothing, so the same hook fails on the same code again.
+      if (fix.changed) {
+        const wrote = await call(ctx, commit, {});
+        if (!wrote.ok) {
+          return { retry: false, reason: `${fix.notes}\n\nThe fix did not commit: ${wrote.reason}` };
+        }
+      }
+      return { retry: true, reason: fix.notes };
+    }
+
     // The pull request reads the remote, so every local change goes up before it is asked for.
-    async function send(): Promise<{ ok: boolean; reason: string }> {
+    async function send(): Promise<{ ok: boolean; reason: string; from: "commit" | "push" }> {
       const wrote = await call(ctx, commit, {});
-      if (!wrote.ok) return { ok: false, reason: wrote.reason };
-      return vcs.push(head.branch);
+      if (!wrote.ok) return { ok: false, reason: wrote.reason, from: "commit" };
+      const sent = await vcs.push(head.branch);
+      return { ok: sent.ok, reason: sent.reason, from: "push" };
     }
 
     async function delivered(): Promise<boolean> {
+      let tries = 0;
       for (;;) {
         const sent = await send();
         if (sent.ok) return true;
-        if (!(await again(`The branch did not reach the remote: ${sent.reason}`))) return false;
+        if (sent.from === "commit") {
+          if (!(await again(`The commit failed: ${sent.reason}`))) return false;
+          continue;
+        }
+        tries += 1;
+        const answer = await cleared(sent.reason, tries);
+        if (answer.retry) continue;
+        if (!(await again(`The branch did not reach the remote: ${answer.reason}`))) return false;
       }
     }
 
     /** The gated push: the commit is already written and a person has already seen it. */
     async function pushed(): Promise<boolean> {
+      let tries = 0;
       for (;;) {
         const sent = await vcs.push(head.branch);
         if (sent.ok) return true;
-        if (!(await again(`The branch did not reach the remote: ${sent.reason}`))) return false;
+        tries += 1;
+        const answer = await cleared(sent.reason, tries);
+        if (answer.retry) continue;
+        if (!(await again(`The branch did not reach the remote: ${answer.reason}`))) return false;
       }
     }
 
