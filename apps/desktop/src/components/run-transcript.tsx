@@ -308,10 +308,18 @@ const TurnRow = memo(function TurnRow({ label }: { label: string }) {
 
 /** Work rows sit tight against each other; prose and turns get room to breathe. */
 function spacing(row: TranscriptRow): string {
-  if (row.kind === "actions" || row.kind === "live") return "pb-0.5";
+  if (row.kind === "actions") return "pb-0.5";
   if (row.kind === "closing") return "pt-2 pb-0.5";
   if (row.kind === "turn") return "pt-4 pb-4";
   return "pb-4";
+}
+
+/**
+ * The live marker rides inside the last row instead of taking a row of its own. The scroller reads
+ * new turns off the tail of its item list, so a row that comes and goes there sends it to the top.
+ */
+function livePad(row: TranscriptRow): string {
+  return row.kind === "actions" ? "pt-0.5" : "pt-4";
 }
 
 type RowProps = { row: TranscriptRow; live: boolean } & DisclosureProps;
@@ -326,8 +334,6 @@ function Row({ row, live, open, onToggle }: RowProps) {
       return <ActionsRow row={row} live={live} open={open} onToggle={onToggle} />;
     case "turn":
       return <TurnRow label={row.label} />;
-    case "live":
-      return <LiveRow state={row.state} />;
     case "closing":
       return <ClosingRow text={row.text} />;
   }
@@ -374,7 +380,7 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
 
   const rows = reuseRows(
     kept.current.id === run.id ? kept.current.rows : undefined,
-    toRows({ ...run, problem }, sent, live),
+    toRows({ ...run, problem }, sent),
   );
   kept.current = { id: run.id, rows };
 
@@ -386,7 +392,7 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
             <ActivityIcon />
           </EmptyMedia>
           <EmptyTitle>Running</EmptyTitle>
-          <EmptyDescription>No output yet.</EmptyDescription>
+          <EmptyDescription>{live?.text ?? "No output yet."}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -394,11 +400,11 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
 
   const open = expanded[run.id] ?? NOTHING_OPEN;
   return (
-    <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+    <MessageScrollerProvider key={run.id} autoScroll defaultScrollPosition="last-anchor">
       <MessageScroller className="flex-1">
         <MessageScrollerViewport>
           <MessageScrollerContent className="gap-0 p-4">
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <MessageScrollerItem
                 key={`${run.id}-${row.key}`}
                 messageId={row.key}
@@ -407,6 +413,11 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
               >
                 <div className={COLUMN}>
                   <Row row={row} live={running} open={open} onToggle={onToggle} />
+                  {live !== undefined && index === rows.length - 1 ? (
+                    <div className={livePad(row)}>
+                      <LiveRow state={live} />
+                    </div>
+                  ) : null}
                 </div>
               </MessageScrollerItem>
             ))}

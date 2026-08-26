@@ -34,7 +34,7 @@ function turn(id: string, agent: number, at: string, skill?: string): Transcript
 }
 
 test("a question and its answer share a call id but never a row key", () => {
-  const rows = toRows(run([said("c4", "ask", "t1"), said("c4", "answer", "t2")]), [], undefined);
+  const rows = toRows(run([said("c4", "ask", "t1"), said("c4", "answer", "t2")]), []);
 
   expect(rows.map((row) => row.key)).toEqual(["line:ask:c4", "line:answer:c4"]);
 });
@@ -43,7 +43,6 @@ test("a sent message sorts by when it was sent, so later output lands below it",
   const rows = toRows(
     run([said("c1", "show", "t1"), said("c3", "show", "t3")]),
     [line("sent:0", "message", "t2")],
-    undefined,
   );
 
   expect(rows.map((row) => row.key)).toEqual([
@@ -57,7 +56,6 @@ test("contiguous tool calls of every kind fold into one row", () => {
   const rows = toRows(
     run([act("a1", "read", "t1"), act("a2", "run", "t2"), act("a3", "edit", "t3")]),
     [],
-    undefined,
   );
 
   expect(rows).toHaveLength(1);
@@ -95,7 +93,6 @@ test("a failed call is counted on its group", () => {
   const rows = toRows(
     run([act("a1", "run", "t1"), act("a2", "run", "t2", { status: "failed" })]),
     [],
-    undefined,
   );
 
   expect(rows[0]).toMatchObject({ kind: "actions", failures: 1 });
@@ -103,16 +100,16 @@ test("a failed call is counted on its group", () => {
 
 test("an unchanged tick hands every row back its previous identity", () => {
   const output = [said("c1", "show", "t1"), act("a1", "read", "t2")];
-  const before = toRows(run(output), [], undefined);
-  const after = reuseRows(before, toRows(run(structuredClone(output)), [], undefined));
+  const before = toRows(run(output), []);
+  const after = reuseRows(before, toRows(run(structuredClone(output)), []));
 
   expect(after).toBe(before);
 });
 
 test("a new row leaves the rows before it untouched", () => {
   const output = [said("c1", "show", "t1")];
-  const before = toRows(run(output), [], undefined);
-  const after = reuseRows(before, toRows(run([...output, said("c2", "show", "t2")]), [], undefined));
+  const before = toRows(run(output), []);
+  const after = reuseRows(before, toRows(run([...output, said("c2", "show", "t2")]), []));
 
   expect(after).not.toBe(before);
   expect(after[0]).toBe(before[0]);
@@ -120,25 +117,22 @@ test("a new row leaves the rows before it untouched", () => {
 });
 
 test("a running call that finishes gives its group a fresh identity", () => {
-  const before = toRows(run([act("a1", "run", "t1", { status: "running" })]), [], undefined);
+  const before = toRows(run([act("a1", "run", "t1", { status: "running" })]), []);
   const after = reuseRows(
     before,
-    toRows(run([act("a1", "run", "t1", { status: "done", output: "ok" })]), [], undefined),
+    toRows(run([act("a1", "run", "t1", { status: "done", output: "ok" })]), []),
   );
 
   expect(after[0]).not.toBe(before[0]);
 });
 
-test("the live row and the closing row sit at the end, in that order", () => {
-  const finished = toRows(run([], { status: "done" }), [], undefined);
+test("the closing row sits at the end", () => {
+  const finished = toRows(run([], { status: "done" }), []);
   expect(finished.map((row) => row.key)).toEqual(["closing"]);
-
-  const working = toRows(run([]), [], { text: "thinking", at: "t1", idle: false });
-  expect(working.map((row) => row.key)).toEqual(["live"]);
 });
 
 test("a run's problem becomes its own row", () => {
-  const rows = toRows(run([], { status: "failed", problem: "boom" }), [], undefined);
+  const rows = toRows(run([], { status: "failed", problem: "boom" }), []);
 
   expect(rows.map((row) => row.key)).toEqual(["closing", "line:problem"]);
 });
@@ -147,7 +141,6 @@ test("the scroller anchors on what the person sent, not on the run's own output"
   const rows = toRows(
     run([said("c1", "show", "t1")], { input: [{ name: "task", text: "go" }] }),
     [line("sent:0", "message", "t2")],
-    undefined,
   );
 
   expect(rows.filter(startsTurn).map((row) => row.key)).toEqual([
@@ -160,14 +153,13 @@ test("a turn boundary breaks the fold, so the next step's work is its own group"
   const rows = toRows(
     run([act("a1", "run", "t1"), turn("t1", 1, "t2", "implement"), act("a2", "run", "t3")]),
     [],
-    undefined,
   );
 
   expect(rows.map((row) => row.key)).toEqual(["actions:a1", "turn:t1", "actions:a2"]);
 });
 
 test("one agent working alone is named by its step, with no number to tell it apart", () => {
-  const rows = toRows(run([turn("t1", 1, "t1", "plan")]), [], undefined);
+  const rows = toRows(run([turn("t1", 1, "t1", "plan")]), []);
 
   expect(rows[0]).toMatchObject({ kind: "turn", label: "plan" });
 });
@@ -176,7 +168,6 @@ test("a run passing work between agents says which one took each step", () => {
   const rows = toRows(
     run([turn("t1", 1, "t1", "implement"), turn("t2", 2, "t2", "review")]),
     [],
-    undefined,
   );
 
   expect(rows.map((row) => (row.kind === "turn" ? row.label : row.key))).toEqual([
@@ -186,7 +177,7 @@ test("a run passing work between agents says which one took each step", () => {
 });
 
 test("a turn on a bare prompt falls back to naming the agent", () => {
-  const rows = toRows(run([turn("t1", 1, "t1"), turn("t2", 2, "t2")]), [], undefined);
+  const rows = toRows(run([turn("t1", 1, "t1"), turn("t2", 2, "t2")]), []);
 
   expect(rows.map((row) => (row.kind === "turn" ? row.label : row.key))).toEqual([
     "agent 1",
@@ -198,7 +189,6 @@ test("the scroller anchors on each new step", () => {
   const rows = toRows(
     run([said("c1", "show", "t1"), turn("t1", 1, "t2", "review")]),
     [],
-    undefined,
   );
 
   expect(rows.filter(startsTurn).map((row) => row.key)).toEqual(["turn:t1"]);

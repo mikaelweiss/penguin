@@ -4,7 +4,6 @@ import type {
   OutputLine,
   Run,
   RunInput,
-  RunState,
   TranscriptItem,
   TurnMark,
 } from "@/lib/runs";
@@ -14,7 +13,6 @@ export type TranscriptRow =
   | { kind: "line"; key: string; line: OutputLine }
   | { kind: "actions"; key: string; actions: ActionItem[]; summary: string; failures: number }
   | { kind: "turn"; key: string; label: string }
-  | { kind: "live"; key: string; state: RunState }
   | { kind: "closing"; key: string; text: string };
 
 const CLOSING: Partial<Record<Run["status"], string>> = {
@@ -100,7 +98,7 @@ function ordered(run: Run, sent: OutputLine[]): TranscriptItem[] {
   return [...run.output, ...mine].sort((a, b) => at(a).localeCompare(at(b)));
 }
 
-export function toRows(run: Run, sent: OutputLine[], live: RunState | undefined): TranscriptRow[] {
+export function toRows(run: Run, sent: OutputLine[]): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   if (run.input.length > 0) rows.push({ kind: "input", key: "input", input: run.input });
 
@@ -148,7 +146,6 @@ export function toRows(run: Run, sent: OutputLine[], live: RunState | undefined)
     });
   }
 
-  if (live !== undefined) rows.push({ kind: "live", key: "live", state: live });
   return rows;
 }
 
@@ -198,10 +195,6 @@ function same(a: TranscriptRow, b: TranscriptRow): boolean {
     }
     case "turn":
       return a.label === (b as typeof a).label;
-    case "live": {
-      const other = (b as typeof a).state;
-      return a.state.text === other.text && a.state.at === other.at && a.state.idle === other.idle;
-    }
     case "closing":
       return a.text === (b as typeof a).text;
   }
