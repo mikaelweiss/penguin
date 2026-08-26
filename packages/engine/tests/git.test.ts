@@ -188,6 +188,45 @@ test("worktree.add starts the branch at the ref it is given", async () => {
   }
 });
 
+test("worktree.add buckets by the repository, not the checkout it was called from", async () => {
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const { dir, host, vcs } = await repo();
+    await commitFile({ dir, host }, "base.txt", "base");
+    const first = await vcs.worktree.add("one");
+    expect(first.ok).toBe(true);
+
+    // A run whose cwd is a worktree of the same repository must land in the same folder.
+    const inside = definition.build(hostFor(first.path));
+    const second = await inside.worktree.add("two");
+    expect(second.ok).toBe(true);
+    expect(path.dirname(second.path)).toBe(path.dirname(first.path));
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});
+
+test("worktree.add reports a branch another worktree holds as one already there", async () => {
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const { dir, host, vcs } = await repo();
+    await commitFile({ dir, host }, "base.txt", "base");
+    const first = await vcs.worktree.add("feature");
+    expect(first.ok).toBe(true);
+
+    // The same branch from a different bucket: git refuses, and the caller is told where it sits.
+    process.env["PENGUIN_HOME"] = tempDir("penguin-home-");
+    const again = await definition.build(hostFor(dir)).worktree.add("feature");
+    expect(again.ok).toBe(false);
+    expect(again.exists).toBe(true);
+    expect(again.path).toBe(fs.realpathSync(first.path));
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});
+
 test("sha names the commit a ref points at, and refuses one that does not resolve", async () => {
   const { dir, host, vcs } = await repo();
   await commitFile({ dir, host }, "base.txt", "base");

@@ -34,6 +34,18 @@ export default adapter({
       };
     }
 
+    /** Where the repository has branch checked out, empty when no worktree holds it. */
+    async function checkedOut(branch: string): Promise<string> {
+      const listed = await git(["worktree", "list", "--porcelain"]);
+      if (listed.code !== 0) return "";
+      let dir = "";
+      for (const line of listed.stdout.split("\n")) {
+        if (line.startsWith("worktree ")) dir = line.slice("worktree ".length).trim();
+        if (line.trim() === `branch refs/heads/${branch}`) return dir;
+      }
+      return "";
+    }
+
     return {
       async stage(files: string[], options?: { cwd?: string }): Promise<Done> {
         const done = await git(["add", "--", ...files], options?.cwd);
@@ -143,10 +155,18 @@ export default adapter({
               `${JSON.stringify({ at: new Date().toISOString(), dir })}\n`,
             );
           };
-          const root = await git(["rev-parse", "--show-toplevel"]);
-          const project = path.basename(root.stdout.trim() === "" ? host.cwd : root.stdout.trim());
+          // The repository, not the checkout: a run started inside a worktree buckets with the
+          // clone it came from, or it loses sight of every worktree an earlier run cut.
+          const common = await git(["rev-parse", "--git-common-dir"]);
+          const gitdir = common.stdout.trim();
+          const repo = gitdir === "" ? host.cwd : path.dirname(path.resolve(host.cwd, gitdir));
           const base = host.config("worktrees") ?? path.join(host.home, "worktrees");
-          const target = path.join(base, project, name);
+          const target = path.join(base, path.basename(repo), name);
+          // A branch git already holds is the same "one is already there" the caller answers,
+          // whatever folder holds it. Reading that refusal as a plain failure strands the rerun.
+          const held = options?.ref === undefined ? await checkedOut(name) : "";
+          if (held !== "")
+            return { ok: false, path: held, exists: true, reason: `${name} is checked out at ${held}` };
           if (fs.existsSync(target))
             return { ok: false, path: target, exists: true, reason: `${target} already exists` };
           fs.mkdirSync(path.dirname(target), { recursive: true });
