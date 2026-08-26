@@ -114,11 +114,13 @@ export default workflow({
         ? `Review this pull request. The working tree holds its code.\n\n${briefing()}`
         : `New code arrived since the last review, and the working tree holds it. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, review what changed, and return the full updated findings.\n\n${briefing()}`;
 
-    const pulled = async (): Promise<void> => {
-      const done = await vcs.pull(ref, { cwd: dir });
+    // The worktree only mirrors the PR head, so a force-push is a reset, not a merge.
+    const synced = async (): Promise<void> => {
+      const fetched = await vcs.fetch(ref, { cwd: dir });
+      const done = fetched.ok ? await vcs.resetHard("FETCH_HEAD", { cwd: dir }) : fetched;
       if (!done.ok)
         await view.ask(
-          `The pull failed: ${done.reason} The review goes on with the last fetched code.`,
+          `The sync failed: ${done.reason} The review goes on with the last fetched code.`,
           Ack,
         );
     };
@@ -133,7 +135,7 @@ export default workflow({
     };
 
     const review = async (): Promise<"approved" | "sent" | "closed" | "draft" | "queued"> => {
-      await pulled();
+      await synced();
       const reviewer = await agent.open({ cwd: dir });
       let turn = agent.turn(reviewer, { skill: "review-pr", prompt: opening() }, { result: Findings });
       let shown = narrate(view, turn.output);
@@ -179,7 +181,7 @@ export default workflow({
         await stopTurn();
         let update: string;
         if (change.kind === "commits") {
-          await pulled();
+          await synced();
           update =
             "New code was pushed to the PR. The working tree now holds it. Continue the review over the current code.";
         } else if (change.kind === "description") {
