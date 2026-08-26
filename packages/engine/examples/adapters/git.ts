@@ -195,7 +195,7 @@ export default adapter({
           }
           // A local ref, so a worktree can start on a commit that has never reached the remote.
           const start = options?.from === undefined ? [] : [options.from];
-          const done = await git(["worktree", "add", "-b", name, target, ...start]);
+          const done = await git(["worktree", "add", "--no-track", "-b", name, target, ...start]);
           if (done.code === 0) {
             moved(target);
             return { ok: true, path: target, exists: false, reason: "" };
