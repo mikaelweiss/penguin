@@ -56,7 +56,7 @@ export default workflow({
       await view.ask(`gh pr view ${params.pr} failed: ${found.reason}`, Ack);
       return { rounds: 0, posted: 0 };
     }
-    const pr = found.pr;
+    let pr = found.pr;
     if (pr.state !== "OPEN") {
       await view.show(`PR #${pr.number} is ${pr.state}, nothing to review`);
       return { rounds: 0, posted: 0 };
@@ -66,6 +66,22 @@ export default workflow({
     if (!said.ok) await view.show(`The PR comments did not read: ${said.reason}`);
     let description = pr.body;
     let notes: Note[] = said.comments;
+
+    /** The PR as it stands now, not as a gate's answer left it. False means it is no longer reviewable. */
+    const reread = async (): Promise<boolean> => {
+      const again = await github.pr.get(params.pr);
+      if (!again.ok || again.pr === null) {
+        await view.ask(`gh pr view ${params.pr} failed: ${again.reason}`, Ack);
+        return false;
+      }
+      pr = again.pr;
+      description = pr.body;
+      const now = await github.pr.comments(params.pr);
+      if (now.ok) notes = now.comments;
+      if (pr.state === "OPEN") return true;
+      await view.show(`PR #${pr.number} is ${pr.state}, nothing to review`);
+      return false;
+    };
 
     const briefing = (): string => {
       const conversation = notes.length === 0 ? "" : `\n\n# Comments\n\n${noted(notes)}`;
@@ -93,6 +109,8 @@ export default workflow({
         await view.show(`PR #${pr.number} is yours to read`);
         return { rounds: 0, posted: 0 };
       }
+      // The gate can sit for hours, so the review reads the PR again rather than the triage's copy.
+      if (!(await reread())) return { rounds: 0, posted: 0 };
     }
 
     const ref = `pull/${pr.number}/head`;
@@ -108,6 +126,7 @@ export default workflow({
     let owed = true;
     let rounds = 0;
     let posted = 0;
+    let head = "";
 
     const opening = (): string =>
       previous === undefined
@@ -123,6 +142,32 @@ export default workflow({
           `The sync failed: ${done.reason} The review goes on with the last fetched code.`,
           Ack,
         );
+      const at = await vcs.sha("HEAD", { cwd: dir });
+      head = at.ok ? at.sha : "";
+    };
+
+    /** The commit the findings judge, against the commit the PR carries now. */
+    const since = async (): Promise<"same" | "moved" | "unread"> => {
+      if (head === "") return "unread";
+      const fetched = await vcs.fetch(ref, { cwd: dir });
+      if (!fetched.ok) return "unread";
+      const now = await vcs.sha("FETCH_HEAD", { cwd: dir });
+      if (!now.ok) return "unread";
+      return now.sha === head ? "same" : "moved";
+    };
+
+    /** A gate the user answers late must not post a verdict on code the review never read. */
+    const overtaken = async (): Promise<boolean> => {
+      const state = await since();
+      if (state === "unread") {
+        await view.show("Git did not name the PR head, so this stands on the code the review read.");
+        return false;
+      }
+      if (state === "same") return false;
+      await view.show(
+        `New code landed on PR #${pr.number}, so nothing was posted. The next round reviews it and carries these findings in.`,
+      );
+      return true;
     };
 
     const post = async (findings: Findings): Promise<void> => {
@@ -134,7 +179,9 @@ export default workflow({
       posted += 1;
     };
 
-    const review = async (): Promise<"approved" | "sent" | "closed" | "draft" | "queued"> => {
+    const review = async (): Promise<
+      "approved" | "sent" | "closed" | "draft" | "queued" | "stale"
+    > => {
       await synced();
       const reviewer = await agent.open({ cwd: dir });
       let turn = agent.turn(reviewer, { skill: "review-pr", prompt: opening() }, { result: Findings });
@@ -178,6 +225,8 @@ export default workflow({
         if (change.kind === "ready") continue;
         if (change.kind === "dequeued") continue;
         if (change.kind === "reviewed") continue;
+        // A stale round syncs before the watch reports, so a push the tree holds already is not news.
+        if (change.kind === "commits" && (await since()) !== "moved") continue;
         await stopTurn();
         let update: string;
         if (change.kind === "commits") {
@@ -204,6 +253,7 @@ export default workflow({
           z.union([z.enum(["send"]), z.string()]),
         );
         if (answer === "send") {
+          if (await overtaken()) return "stale";
           await post(findings);
           await view.show(`Posted feedback on PR #${pr.number} without approving`);
           return "sent";
@@ -221,6 +271,7 @@ export default workflow({
         );
         previous = findings;
       }
+      if (await overtaken()) return "stale";
       await post(findings);
       const approved = await github.pr.approve(params.pr);
       if (!approved.ok) await view.ask(`The approve failed: ${approved.reason}`, Ack);
@@ -243,6 +294,8 @@ export default workflow({
             paused = true;
             continue;
           }
+          // A round the new code overtook owes a review still, so the loop goes straight round again.
+          if (outcome === "stale") continue;
           owed = false;
           continue;
         }
