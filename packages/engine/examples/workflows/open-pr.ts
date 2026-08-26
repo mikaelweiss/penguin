@@ -81,6 +81,12 @@ export default workflow({
       .string()
       .default("main")
       .describe("the branch the pull request lands on, empty to take the one origin calls default"),
+    note: z
+      .string()
+      .default("")
+      .describe(
+        "markdown appended to the pull request body, e.g. what a calling workflow carried past",
+      ),
     fixes: z.number().int().min(1).default(3).meta({ internal: true }),
   }),
 
@@ -196,6 +202,17 @@ export default workflow({
     }
 
     /**
+     * Parallel worktrees share one .git, so two setting an upstream at once race on its config
+     * lock. That clears itself, and a whole agent turn is a waste of a wait.
+     */
+    async function sending(force: boolean): Promise<{ ok: boolean; reason: string }> {
+      const first = await vcs.push(head.branch, { force });
+      if (first.ok || !first.reason.includes("config.lock")) return first;
+      await new Promise((settle) => setTimeout(settle, 1000));
+      return vcs.push(head.branch, { force });
+    }
+
+    /**
      * The one way anything reaches origin. The branch sits on its base first, so no pull request
      * opens off a stale one, and the lease rides along because a rebased branch no longer
      * fast-forwards. A rebase that does not come back clean is a person's call, not a push.
@@ -210,7 +227,7 @@ export default workflow({
             continue;
           }
         }
-        const sent = await vcs.push(head.branch, { force: rebasing });
+        const sent = await sending(rebasing);
         if (sent.ok) return true;
         tries += 1;
         const answer = await cleared(sent.reason, tries);
@@ -234,7 +251,7 @@ export default workflow({
         await view.show(`${head.branch} has nothing over ${base}, so nothing goes up`);
         return;
       }
-      const sent = await vcs.push(head.branch, { force: true });
+      const sent = await sending(true);
       if (!sent.ok) {
         await view.show(`${head.branch} did not reach the remote: ${sent.reason}`);
         return;
@@ -263,10 +280,12 @@ export default workflow({
         { result: Description },
       ),
     );
-    let made = await github.pr.create({ title: written.title, body: written.body, base });
+    // The note is the caller's, so it goes under a body the agent wrote knowing nothing of it.
+    const body = params.note === "" ? written.body : `${written.body}\n\n${params.note}`;
+    let made = await github.pr.create({ title: written.title, body, base });
     while (!made.ok) {
       if (!(await again(`No pull request: ${made.reason}`))) return nowhere;
-      made = await github.pr.create({ title: written.title, body: written.body, base });
+      made = await github.pr.create({ title: written.title, body, base });
     }
 
     const found = await github.pr.get(made.url);
