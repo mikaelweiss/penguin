@@ -40,6 +40,19 @@ test("points the catalog at the running install's own penguin", async () => {
   expect(fs.existsSync(entry)).toBe(true);
 });
 
+test("maps a composed import onto the catalogs a run searches, nearest first", async () => {
+  const project = catalog("project", { vcs: "git" });
+  const home = catalog("home", { agent: "claude" });
+  await writeEditorFiles([project, home]);
+  expect(tsconfigIn(project.dir).compilerOptions.paths["penguin:*"]).toEqual([
+    path.join(project.dir, "workflows", "*.ts"),
+    path.join(home.dir, "workflows", "*.ts"),
+  ]);
+  expect(tsconfigIn(home.dir).compilerOptions.paths["penguin:*"]).toEqual([
+    path.join(home.dir, "workflows", "*.ts"),
+  ]);
+});
+
 test("types one ctx member per resolved role, from the adapter's own build", async () => {
   const project = catalog("project", { vcs: "git" });
   const home = catalog("home", { agent: "claude" });

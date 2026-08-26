@@ -11,11 +11,20 @@ export type WorkflowFound = {
 };
 
 export function found(cwd: string): WorkflowFound[] {
-  return catalogs.roots(cwd).flatMap(scan);
+  return foundIn(catalogs.roots(cwd));
+}
+
+export function foundIn(list: catalogs.Catalog[]): WorkflowFound[] {
+  return list.flatMap(scan);
 }
 
 export function locate(name: string, cwd: string): string | undefined {
-  return found(cwd).find((entry) => entry.name === name)?.file;
+  return locateIn(name, catalogs.roots(cwd));
+}
+
+/** The file a name resolves to: the nearest catalog holding it, so a farther one is shadowed. */
+export function locateIn(name: string, list: catalogs.Catalog[]): string | undefined {
+  return foundIn(list).find((entry) => entry.name === name)?.file;
 }
 
 export function searchedWorkflows(cwd: string): string[] {

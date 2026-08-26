@@ -336,6 +336,12 @@ Write "vcs jj" to /Users/you/.penguin/config to choose one.</code></pre>
       loader: "object",
     }));
     build.module("zod", () =&gt; ({ exports: { ...zod }, loader: "object" }));
+    for (const [name, file] of composed) {
+      build.module(`penguin:${name}`, async () =&gt; ({
+        exports: { ...(await import(pathToFileURL(file).href)) },
+        loader: "object",
+      }));
+    }
   },
 });</code></pre>
 
@@ -351,6 +357,14 @@ Write "vcs jj" to /Users/you/.penguin/config to choose one.</code></pre>
       <li>
         <code>zod</code> is imported statically at the top of the loader. A dynamic
         <code>import("zod")</code> would resolve back through this same plugin and hang.
+      </li>
+      <li>
+        <code>composed</code> is one entry per workflow name the run's catalogs hold, nearest
+        first, so <code>import openPr from "penguin:open-pr"</code> reaches another catalog's file
+        and a catalog composes what it does not hold. The run passes its own catalog list to
+        <code>load</code>, because an import carries no run. Bun serves no
+        <code>onResolve</code> hook at runtime, so the names are registered rather than resolved on
+        demand, and a list that has not changed registers once.
       </li>
     </ul>
 

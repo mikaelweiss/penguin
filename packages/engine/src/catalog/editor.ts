@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { installedIn, pick, type AdapterFound } from "./adapters.ts";
-import type { Catalog, CatalogScope } from "./catalogs.ts";
+import { workflowsDir, type Catalog, type CatalogScope } from "./catalogs.ts";
 
 /**
  * Definition files import `penguin` and `zod` with no install of their own, so
@@ -27,12 +27,12 @@ export async function writeEditorFiles(list: Catalog[]): Promise<void> {
     // A catalog is typed against itself and what it shadows, never against a
     // caller's folder, so the same catalog reads the same from every project.
     put(path.join(catalog.dir, ENV), env(await installedIn(list.slice(index))));
-    put(path.join(catalog.dir, TSCONFIG), tsconfig());
+    put(path.join(catalog.dir, TSCONFIG), tsconfig(list.slice(index)));
     ignore(path.join(catalog.dir, IGNORE));
   }
 }
 
-function tsconfig(): string {
+function tsconfig(list: Catalog[]): string {
   const engine = engineRoot();
   const body = {
     compilerOptions: {
@@ -48,6 +48,8 @@ function tsconfig(): string {
       allowImportingTsExtensions: true,
       paths: {
         penguin: [path.join(engine, "src", "core", "index.ts")],
+        // A composed import reads as the run resolves it: the nearest catalog holding the name.
+        "penguin:*": list.map((catalog) => path.join(workflowsDir(catalog), "*.ts")),
         zod: modules("zod"),
       },
     },

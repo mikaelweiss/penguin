@@ -35,7 +35,7 @@ export async function run(
   options?: RunOptions,
 ): Promise<unknown> {
   const { cwd, list } = where(file, options?.cwd ?? process.cwd(), options?.catalogs);
-  const definition = await load(file);
+  const definition = await load(file, list);
   const parsed: unknown = definition.params.parse(params);
   const id = options?.id ?? runId();
   const journal =

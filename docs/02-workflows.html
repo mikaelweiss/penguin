@@ -258,6 +258,21 @@ if (!state.dirty) {
     <pre><code>await call(ctx, commit, {}, { cwd: worktree });</code></pre>
 
     <p>
+      A child is an imported workflow, so a catalog composes its neighbours with a relative import
+      and another catalog's with a <code>penguin:</code> one. The name resolves through the same
+      search path a launcher starts a workflow from, nearest catalog first, so a project composes
+      the starter catalog's <code>open-pr</code> without keeping a copy of it that drifts:
+    </p>
+
+    <pre><code>import commit from "./commit.ts";        // this catalog's
+import openPr from "penguin:open-pr";    // whichever catalog the run resolves</code></pre>
+
+    <p>
+      A name nothing in the search path holds is refused when the file loads, naming what is
+      installed, so a composed import fails at the launcher rather than mid-run.
+    </p>
+
+    <p>
       Parallel children are <code>Promise.all</code> over <code>call</code>:
     </p>
 

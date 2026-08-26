@@ -42,7 +42,7 @@ export async function describe(cwd: string): Promise<Described> {
   const workflows: WorkflowDescribed[] = [];
   for (const entry of found(cwd)) {
     try {
-      const definition = await load(entry.file);
+      const definition = await load(entry.file, list);
       workflows.push({
         ...entry,
         description: definition.description,

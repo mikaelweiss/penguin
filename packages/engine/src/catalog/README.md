@@ -8,4 +8,6 @@ A worktree catalog may only add a name. An adapter from a branch is inert until 
 
 The starter catalog is the package's `examples/` directory.
 
+A definition file composes another catalog's workflow by name: `import openPr from "penguin:open-pr"` reads the same ordered scan, nearest first, so a catalog holds only what it actually writes. The loader is handed the run's catalog list, since an import knows nothing of the run that started it.
+
 Reading a catalog also writes the files an editor needs to type it: `tsconfig.json`, `penguin-env.d.ts`, and the `.gitignore` that keeps their machine paths out of a repository.
