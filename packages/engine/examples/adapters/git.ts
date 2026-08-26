@@ -107,11 +107,21 @@ export default adapter({
         const done = await git(["reset", "--hard", ref], options?.cwd);
         return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
       },
-      /** `force` uses --force-with-lease, so a rebased branch pushes without clobbering unseen work. */
+      /**
+       * `force` uses --force-with-lease, so a rebased branch pushes without clobbering unseen work.
+       * A pre-push hook fails a push whose commits are already up, so origin's own ref decides
+       * whether the branch reached the remote, and the hook's complaint rides along as the reason.
+       */
       async push(branch: string, options?: { cwd?: string; force?: boolean }): Promise<Done> {
         const how = options?.force === true ? ["--force-with-lease"] : [];
         const done = await git(["push", "-u", ...how, "origin", branch], options?.cwd);
-        return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
+        const said = (done.stdout + done.stderr).trim();
+        if (done.code === 0) return { ok: true, reason: "" };
+        const there = await git(["ls-remote", "origin", `refs/heads/${branch}`], options?.cwd);
+        const remote = there.stdout.trim().split(/\s+/)[0] ?? "";
+        const local = await git(["rev-parse", branch], options?.cwd);
+        const landed = there.code === 0 && remote !== "" && remote === local.stdout.trim();
+        return { ok: landed, reason: said };
       },
       async merge(
         branch: string,

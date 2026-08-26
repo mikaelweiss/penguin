@@ -338,3 +338,33 @@ test("force still opens a branch the remote does not have yet", async () => {
     await git(ours.host, ["rev-parse", "HEAD"]),
   );
 });
+
+function refuse(dir: string): void {
+  const hook = path.join(dir, ".git", "hooks", "pre-push");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, "#!/bin/sh\nexit 1\n");
+  fs.chmodSync(hook, 0o755);
+}
+
+test("a hook that refuses a push the remote already has does not fail it", async () => {
+  const { ours } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+  expect((await ours.vcs.push("feature")).ok).toBe(true);
+
+  refuse(ours.dir);
+  const sent = await ours.vcs.push("feature");
+  expect(sent.ok).toBe(true);
+  expect(sent.reason).not.toBe("");
+});
+
+test("a hook still stops a push carrying a commit the remote does not have", async () => {
+  const { ours } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+  expect((await ours.vcs.push("feature")).ok).toBe(true);
+
+  refuse(ours.dir);
+  await commitFile(ours, "more.txt", "more");
+  expect((await ours.vcs.push("feature")).ok).toBe(false);
+});
