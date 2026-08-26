@@ -7,6 +7,8 @@
     "core:default",
     "opener:default",
     "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
     "core:window:allow-set-background-color",
     "dialog:allow-open",
     "clipboard-manager:allow-write-text"

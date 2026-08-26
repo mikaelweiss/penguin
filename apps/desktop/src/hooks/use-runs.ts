@@ -10,17 +10,20 @@ type Tracked = RunFile & { offset: number };
 
 export type Runs = {
   projects: Project[];
+  /** False until the first tree lands, so an empty first render is not read as no runs. */
+  published: boolean;
   error: string | undefined;
 };
 
 /** Follows every run file, re-reading only the bytes each one has grown by. */
 export function useRuns(dirs: string[]): Runs {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [published, setPublished] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let tracked = new Map<string, Tracked>();
-    let published = false;
+    let drawn = false;
     let stopped = false;
     let timer = 0;
 
@@ -30,7 +33,7 @@ export function useRuns(dirs: string[]): Runs {
 
       const updates = await readRuns(offsets);
       // These directories are new, so they need a first draw even when no run file has grown.
-      let changed = !published || updates.length !== tracked.size;
+      let changed = !drawn || updates.length !== tracked.size;
 
       const next = new Map<string, Tracked>();
       for (const update of updates) {
@@ -50,8 +53,9 @@ export function useRuns(dirs: string[]): Runs {
 
       tracked = next;
       if (!changed) return;
-      published = true;
+      drawn = true;
       setProjects(toProjects([...next.values()], dirs));
+      setPublished(true);
     };
 
     const loop = async () => {
@@ -71,5 +75,5 @@ export function useRuns(dirs: string[]): Runs {
     };
   }, [dirs]);
 
-  return { projects, error };
+  return { projects, published, error };
 }

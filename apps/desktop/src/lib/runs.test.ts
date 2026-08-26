@@ -1,9 +1,15 @@
 import { expect, test } from "bun:test";
 
-import { nextView } from "@/lib/runs";
-import type { Follow, Project, Run, RunStatus } from "@/lib/runs";
+import { blockedOn, needsYouNotice, newlyBlocked, nextView } from "@/lib/runs";
+import type { Ask, Auth, Follow, Project, Run, RunStatus } from "@/lib/runs";
 
-type Sketch = { id: string; status?: RunStatus; children?: Sketch[] };
+type Sketch = {
+  id: string;
+  status?: RunStatus;
+  ask?: Partial<Ask>;
+  auth?: Partial<Auth>;
+  children?: Sketch[];
+};
 
 function run(sketch: Sketch): Run {
   return {
@@ -11,6 +17,12 @@ function run(sketch: Sketch): Run {
     name: sketch.id,
     status: sketch.status ?? "running",
     dir: "/work",
+    ...(sketch.ask === undefined
+      ? {}
+      : { ask: { prompt: "which one?", schema: undefined, problem: undefined, ...sketch.ask } }),
+    ...(sketch.auth === undefined
+      ? {}
+      : { auth: { role: "jira", reason: "", at: "t1", ...sketch.auth } }),
     listening: false,
     input: [],
     output: [],
@@ -120,4 +132,67 @@ test("a run that vanished from the tree moves nothing", () => {
 
   expect(nextView(before, tree({ id: "work" }), "plan", undefined)).toBeUndefined();
   expect(nextView(before, before, undefined, undefined)).toBeUndefined();
+});
+
+test("credentials outrank a question, the way the output area orders them", () => {
+  expect(blockedOn(run({ id: "work", ask: {}, auth: {} }))).toBe("auth:jira:t1");
+  expect(blockedOn(run({ id: "work", ask: {} }))).toBe("ask:which one?:");
+  expect(blockedOn(run({ id: "work" }))).toBeUndefined();
+});
+
+test("a run that starts waiting is reported once and not again while it waits", () => {
+  const free = tree({ id: "work", children: [{ id: "plan" }] });
+  const asking = tree({ id: "work", children: [{ id: "plan", ask: {} }] });
+
+  expect(newlyBlocked(free, asking).map((waiting) => waiting.id)).toEqual(["plan"]);
+  expect(newlyBlocked(asking, asking)).toEqual([]);
+});
+
+test("a fresh question, a refusal, and new credentials each count as a new call", () => {
+  const asking = tree({ id: "plan", ask: {} });
+  const again = tree({ id: "plan", ask: { prompt: "and now?" } });
+  const refused = tree({ id: "plan", ask: { problem: "not a number" } });
+  const auth = tree({ id: "plan", auth: {} });
+  const later = tree({ id: "plan", auth: { at: "t2" } });
+
+  expect(newlyBlocked(asking, again).map((waiting) => waiting.id)).toEqual(["plan"]);
+  expect(newlyBlocked(asking, refused).map((waiting) => waiting.id)).toEqual(["plan"]);
+  expect(newlyBlocked(auth, later).map((waiting) => waiting.id)).toEqual(["plan"]);
+});
+
+test("a run that stops waiting, by answer or by finishing, is reported by nobody", () => {
+  const asking = tree({ id: "plan", ask: {} });
+
+  expect(newlyBlocked(asking, tree({ id: "plan" }))).toEqual([]);
+  expect(newlyBlocked(asking, tree({ id: "plan", status: "done" }))).toEqual([]);
+});
+
+test("two runs blocking on one tick are reported separately, however deep they sit", () => {
+  const before = tree({ id: "work", children: [{ id: "plan" }, { id: "review" }] });
+  const after = tree({
+    id: "work",
+    children: [{ id: "plan", ask: {} }, { id: "review", children: [{ id: "notes", auth: {} }] }],
+  });
+
+  expect(newlyBlocked(before, after).map((waiting) => waiting.id)).toEqual(["plan", "notes"]);
+});
+
+test("the notice names the run and says what it waits on", () => {
+  expect(needsYouNotice(run({ id: "plan", auth: { role: "jira" } }))).toEqual({
+    title: "plan needs you",
+    body: "Waiting on jira credentials",
+  });
+  expect(needsYouNotice(run({ id: "plan", ask: { problem: "not a number" } }))?.body).toBe(
+    "not a number",
+  );
+  expect(needsYouNotice(run({ id: "plan" }))).toBeUndefined();
+});
+
+test("a long or many-lined question is flattened to one capped line", () => {
+  const asked = needsYouNotice(run({ id: "plan", ask: { prompt: "pick one:\n  a\n  b" } }));
+  expect(asked?.body).toBe("pick one: a b");
+
+  const long = needsYouNotice(run({ id: "plan", ask: { prompt: "x".repeat(400) } }));
+  expect(long?.body).toHaveLength(200);
+  expect(long?.body.endsWith("\u2026")).toBe(true);
 });

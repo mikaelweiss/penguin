@@ -26,6 +26,7 @@ import { useConfig } from "@/hooks/use-config";
 import { useDirectories } from "@/hooks/use-directories";
 import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
+import { useNeedsYou } from "@/hooks/use-needs-you";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
 import { useRunTree } from "@/hooks/use-run-tree";
@@ -44,7 +45,7 @@ type Starting = {
 export function App() {
   useWindowBackground();
   const directories = useDirectories();
-  const { projects, error } = useRuns(directories.dirs);
+  const { projects, published, error } = useRuns(directories.dirs);
   const inbox = useInbox();
   const actions = useRunActions();
   const config = useConfig();
@@ -72,6 +73,7 @@ export function App() {
     clearFollow();
     show(id);
   };
+  useNeedsYou(projects, published, select);
 
   const hasRun = run !== undefined;
   useEffect(() => {

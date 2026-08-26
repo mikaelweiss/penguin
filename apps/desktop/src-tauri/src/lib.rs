@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use tauri::path::BaseDirectory;
 use tauri::window::Color;
-use tauri::{Manager, Theme};
+use tauri::{Emitter, Manager, Theme};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -676,6 +676,46 @@ fn died(file: &str, log: &Path) -> String {
     }
 }
 
+/// The run ids whose notification is still on screen, so one run never stacks two.
+struct Notices(Mutex<HashSet<String>>);
+
+impl Notices {
+    fn claim(&self, id: &str) -> bool {
+        match self.0.lock() {
+            Ok(mut held) => held.insert(id.to_string()),
+            Err(_) => false,
+        }
+    }
+
+    fn release(&self, id: &str) {
+        if let Ok(mut held) = self.0.lock() {
+            held.remove(id);
+        }
+    }
+}
+
+/// Carries the run id of the notification that was clicked.
+const NEEDS_YOU_CLICK: &str = "needs-you-click";
+
+/// Posts a notification for a waiting run. It takes a thread of its own because macOS only
+/// sends the notification while something waits on the response, and that wait blocks.
+#[tauri::command]
+fn notify_needs_you(app: tauri::AppHandle, id: String, title: String, body: String) {
+    if !app.state::<Notices>().claim(&id) {
+        return;
+    }
+    std::thread::spawn(move || {
+        if let Ok(handle) = notify_rust::Notification::new().summary(&title).body(&body).show() {
+            let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
+                if response.is_default_action() {
+                    let _ = app.emit(NEEDS_YOU_CLICK, &id);
+                }
+            });
+        }
+        app.state::<Notices>().release(&id);
+    });
+}
+
 /// Matches `--background` in `packages/ui/src/styles/globals.css`.
 const LIGHT_BACKGROUND: Color = Color(0xff, 0xff, 0xff, 0xff);
 const DARK_BACKGROUND: Color = Color(0x0a, 0x0a, 0x0a, 0xff);
@@ -694,6 +734,17 @@ pub fn run() {
             };
             window.set_background_color(Some(background))?;
 
+            #[cfg(target_os = "macos")]
+            {
+                // Dev has no bundle of its own, so the notification goes out under Terminal's.
+                let sender = if tauri::is_dev() {
+                    "com.apple.Terminal"
+                } else {
+                    app.config().identifier.as_str()
+                };
+                let _ = notify_rust::set_application(sender);
+            }
+
             let waiting = window.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(SHOW_DEADLINE);
@@ -706,6 +757,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(TerminalHostState(Mutex::new(None)))
+        .manage(Notices(Mutex::new(HashSet::new())))
         .invoke_handler(tauri::generate_handler![
             read_runs,
             append_inbox,
@@ -724,7 +776,8 @@ pub fn run() {
             read_config,
             write_config,
             store_auth_secret,
-            terminal_host
+            terminal_host,
+            notify_needs_you
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -749,6 +802,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("penguin-test-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn a_run_is_notified_about_once_at_a_time() {
+        let notices = Notices(Mutex::new(HashSet::new()));
+        assert!(notices.claim("r"));
+        assert!(!notices.claim("r"));
+    }
+
+    #[test]
+    fn a_finished_notification_lets_the_run_be_notified_about_again() {
+        let notices = Notices(Mutex::new(HashSet::new()));
+        assert!(notices.claim("r"));
+        notices.release("r");
+        assert!(notices.claim("r"));
     }
 
     #[test]

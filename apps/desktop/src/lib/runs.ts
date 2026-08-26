@@ -103,6 +103,54 @@ export function needsYou(run: Run): boolean {
   return run.ask !== undefined || run.auth !== undefined;
 }
 
+/** What the run waits on, changing whenever the call on the person is a new one. */
+export function blockedOn(run: Run): string | undefined {
+  if (run.auth !== undefined) return `auth:${run.auth.role}:${run.auth.at}`;
+  if (run.ask !== undefined) return `ask:${run.ask.prompt}:${run.ask.problem ?? ""}`;
+  return undefined;
+}
+
+function blockedBy(projects: Project[]): Map<string, string> {
+  const signatures = new Map<string, string>();
+  for (const project of projects) {
+    for (const row of visibleRuns(project, { collapsed: new Set(), showFinished: true })) {
+      const signature = blockedOn(row.run);
+      if (signature !== undefined) signatures.set(row.run.id, signature);
+    }
+  }
+  return signatures;
+}
+
+/** The runs that started waiting on a person this tick, a re-ask counting as a fresh one. */
+export function newlyBlocked(before: Project[], after: Project[]): Run[] {
+  const was = blockedBy(before);
+  const started: Run[] = [];
+  for (const project of after) {
+    for (const row of visibleRuns(project, { collapsed: new Set(), showFinished: true })) {
+      const signature = blockedOn(row.run);
+      if (signature !== undefined && was.get(row.run.id) !== signature) started.push(row.run);
+    }
+  }
+  return started;
+}
+
+const NOTICE_LIMIT = 200;
+
+function oneLine(said: string): string {
+  const flat = said.replace(/\s+/g, " ").trim();
+  return flat.length <= NOTICE_LIMIT ? flat : `${flat.slice(0, NOTICE_LIMIT - 1).trimEnd()}…`;
+}
+
+/** What the desktop notification for a waiting run says. */
+export function needsYouNotice(run: Run): { title: string; body: string } | undefined {
+  const said =
+    run.auth !== undefined
+      ? `Waiting on ${run.auth.role} credentials`
+      : (run.ask?.problem ?? run.ask?.prompt);
+  if (said === undefined) return undefined;
+  return { title: `${run.name} needs you`, body: oneLine(said) };
+}
+
 export function findBlocked(run: Run): { expand: string[]; blocked: Run } | undefined {
   for (const child of run.children) {
     if (needsYou(child)) return { expand: [run.id], blocked: child };
