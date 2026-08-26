@@ -36,8 +36,13 @@ export default workflow({
     });
     if (!worked.done) return { landed: false, sha: "", reason: "the work never started" };
 
-    // The hold is where the person tries the code, so they try it as it will land.
-    const rebased = await call(ctx, rebase, { base: params.onto, dir: worked.path });
+    // The hold is where the person tries the code, so they try it on what it lands on: the
+    // branch this clone holds, which carries every commit an earlier run landed and never pushed.
+    const rebased = await call(ctx, rebase, {
+      base: params.onto,
+      local: true,
+      dir: worked.path,
+    });
     if (!rebased.rebased) return { landed: false, sha: "", reason: rebased.reason };
 
     for (;;) {
