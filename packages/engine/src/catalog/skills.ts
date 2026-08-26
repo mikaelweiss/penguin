@@ -88,13 +88,22 @@ export function readSkill(dir: string): Skill {
 
 function scan(dir: string, scope: catalogs.CatalogScope): SkillFound[] {
   if (!fs.existsSync(dir)) return [];
-  return fs
+  const names = fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .sort()
-    .map((name) => {
-      const skill = readSkill(path.join(dir, name));
-      return { name: skill.name, description: skill.description, scope, dir: skill.dir };
-    });
+    .sort();
+  const found: SkillFound[] = [];
+  for (const name of names) {
+    let skill;
+    try {
+      skill = readSkill(path.join(dir, name));
+    } catch (error) {
+      // A branch is free to be half written. Its broken folder must not fail every run in the project.
+      if (scope !== "worktree") throw error;
+      continue;
+    }
+    found.push({ name: skill.name, description: skill.description, scope, dir: skill.dir });
+  }
+  return found;
 }

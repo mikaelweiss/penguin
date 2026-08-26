@@ -126,3 +126,16 @@ test("a role only one worktree supplies installs from the branch", async () => {
   expect(found.map((entry) => entry.name)).toEqual(["git", "ruff"]);
   expect(found[1]?.scope).toBe("worktree");
 });
+
+test("a branch's half-written adapter is skipped, never fatal for the project", async () => {
+  const branch = catalogWith("worktree", "fmt", "ruff", "feature");
+  fs.writeFileSync(path.join(branch.dir, "adapters", "wip.ts"), "export default 5;");
+  const found = await installedIn([catalogWith("project", "vcs", "git"), branch]);
+  expect(found.map((entry) => entry.name)).toEqual(["git", "ruff"]);
+});
+
+test("a half-written adapter in a catalog of one's own still refuses to load", async () => {
+  const project = catalogWith("project", "vcs", "git");
+  fs.writeFileSync(path.join(project.dir, "adapters", "wip.ts"), "export default 5;");
+  await expect(installedIn([project])).rejects.toThrow(/does not default-export an adapter/);
+});

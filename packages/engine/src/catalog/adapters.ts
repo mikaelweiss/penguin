@@ -108,7 +108,14 @@ async function scan(dir: string, scope: catalogs.CatalogScope): Promise<AdapterF
   const found: AdapterFound[] = [];
   for (const name of names) {
     const file = path.join(dir, name);
-    const definition = await loadAdapter(file);
+    let definition;
+    try {
+      definition = await loadAdapter(file);
+    } catch (error) {
+      // A branch is free to be half written. Its broken file must not fail every run in the project.
+      if (scope !== "worktree") throw error;
+      continue;
+    }
     found.push({
       role: definition.role,
       name: definition.name,

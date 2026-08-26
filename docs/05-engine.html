@@ -213,7 +213,9 @@ return definition.run(ctx);</code></pre>
       siblings. A checkout with no <code>.penguin</code> folder is skipped, and cwd's own catalog is
       never listed twice. A branch may only add a name, never take one over: a worktree adapter is
       dropped unless it is the one and only claim on its role, and a worktree skill is dropped when
-      any other catalog supplies that name. Workflows list one row per file, so a branch's
+      any other catalog supplies that name. A branch is free to be half written: a file there that
+      refuses to load is skipped, where the same file in the project's own catalog still throws.
+      Workflows list one row per file, so a branch's
       <code>ship</code> appears beside the project's, and the run's directory stays the project it
       started from.
     </p>

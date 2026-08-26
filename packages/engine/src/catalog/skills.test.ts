@@ -79,3 +79,10 @@ test("a worktree skill never shadows a name a non-worktree catalog supplies", ()
   expect(found).toHaveLength(1);
   expect(found[0]?.description).toBe("the builtin one");
 });
+
+test("a branch's half-written skill is skipped, never fatal for the project", () => {
+  const project = catalogWith({ greet: skillMd("greet") });
+  const branch = catalogWith({ ship: skillMd("ship") }, "worktree");
+  fs.mkdirSync(path.join(branch.dir, "skills", "half"), { recursive: true });
+  expect(skillsIn([project, branch]).map((entry) => entry.name)).toEqual(["greet", "ship"]);
+});
