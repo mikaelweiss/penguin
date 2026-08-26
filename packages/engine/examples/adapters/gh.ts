@@ -139,6 +139,29 @@ export function changedBetween(last: Watched, snap: Watched, me: string): Change
   return found;
 }
 
+/** The head a ref points at, each time it changes. The first poll is only a baseline. */
+export function movesOf(
+  read: () => Promise<string>,
+  rest: () => Promise<void>,
+): { next(): Promise<{ sha: string }> } {
+  let last: string | undefined;
+  return {
+    async next(): Promise<{ sha: string }> {
+      for (;;) {
+        try {
+          const sha = await read();
+          const news = last !== undefined && sha !== last;
+          last = sha;
+          if (news) return { sha };
+        } catch {
+          // The next poll tries again. A watch has nowhere to report a passing failure.
+        }
+        await rest();
+      }
+    },
+  };
+}
+
 function rested(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -160,7 +183,8 @@ function reasonOf(done: CommandResult): string {
 export default adapter({
   role: "github",
   name: "gh",
-  description: "GitHub issues and pull requests through the gh CLI, under your own login",
+  description:
+    "GitHub issues, pull requests, and branch heads through the gh CLI, under your own login",
   build: (host) => {
     async function gh(
       args: string[],
@@ -174,6 +198,27 @@ export default adapter({
     }
 
     return {
+      branch: {
+        /** A handle, not a snapshot, so the trace never replays a poll. A failed poll retries quietly. */
+        moved(branch: string): { next(): Promise<{ sha: string }> } {
+          return movesOf(
+            async () => {
+              // gh resolves {owner} and {repo} from the checkout, so the watch needs no url parsing.
+              const done = await gh([
+                "api",
+                `repos/{owner}/{repo}/git/ref/heads/${branch}`,
+                "-q",
+                ".object.sha",
+              ]);
+              if (done.code !== 0) throw new Error(reasonOf(done));
+              const sha = done.stdout.trim();
+              if (sha === "") throw new Error(`origin names no head for ${branch}`);
+              return sha;
+            },
+            () => rested(POLL_MS),
+          );
+        },
+      },
       issue: {
         async get(ref: string): Promise<{ ok: boolean; issue: Issue | null; reason: string }> {
           const done = await gh(["issue", "view", ref, "--json", ISSUE_FIELDS]);

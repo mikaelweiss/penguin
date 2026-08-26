@@ -47,6 +47,8 @@ const Assessment = z.object({
 
 type Assessment = z.infer<typeof Assessment>;
 
+type Woke = { kind: "change" } | { kind: "said" } | { kind: "moved"; sha: string };
+
 const REVIEWS: Record<string, string> = {
   APPROVED: "approved it",
   CHANGES_REQUESTED: "asked for changes",
@@ -122,6 +124,12 @@ export default workflow({
     // A branch that is its own base has nothing to sit on, and force-pushing it would be a footgun.
     const rebasing = head.branch !== base;
 
+    // The baseline poll fires here, not at the watch: a whole agent turn plus pr.create sits
+    // between the first push and the watch, and a move in that window would go unseen.
+    let ahead = "";
+    const based = rebasing ? github.branch.moved(base) : undefined;
+    let moving = based?.next();
+
     let fixer = "";
 
     /**
@@ -175,6 +183,29 @@ export default workflow({
         if (answer.retry) continue;
         if (!(await again(`The branch did not reach the remote: ${answer.reason}`))) return false;
       }
+    }
+
+    /**
+     * The branch back onto a base that moved under it. A base that moved once will move again, so
+     * every way this ends leaves the watch open, unlike pushed(), which ends the run on stop.
+     */
+    async function followed(): Promise<void> {
+      const landed = await call(ctx, rebase, { base });
+      if (!landed.rebased) {
+        await view.show(`The rebase onto the new ${base} failed: ${landed.reason}`);
+        return;
+      }
+      // Same abbreviation on both, so equal shas mean the branch has no commits of its own left.
+      if (landed.sha === landed.base) {
+        await view.show(`${head.branch} has nothing over ${base}, so nothing goes up`);
+        return;
+      }
+      const sent = await vcs.push(head.branch, { force: true });
+      if (!sent.ok) {
+        await view.show(`${head.branch} did not reach the remote: ${sent.reason}`);
+        return;
+      }
+      await view.show(`${head.branch} is up on the new ${base}`);
     }
 
     // The pull request reads the remote, so every local change goes up before it is asked for.
@@ -309,6 +340,33 @@ export default workflow({
 
     try {
       for (;;) {
+        // Ahead of the feedback round, so an agent assessing feedback reads a branch that
+        // already sits on the base it will land on.
+        if (ahead !== "" && !paused) {
+          // The base moving is also what a merge of this pull request looks like, so what to do
+          // with the move turns on a read of the pull request as it stands right now.
+          const now = await github.pr.get(pr.url);
+          if (!now.ok || now.pr === null) {
+            ahead = "";
+            await view.show(`${base} moved, but PR #${pr.number} did not read: ${now.reason}`);
+            continue;
+          }
+          if (now.pr.state !== "OPEN") {
+            state = now.pr.state;
+            await view.show(`PR #${pr.number} is ${now.pr.state}`);
+            break;
+          }
+          if (now.pr.isInMergeQueue) {
+            // The move is held, not dropped, so leaving the queue is what acts on it.
+            paused = true;
+            await view.show(`PR #${pr.number} is queued to merge, so the move on ${base} holds`);
+            continue;
+          }
+          ahead = "";
+          await followed();
+          continue;
+        }
+
         if (pending.length > 0 && !inDraft && !paused) {
           rounds += 1;
           await view.show(`feedback round ${rounds}`);
@@ -319,14 +377,21 @@ export default workflow({
         }
 
         await view.status(`watching PR #${pr.number}`, { idle: true });
-        const first = listening
-          ? await Promise.race([
-              inbound.then(() => "change" as const),
-              heard.then(() => "said" as const),
-            ])
-          : await inbound.then(() => "change" as const);
+        const arms: Promise<Woke>[] = [inbound.then(() => ({ kind: "change" }) as const)];
+        if (listening) arms.push(heard.then(() => ({ kind: "said" }) as const));
+        if (moving !== undefined) {
+          arms.push(moving.then((move) => ({ kind: "moved", sha: move.sha }) as const));
+        }
+        const first = await Promise.race(arms);
 
-        if (first === "said") {
+        if (first.kind === "moved") {
+          // Re-armed now, so the poll keeps running through the gate and the rebase it leads to.
+          moving = based?.next();
+          ahead = first.sha;
+          continue;
+        }
+
+        if (first.kind === "said") {
           const message = await heard;
           if (message.done === true) {
             listening = false;

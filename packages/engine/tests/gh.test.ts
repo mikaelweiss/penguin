@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { changedBetween } from "../examples/adapters/gh.ts";
+import { changedBetween, movesOf } from "../examples/adapters/gh.ts";
 
 const ME = "mikael";
 
@@ -77,4 +77,52 @@ test("a merge closes the pull request and reports the state it landed in", () =>
     { kind: "closed", state: "MERGED" },
     { kind: "commits" },
   ]);
+});
+
+/** A poll that hands back one step per read. A read past the last step never settles. */
+function polling(steps: (string | Error)[]): {
+  read: () => Promise<string>;
+  rest: () => Promise<void>;
+  reads: () => number;
+  rests: () => number;
+} {
+  let taken = 0;
+  let rested = 0;
+  return {
+    read: () => {
+      const step = steps[taken++];
+      if (step === undefined) return new Promise<string>(() => {});
+      if (step instanceof Error) return Promise.reject(step);
+      return Promise.resolve(step);
+    },
+    rest: () => {
+      rested += 1;
+      return Promise.resolve();
+    },
+    reads: () => taken,
+    rests: () => rested,
+  };
+}
+
+test("the first poll is only a baseline, and the head it settles on is not a move", async () => {
+  const poll = polling(["abc", "abc", "def"]);
+  const moves = movesOf(poll.read, poll.rest);
+  expect(await moves.next()).toEqual({ sha: "def" });
+  expect(poll.reads()).toBe(3);
+  expect(poll.rests()).toBe(2);
+});
+
+test("a head already reported is never reported twice", async () => {
+  const poll = polling(["abc", "def", "def", "ghi"]);
+  const moves = movesOf(poll.read, poll.rest);
+  expect(await moves.next()).toEqual({ sha: "def" });
+  expect(await moves.next()).toEqual({ sha: "ghi" });
+  expect(poll.reads()).toBe(4);
+});
+
+test("a poll the branch cannot be read on reports nothing and keeps watching", async () => {
+  const poll = polling([new Error("origin names no head for main"), "abc", "def"]);
+  const moves = movesOf(poll.read, poll.rest);
+  expect(await moves.next()).toEqual({ sha: "def" });
+  expect(poll.reads()).toBe(3);
 });
