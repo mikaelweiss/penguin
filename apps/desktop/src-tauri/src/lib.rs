@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -676,24 +676,6 @@ fn died(file: &str, log: &Path) -> String {
     }
 }
 
-/// The run ids whose notification is still on screen, so one run never stacks two.
-struct Notices(Mutex<HashSet<String>>);
-
-impl Notices {
-    fn claim(&self, id: &str) -> bool {
-        match self.0.lock() {
-            Ok(mut held) => held.insert(id.to_string()),
-            Err(_) => false,
-        }
-    }
-
-    fn release(&self, id: &str) {
-        if let Ok(mut held) = self.0.lock() {
-            held.remove(id);
-        }
-    }
-}
-
 /// Carries the run id of the notification that was clicked.
 const NEEDS_YOU_CLICK: &str = "needs-you-click";
 
@@ -708,13 +690,10 @@ fn opens_the_run(response: &notify_rust::NotificationResponse) -> bool {
     }
 }
 
-/// Posts a notification for a waiting run. It takes a thread of its own because macOS only
-/// sends the notification while something waits on the response, and that wait blocks.
+/// Posts a notification for a waiting run. Its thread lives until the person acts on the
+/// notification or clears it, because macOS only sends one while something waits on the response.
 #[tauri::command]
 fn notify_needs_you(app: tauri::AppHandle, id: String, title: String, body: String) {
-    if !app.state::<Notices>().claim(&id) {
-        return;
-    }
     std::thread::spawn(move || {
         let sent = notify_rust::Notification::new()
             .summary(&title)
@@ -728,7 +707,6 @@ fn notify_needs_you(app: tauri::AppHandle, id: String, title: String, body: Stri
                 }
             });
         }
-        app.state::<Notices>().release(&id);
     });
 }
 
@@ -773,7 +751,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(TerminalHostState(Mutex::new(None)))
-        .manage(Notices(Mutex::new(HashSet::new())))
         .invoke_handler(tauri::generate_handler![
             read_runs,
             append_inbox,
@@ -828,21 +805,6 @@ mod tests {
         assert!(opens_the_run(&NotificationResponse::Action(OPEN_ACTION.into())));
         assert!(!opens_the_run(&NotificationResponse::Action("snooze".into())));
         assert!(!opens_the_run(&NotificationResponse::Closed(CloseReason::Expired)));
-    }
-
-    #[test]
-    fn a_run_is_notified_about_once_at_a_time() {
-        let notices = Notices(Mutex::new(HashSet::new()));
-        assert!(notices.claim("r"));
-        assert!(!notices.claim("r"));
-    }
-
-    #[test]
-    fn a_finished_notification_lets_the_run_be_notified_about_again() {
-        let notices = Notices(Mutex::new(HashSet::new()));
-        assert!(notices.claim("r"));
-        notices.release("r");
-        assert!(notices.claim("r"));
     }
 
     #[test]
