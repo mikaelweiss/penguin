@@ -13,7 +13,7 @@ export default workflow({
       .meta({ multiline: true }),
     base: z
       .string()
-      .default("")
+      .default("main")
       .describe(
         "the branch the work starts from and the pull request lands on, empty to take the one origin calls default",
       ),

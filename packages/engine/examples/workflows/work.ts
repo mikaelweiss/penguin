@@ -30,7 +30,7 @@ export default workflow({
       .meta({ multiline: true }),
     base: z
       .string()
-      .default("")
+      .default("main")
       .describe("the branch the work starts from, empty to take the one origin calls default"),
     rounds: z
       .number()

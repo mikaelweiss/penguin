@@ -18,7 +18,7 @@ export default workflow({
   params: z.object({
     base: z
       .string()
-      .default("")
+      .default("main")
       .describe("the branch it rebases onto, empty to take the one origin calls default"),
     /** The base lives only in this clone, so the branch lands on the branch and not on origin's copy. */
     local: z.boolean().default(false).meta({ internal: true }),

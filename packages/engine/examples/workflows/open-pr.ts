@@ -78,7 +78,7 @@ export default workflow({
   params: z.object({
     base: z
       .string()
-      .default("")
+      .default("main")
       .describe("the branch the pull request lands on, empty to take the one origin calls default"),
     fixes: z.number().int().min(1).default(3).meta({ internal: true }),
   }),
