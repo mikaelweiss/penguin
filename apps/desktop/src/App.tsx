@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
+import { FileDiffIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
 import { Button } from "@workspace/ui/components/button";
@@ -10,10 +10,17 @@ import {
 } from "@workspace/ui/components/resizable";
 import { Separator } from "@workspace/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/sidebar";
-import { TooltipProvider } from "@workspace/ui/components/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@workspace/ui/components/tooltip";
 
 import { AppSettingsDialog } from "@/components/app-settings-dialog";
 import { CommandPalette } from "@/components/command-palette";
+import { DiffPanel } from "@/components/diff-panel";
+import { DiffWorkerPool } from "@/components/diff-worker-pool";
 import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { RunAuth } from "@/components/run-auth";
@@ -28,6 +35,7 @@ import { useDirectories } from "@/hooks/use-directories";
 import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
 import { useNeedsYou } from "@/hooks/use-needs-you";
+import { PANEL_DEFAULTS, PANEL_MINIMUMS, usePanels } from "@/hooks/use-panels";
 import { useRemoveProject } from "@/hooks/use-remove-project";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
@@ -58,20 +66,21 @@ export function App() {
   const [settingProject, setSettingProject] = useState<Project | undefined>(undefined);
   const [appSettings, setAppSettings] = useState(false);
   const [palette, setPalette] = useState(false);
-  const [terminal, setTerminal] = useState(false);
-  const [terminalFull, setTerminalFull] = useState(false);
   const index = useWorkflowIndex(projects, palette);
   const selected = findRun(projects, selectedId);
   const run = selected?.run;
-  const showTerminal = terminal && run !== undefined;
-  const fullTerminal = terminalFull && showTerminal;
+  const panels = usePanels(run?.id);
+  const showTerminal = panels.open("terminal") && run !== undefined;
+  const showDiff = panels.open("diff") && run !== undefined;
+  const fullTerminal = panels.full === "terminal" && showTerminal;
+  const fullDiff = panels.full === "diff" && showDiff;
 
   const show = (id: string) => {
     const node = findRun(projects, id);
     if (node !== undefined) tree.reveal(node);
     setSelectedId(id);
   };
-  const clearFollow = useFollow(projects, selectedId, fullTerminal, show);
+  const clearFollow = useFollow(projects, selectedId, fullTerminal || fullDiff, show);
   const select = (id: string) => {
     clearFollow();
     show(id);
@@ -79,14 +88,12 @@ export function App() {
   useNeedsYou(projects, published, select);
 
   const hasRun = run !== undefined;
+  const { toggle } = panels;
   useEffect(() => {
     const open = (event: KeyboardEvent) => {
       if (event.ctrlKey && !event.metaKey && event.key === "/") {
         event.preventDefault();
-        if (hasRun) {
-          setTerminal((showing) => !showing);
-          setTerminalFull(false);
-        }
+        if (hasRun) toggle("terminal");
         return;
       }
       if (!event.metaKey) return;
@@ -100,7 +107,9 @@ export function App() {
     };
     window.addEventListener("keydown", open);
     return () => window.removeEventListener("keydown", open);
-  }, [hasRun]);
+  }, [hasRun, toggle]);
+
+  const wrote = run === undefined ? 0 : run.output.length;
 
   return (
     <TooltipProvider delayDuration={2000} skipDelayDuration={0}>
@@ -167,16 +176,22 @@ export function App() {
               </div>
             ) : null}
             <span className="flex-1" />
-            <Button
-              variant={terminal ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label="Toggle terminal"
-              aria-pressed={terminal}
+            <PanelButton
+              label="Toggle diff"
+              showing={showDiff}
               disabled={run === undefined}
-              onClick={() => setTerminal((showing) => !showing)}
+              onClick={() => panels.toggle("diff")}
+            >
+              <FileDiffIcon />
+            </PanelButton>
+            <PanelButton
+              label="Toggle terminal"
+              showing={showTerminal}
+              disabled={run === undefined}
+              onClick={() => panels.toggle("terminal")}
             >
               <SquareTerminalIcon />
-            </Button>
+            </PanelButton>
           </header>
           {error ? (
             <Alert variant="destructive" className="m-4 w-auto">
@@ -185,42 +200,86 @@ export function App() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : (
-            <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+            <ResizablePanelGroup
+              orientation="vertical"
+              className="min-h-0 flex-1"
+              onLayoutChanged={panels.onDragged}
+            >
               {fullTerminal ? null : (
-                <ResizablePanel key="output" minSize={160} className="flex min-h-0 flex-col">
-                  <RunTranscript
-                    run={run}
-                    sent={run === undefined ? [] : (inbox.sent[run.id] ?? [])}
-                  />
-                  {run?.auth !== undefined ? (
-                    <RunAuth key={`${run.id}:${run.auth.at}`} auth={run.auth} />
-                  ) : run !== undefined && (run.ask !== undefined || run.listening) ? (
-                    <RunComposer
-                      key={`${run.id}:${run.ask?.prompt ?? ""}`}
-                      run={run}
-                      error={inbox.error}
-                      onSend={(entry, files) => inbox.send(run.id, entry, files)}
-                    />
-                  ) : null}
+                <ResizablePanel
+                  key="work"
+                  id="work"
+                  minSize={PANEL_MINIMUMS.output}
+                  className="flex min-h-0 flex-col"
+                >
+                  <ResizablePanelGroup
+                    orientation="horizontal"
+                    className="min-h-0 flex-1"
+                    onLayoutChanged={panels.onDragged}
+                  >
+                    {fullDiff ? null : (
+                      <ResizablePanel
+                        key="output"
+                        id="output"
+                        minSize={PANEL_MINIMUMS.output}
+                        className="flex min-h-0 flex-col"
+                      >
+                        <RunTranscript
+                          run={run}
+                          sent={run === undefined ? [] : (inbox.sent[run.id] ?? [])}
+                        />
+                        {run?.auth !== undefined ? (
+                          <RunAuth key={`${run.id}:${run.auth.at}`} auth={run.auth} />
+                        ) : run !== undefined && (run.ask !== undefined || run.listening) ? (
+                          <RunComposer
+                            key={`${run.id}:${run.ask?.prompt ?? ""}`}
+                            run={run}
+                            error={inbox.error}
+                            onSend={(entry, files) => inbox.send(run.id, entry, files)}
+                          />
+                        ) : null}
+                      </ResizablePanel>
+                    )}
+                    {showDiff && !fullDiff ? <ResizableHandle key="right-handle" /> : null}
+                    {showDiff ? (
+                      <ResizablePanel
+                        key="right"
+                        id="right"
+                        panelRef={panels.rightRef}
+                        defaultSize={PANEL_DEFAULTS.right}
+                        minSize={PANEL_MINIMUMS.right}
+                        className="flex min-h-0 min-w-0 flex-col"
+                      >
+                        <DiffWorkerPool>
+                          <DiffPanel
+                            dir={run.dir}
+                            wrote={wrote}
+                            full={fullDiff}
+                            onToggleFull={() => panels.toggleFull("diff")}
+                            onClose={() => panels.close("diff")}
+                          />
+                        </DiffWorkerPool>
+                      </ResizablePanel>
+                    ) : null}
+                  </ResizablePanelGroup>
                 </ResizablePanel>
               )}
-              {showTerminal && !fullTerminal ? <ResizableHandle key="handle" /> : null}
+              {showTerminal && !fullTerminal ? <ResizableHandle key="work-handle" /> : null}
               {showTerminal ? (
                 <ResizablePanel
                   key="terminal"
-                  defaultSize={224}
-                  minSize={120}
+                  id="terminal"
+                  panelRef={panels.terminalRef}
+                  defaultSize={PANEL_DEFAULTS.terminal}
+                  minSize={PANEL_MINIMUMS.terminal}
                   className="flex min-h-0 flex-col"
                 >
                   <TerminalPanel
                     runId={run.id}
                     dir={run.dir}
                     full={fullTerminal}
-                    onToggleFull={() => setTerminalFull((filling) => !filling)}
-                    onClose={() => {
-                      setTerminal(false);
-                      setTerminalFull(false);
-                    }}
+                    onToggleFull={() => panels.toggleFull("terminal")}
+                    onClose={() => panels.close("terminal")}
                   />
                 </ResizablePanel>
               ) : null}
@@ -229,5 +288,37 @@ export function App() {
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
+  );
+}
+
+function PanelButton({
+  label,
+  showing,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  showing: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant={showing ? "secondary" : "ghost"}
+          size="icon-sm"
+          aria-label={label}
+          aria-pressed={showing}
+          disabled={disabled}
+          onClick={onClick}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

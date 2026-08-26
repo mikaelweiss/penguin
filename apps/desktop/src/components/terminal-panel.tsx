@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 
-import { Button } from "@workspace/ui/components/button";
 import { GhosttyTerminalSurface } from "@workspace/terminal/surface";
 
+import { PanelChrome } from "@/components/panel-chrome";
 import { useDark } from "@/hooks/use-dark";
 import { terminalTheme } from "@/lib/terminal-theme";
 
@@ -150,28 +149,22 @@ export function TerminalPanel({
   }, [dark]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-muted/50 px-3">
-        <span className="truncate text-xs font-medium text-muted-foreground">
-          Terminal · <span className="font-mono">{dir}</span>
-        </span>
-        {error !== undefined ? (
-          <span className="truncate text-xs text-destructive">{error}</span>
-        ) : null}
-        <span className="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={full ? "Leave full screen" : "Full screen"}
-          onClick={onToggleFull}
-        >
-          {full ? <Minimize2Icon /> : <Maximize2Icon />}
-        </Button>
-        <Button variant="ghost" size="icon-xs" aria-label="Close terminal" onClick={onClose}>
-          <XIcon />
-        </Button>
-      </div>
+    <PanelChrome
+      name="terminal"
+      full={full}
+      onToggleFull={onToggleFull}
+      onClose={onClose}
+      title={
+        <>
+          <span className="shrink-0">Terminal</span>
+          <span className="truncate font-mono">{dir}</span>
+          {error !== undefined ? (
+            <span className="truncate text-destructive">{error}</span>
+          ) : null}
+        </>
+      }
+    >
       <div ref={mountRef} className="relative min-h-0 flex-1 bg-background" />
-    </div>
+    </PanelChrome>
   );
 }

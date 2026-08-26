@@ -424,6 +424,125 @@ fn project_root(dir: String) -> String {
     }
 }
 
+/// A byte ceiling on one run's patch. One committed lockfile should not drown the panel.
+const DIFF_MAX_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunDiff {
+    patch: String,
+    base: String,
+    truncated: bool,
+}
+
+fn git(dir: &str, args: &[&str]) -> Option<(i32, String)> {
+    let done = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    let code = done.status.code()?;
+    Some((code, String::from_utf8_lossy(&done.stdout).into_owned()))
+}
+
+fn git_line(dir: &str, args: &[&str]) -> Option<String> {
+    let (code, out) = git(dir, args)?;
+    if code != 0 {
+        return None;
+    }
+    let line = out.trim().to_string();
+    if line.is_empty() { None } else { Some(line) }
+}
+
+/// True when dir is a linked worktree, whose own gitdir sits inside the repository's common one.
+fn is_worktree(dir: &str) -> bool {
+    let own = git_line(dir, &["rev-parse", "--absolute-git-dir"]);
+    let common = git_line(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    match (own, common) {
+        (Some(own), Some(common)) => own != common,
+        _ => false,
+    }
+}
+
+/// What origin calls default, as a remote ref. An unset origin/HEAD answers none, never a guess.
+fn default_branch(dir: &str) -> Option<String> {
+    git_line(dir, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+}
+
+/// Untracked files are absent from git diff, so each one is diffed against nothing by hand.
+fn untracked_patch(dir: &str, room: usize) -> String {
+    let Some(listed) = git_line(dir, &["ls-files", "--others", "--exclude-standard", "-z"]) else {
+        return String::new();
+    };
+    let mut patch = String::new();
+    for path in listed.split('\0').filter(|path| !path.is_empty()) {
+        if patch.len() >= room {
+            break;
+        }
+        // A difference exits 1 here, which is the answer, not a failure.
+        let Some((_, out)) = git(
+            dir,
+            &[
+                "diff",
+                "--no-index",
+                "--patch",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--minimal",
+                "--",
+                "/dev/null",
+                path,
+            ],
+        ) else {
+            continue;
+        };
+        patch.push_str(&out);
+    }
+    patch
+}
+
+/// Everything the run changed in dir. A worktree reads from where it forked, a checkout from HEAD.
+#[tauri::command]
+fn run_diff(dir: String) -> Result<Option<RunDiff>, String> {
+    if git_line(&dir, &["rev-parse", "--show-toplevel"]).is_none() {
+        return Ok(None);
+    }
+    let forked = if is_worktree(&dir) { default_branch(&dir) } else { None };
+    let base = forked.clone().unwrap_or_else(|| "HEAD".into());
+    let mut against: Vec<&str> = vec![
+        "diff",
+        "--patch",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--minimal",
+    ];
+    match forked.as_deref() {
+        Some(branch) => {
+            against.push("--merge-base");
+            against.push(branch);
+        }
+        None => against.push("HEAD"),
+    }
+    against.push("--");
+    let tracked = git(&dir, &against).map(|(_, out)| out).unwrap_or_default();
+    let room = DIFF_MAX_BYTES.saturating_sub(tracked.len());
+    let mut patch = tracked;
+    patch.push_str(&untracked_patch(&dir, room));
+    let truncated = patch.len() > DIFF_MAX_BYTES;
+    if truncated {
+        let mut cut = DIFF_MAX_BYTES;
+        while cut > 0 && !patch.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        patch.truncate(cut);
+    }
+    Ok(Some(RunDiff { patch, base, truncated }))
+}
+
 fn text_of(path: PathBuf) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -827,6 +946,7 @@ pub fn run() {
             read_hidden,
             write_hidden,
             project_root,
+            run_diff,
             describe,
             claim_run,
             discard_run,
@@ -866,6 +986,96 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("penguin-test-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    fn repo(name: &str) -> PathBuf {
+        let dir = temp(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().into_owned();
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "test"],
+        ] {
+            git(&path, &args).unwrap();
+        }
+        std::fs::write(dir.join("kept.txt"), "one\ntwo\n").unwrap();
+        git(&path, &["add", "-A"]).unwrap();
+        git(&path, &["commit", "-qm", "first"]).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_folder_outside_any_repository_has_no_diff_to_read() {
+        let dir = temp("plain");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(run_diff(text_of(dir)).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_clean_checkout_reads_an_empty_patch_against_head() {
+        let dir = repo("clean");
+        let found = run_diff(text_of(dir)).unwrap().unwrap();
+        assert_eq!(found.base, "HEAD");
+        assert_eq!(found.patch, "");
+    }
+
+    #[test]
+    fn an_edit_and_an_untracked_file_both_reach_the_patch() {
+        let dir = repo("dirty");
+        std::fs::write(dir.join("kept.txt"), "one\nthree\n").unwrap();
+        std::fs::write(dir.join("fresh.txt"), "new\n").unwrap();
+        let found = run_diff(text_of(dir)).unwrap().unwrap();
+        assert!(found.patch.contains("kept.txt"), "the edit is missing: {}", found.patch);
+        assert!(found.patch.contains("fresh.txt"), "the new file is missing: {}", found.patch);
+        assert!(found.patch.contains("+three"));
+        assert!(found.patch.contains("+new"));
+    }
+
+    #[test]
+    fn an_ignored_file_stays_out_of_the_patch() {
+        let dir = repo("ignored");
+        std::fs::write(dir.join(".gitignore"), "hidden.txt\n").unwrap();
+        std::fs::write(dir.join("hidden.txt"), "secret\n").unwrap();
+        let found = run_diff(text_of(dir)).unwrap().unwrap();
+        // The ignore file itself is new, so it lands. Only the file it names must stay out.
+        assert!(found.patch.contains("b/.gitignore"), "{}", found.patch);
+        assert!(!found.patch.contains("b/hidden.txt"), "{}", found.patch);
+    }
+
+    #[test]
+    fn a_commit_in_the_checkout_is_left_out_because_head_moved_with_it() {
+        let dir = repo("committed");
+        let path = text_of(dir.clone());
+        std::fs::write(dir.join("kept.txt"), "one\nthree\n").unwrap();
+        git(&path, &["commit", "-qam", "second"]).unwrap();
+        assert_eq!(run_diff(path).unwrap().unwrap().patch, "");
+    }
+
+    #[test]
+    fn a_worktree_reads_from_where_it_forked_so_its_commits_stay_in_the_patch() {
+        let dir = repo("forked");
+        let path = text_of(dir.clone());
+        // A bare clone stands in for origin, so origin/HEAD names a default branch to fork from.
+        let remote = temp("forked-origin");
+        git(&path, &["clone", "-q", "--bare", ".", &text_of(remote.clone())]).unwrap();
+        git(&path, &["remote", "add", "origin", &text_of(remote)]).unwrap();
+        git(&path, &["fetch", "-q", "origin"]).unwrap();
+        git(&path, &["remote", "set-head", "origin", "main"]).unwrap();
+
+        let side = temp("forked-side");
+        git(&path, &["worktree", "add", "-q", "-b", "work", &text_of(side.clone())]).unwrap();
+        let branch = text_of(side.clone());
+        std::fs::write(side.join("kept.txt"), "one\nthree\n").unwrap();
+        git(&branch, &["commit", "-qam", "on the branch"]).unwrap();
+        std::fs::write(side.join("kept.txt"), "one\nfour\n").unwrap();
+
+        let found = run_diff(branch).unwrap().unwrap();
+        assert_eq!(found.base, "origin/main");
+        // The commit and the edit on top of it both measure from the fork, not from HEAD.
+        assert!(found.patch.contains("+four"), "{}", found.patch);
+        assert!(!found.patch.contains("+three"), "{}", found.patch);
+        assert!(found.patch.contains("-two"), "{}", found.patch);
     }
 
     #[test]

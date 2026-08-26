@@ -9,6 +9,13 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
+  // The diff renderer's worker code-splits, which rules out Vite's default iife worker format.
+  worker: { format: "es" as const },
+
+  optimizeDeps: {
+    include: ["@pierre/diffs", "@pierre/diffs/react", "@pierre/diffs/worker/worker.js"],
+  },
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
