@@ -38,7 +38,10 @@ export function checklist(brief: Brief): string {
 export default workflow({
   description: "review a working tree against its acceptance checks",
   params: z.object({
-    acceptance: z.string().describe("what the change has to satisfy, one check per line"),
+    acceptance: z
+      .string()
+      .describe("what the change has to satisfy, one check per line")
+      .meta({ multiline: true }),
     blocking: z.string().default("").meta({ internal: true }),
     baseline: z.string().default("").meta({ internal: true }),
     base: z.string().default("").meta({ internal: true }),

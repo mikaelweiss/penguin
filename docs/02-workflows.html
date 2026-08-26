@@ -119,9 +119,18 @@ z.object({ title: z.string(), urgent: z.boolean() })  // a form</code></pre>
 })</code></pre>
 
     <p>
-      The two markers are exhaustive: a param with neither refuses to load, so a form can never
-      show a person a box nobody can label.
+      Those two markers are exhaustive for whether a param is shown: one with neither refuses to
+      load, so a form can never show a person a box nobody can label.
     </p>
+
+    <p>
+      A param that holds prose rather than a word carries
+      <code>.meta({ multiline: true })</code>. It changes nothing about whether the param is
+      shown or what the workflow receives, only how the box is drawn: one that wraps and grows
+      instead of a line that scrolls sideways.
+    </p>
+
+    <pre><code>ticket: z.string().describe("the ticket to work").meta({ multiline: true }),</code></pre>
 
     <p>
       Each call is its own request with its own response. There is no inbox and no message router. An

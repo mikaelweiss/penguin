@@ -3,6 +3,7 @@ import type { Attachment } from "@/lib/attachments";
 
 export type Control =
   | { kind: "text" }
+  | { kind: "prose" }
   | { kind: "number" }
   | { kind: "boolean" }
   | { kind: "choice"; choices: string[] }
@@ -37,7 +38,9 @@ function controlOf(property: Schema): Control {
   }
   const items = schemaOf(property["items"]);
   if (property["type"] === "array" && items?.["type"] === "string") return { kind: "lines" };
-  if (property["type"] === "string") return { kind: "text" };
+  if (property["type"] === "string") {
+    return property["multiline"] === true ? { kind: "prose" } : { kind: "text" };
+  }
   if (property["type"] === "number" || property["type"] === "integer") return { kind: "number" };
   if (property["type"] === "boolean") return { kind: "boolean" };
   return { kind: "json" };
@@ -83,7 +86,7 @@ export function initialValues(params: Param[]): Values {
 
 /** A pasted path reads as a value only where a line of text is one. */
 export function canAttach(control: Control): boolean {
-  return control.kind === "text" || control.kind === "lines";
+  return control.kind === "text" || control.kind === "prose" || control.kind === "lines";
 }
 
 /** The pasted paths ride the value, so no field ever shows a path a person did not type. */

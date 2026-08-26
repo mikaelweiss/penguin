@@ -13,7 +13,10 @@ export default workflow({
   description:
     "ticket to a landed commit: triage, plan, and implement in a worktree, then hold until you land it on main",
   params: z.object({
-    ticket: z.string().describe("the ticket to work, as an id, a url, or the text itself"),
+    ticket: z
+      .string()
+      .describe("the ticket to work, as an id, a url, or the text itself")
+      .meta({ multiline: true }),
     onto: z.string().default("main").describe("the branch the work lands on"),
     rounds: z
       .number()

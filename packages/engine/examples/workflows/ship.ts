@@ -7,7 +7,10 @@ export default workflow({
   description:
     "ticket to merged pull request: triage splits the ticket, then plan and implement per task in a worktree, then open the pull request and answer its feedback until it lands",
   params: z.object({
-    ticket: z.string().describe("the ticket to work, as an id, a url, or the text itself"),
+    ticket: z
+      .string()
+      .describe("the ticket to work, as an id, a url, or the text itself")
+      .meta({ multiline: true }),
     rounds: z
       .number()
       .int()

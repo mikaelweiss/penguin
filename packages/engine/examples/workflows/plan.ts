@@ -27,7 +27,10 @@ async function answered(
 export default workflow({
   description: "plan a change with feedback and approval from the user",
   params: z.object({
-    ticket: z.string().describe("the ticket to plan, as an id, a url, or the text itself"),
+    ticket: z
+      .string()
+      .describe("the ticket to plan, as an id, a url, or the text itself")
+      .meta({ multiline: true }),
     context: z.string().default("").meta({ internal: true }),
   }),
 

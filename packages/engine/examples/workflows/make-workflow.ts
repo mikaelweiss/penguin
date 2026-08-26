@@ -24,7 +24,7 @@ function brief(design: string, dest: string, findings: string[]): string {
 export default workflow({
   description: "design, write, and review a new workflow from an idea",
   params: z.object({
-    idea: z.string().describe("what the new workflow should do"),
+    idea: z.string().describe("what the new workflow should do").meta({ multiline: true }),
     scope: z
       .enum(["project", "home"])
       .default("home")

@@ -23,7 +23,10 @@ function slug(name: string): string {
 export default workflow({
   description: "triage a ticket, then plan and implement each task in a worktree",
   params: z.object({
-    ticket: z.string().describe("the ticket to work, as an id, a url, or the text itself"),
+    ticket: z
+      .string()
+      .describe("the ticket to work, as an id, a url, or the text itself")
+      .meta({ multiline: true }),
     rounds: z
       .number()
       .int()

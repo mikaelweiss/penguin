@@ -44,6 +44,8 @@ function pasted(onPaste: ((files: File[]) => void) | undefined) {
   };
 }
 
+const hints: Partial<Record<Control["kind"], string>> = { lines: "one per line", json: "JSON" };
+
 function ParamControl({ id, control, value, invalid, onChange, onPaste }: ControlProps) {
   if (control.kind === "choice") {
     return (
@@ -64,14 +66,14 @@ function ParamControl({ id, control, value, invalid, onChange, onPaste }: Contro
     );
   }
 
-  if (control.kind === "lines" || control.kind === "json") {
+  if (control.kind === "prose" || control.kind === "lines" || control.kind === "json") {
     return (
       <Textarea
         id={id}
         rows={3}
         value={value}
         aria-invalid={invalid}
-        placeholder={control.kind === "lines" ? "one per line" : "JSON"}
+        placeholder={hints[control.kind]}
         className={control.kind === "json" ? "font-mono" : undefined}
         onChange={(event) => onChange(event.target.value)}
         onPaste={pasted(onPaste)}

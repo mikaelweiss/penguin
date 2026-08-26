@@ -16,7 +16,7 @@ function brief(task: string, blocking: string, baseline: string): string {
 export default workflow({
   description: "implement a change and close the review findings",
   params: z.object({
-    task: z.string().describe("the change to make"),
+    task: z.string().describe("the change to make").meta({ multiline: true }),
     rounds: z
       .number()
       .int()
