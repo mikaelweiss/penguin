@@ -3,7 +3,7 @@ import { z } from "zod";
 import { narrate, narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
-const Ack = z.union([z.enum(["ok"]), z.string()]);
+const Ack = z.enum(["ok"]);
 
 const DIFF_LINES = 500;
 

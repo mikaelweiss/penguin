@@ -89,7 +89,7 @@ export default workflow({
     if (!approved) {
       await view.ask(
         `${params.rounds} rounds and still findings. Take a look.`,
-        z.union([z.enum(["ok"]), z.string()]),
+        z.enum(["ok"]),
       );
     }
 

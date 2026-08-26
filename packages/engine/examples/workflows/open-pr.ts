@@ -5,9 +5,10 @@ import { narrated } from "../helpers/turns.ts";
 import commit from "./commit.ts";
 import rebase from "./rebase.ts";
 
-const Ack = z.union([z.enum(["ok"]), z.string()]);
-const Confirm = z.union([z.enum(["ok", "stop"]), z.string()]);
-const Retry = z.union([z.enum(["retry", "stop"]), z.string()]);
+const Ack = z.enum(["ok"]);
+const Confirm = z.enum(["ok", "stop"]);
+const Retry = z.enum(["retry", "stop"]);
+const Fixing = z.union([z.enum(["retry", "stop"]), z.string()]);
 const Go = z.union([z.enum(["go", "skip"]), z.string()]);
 const Send = z.union([z.enum(["push", "hold"]), z.string()]);
 
@@ -102,11 +103,8 @@ export default workflow({
 
     // What blocks a send is often a person's to fix, so the ask retries instead of ending the run.
     async function again(reason: string): Promise<boolean> {
-      for (;;) {
-        const answer = await view.ask(`${reason}\n\nFix it and reply retry, or stop.`, Retry);
-        if (answer === "stop") return false;
-        if (answer === "retry") return true;
-      }
+      const answer = await view.ask(`${reason}\n\nFix it and reply retry, or stop.`, Retry);
+      return answer === "retry";
     }
 
     let base = await resolveBase(ctx, params.base);
@@ -128,20 +126,15 @@ export default workflow({
         Confirm,
       );
       if (answer === "stop") return nowhere;
-      if (answer === "ok") {
-        base = other.baseRefName;
-        break;
-      }
+      base = other.baseRefName;
+      break;
     }
     if (head.branch === base) {
-      for (;;) {
-        const answer = await view.ask(
-          `The checkout is on ${base}, the branch the pull request would land on. Reply ok to open it from ${base} onto itself anyway, or stop.`,
-          Confirm,
-        );
-        if (answer === "stop") return nowhere;
-        if (answer === "ok") break;
-      }
+      const answer = await view.ask(
+        `The checkout is on ${base}, the branch the pull request would land on. Reply ok to open it from ${base} onto itself anyway, or stop.`,
+        Confirm,
+      );
+      if (answer === "stop") return nowhere;
     }
     // A branch that is its own base has nothing to sit on, and force-pushing it would be a footgun.
     const rebasing = head.branch !== base;
@@ -154,23 +147,11 @@ export default workflow({
 
     let fixer = "";
 
-    /**
-     * A failed push goes to the agent before the person, because most of what stops one is the
-     * agent's to clear. The bound keeps a fix it only thinks it made from spinning unattended.
-     */
-    async function cleared(
-      reason: string,
-      tries: number,
-    ): Promise<{ retry: boolean; reason: string }> {
-      if (tries > params.fixes) return { retry: false, reason };
+    async function fixing(prompt: string): Promise<{ retry: boolean; reason: string }> {
       if (fixer === "") fixer = await agent.open();
       const fix = await narrated(
         view,
-        agent.turn(
-          fixer,
-          { skill: "fix-push", prompt: `The push of ${head.branch} failed. git said:\n\n${reason}` },
-          { result: Fix },
-        ),
+        agent.turn(fixer, { skill: "fix-push", prompt }, { result: Fix }),
       );
       if (!fix.fixed) return { retry: false, reason: fix.notes };
       // A fix left in the tree pushes nothing, so the same hook fails on the same code again.
@@ -181,6 +162,37 @@ export default workflow({
         }
       }
       return { retry: true, reason: fix.notes };
+    }
+
+    /**
+     * A failed push goes to the agent before the person, because most of what stops one is the
+     * agent's to clear. The bound keeps a fix it only thinks it made from spinning unattended.
+     */
+    async function cleared(
+      reason: string,
+      tries: number,
+    ): Promise<{ retry: boolean; reason: string }> {
+      if (tries > params.fixes) return { retry: false, reason };
+      return fixing(`The push of ${head.branch} failed. git said:\n\n${reason}`);
+    }
+
+    /**
+     * The push gate. The fixer just stopped here, so what the person types is its next
+     * instruction, and no bound applies to a turn a person asked for by hand.
+     */
+    async function directed(reason: string): Promise<boolean> {
+      let said = reason;
+      for (;;) {
+        const answer = await view.ask(
+          `The branch did not reach the remote: ${said}\n\nFix it and reply retry, or stop.`,
+          Fixing,
+        );
+        if (answer === "stop") return false;
+        if (answer === "retry") return true;
+        const fix = await fixing(`The user says:\n\n${answer}\n\nAnswer it and act on it.`);
+        if (fix.retry) return true;
+        said = fix.reason;
+      }
     }
 
     /**
@@ -203,7 +215,7 @@ export default workflow({
         tries += 1;
         const answer = await cleared(sent.reason, tries);
         if (answer.retry) continue;
-        if (!(await again(`The branch did not reach the remote: ${answer.reason}`))) return false;
+        if (!(await directed(answer.reason))) return false;
       }
     }
 

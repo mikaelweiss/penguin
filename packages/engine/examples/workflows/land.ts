@@ -2,7 +2,7 @@ import { call, workflow } from "penguin";
 import { z } from "zod";
 import rebase from "./rebase.ts";
 
-const Ack = z.union([z.enum(["ok"]), z.string()]);
+const Ack = z.enum(["ok"]);
 
 export default workflow({
   description: "rebase a branch onto main until it is clean, then move main to it",

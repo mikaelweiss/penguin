@@ -8,7 +8,7 @@ import implement from "./implement.ts";
 import plan from "./plan.ts";
 import triage from "./triage.ts";
 
-const Ack = z.union([z.enum(["ok"]), z.string()]);
+const Ack = z.enum(["ok"]);
 const Tried = z.union([z.enum(["done"]), z.string()]);
 const Named = z.object({
   branch: z.string().describe("the branch name, lowercase words with dashes between them"),

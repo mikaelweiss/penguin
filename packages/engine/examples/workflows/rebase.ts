@@ -3,7 +3,8 @@ import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
 import { narrated } from "../helpers/turns.ts";
 
-const Ack = z.union([z.enum(["ok"]), z.string()]);
+const Ack = z.enum(["ok"]);
+const Fixing = z.union([z.enum(["continue", "abort"]), z.string()]);
 const Resolved = z.object({
   resolved: z.boolean(),
   notes: z.string().describe("what the conflict was, and what is left when it is not resolved"),
@@ -35,6 +36,35 @@ export default workflow({
     const nowhere = (reason: string) => ({ rebased: false, sha: "", base: "", reason });
     let turns = 0;
     let clean = false;
+    let fixer = "";
+
+    // One session across the passes, so the resolver keeps what it already learned about the tree.
+    const resolving = async (prompt: string): Promise<z.infer<typeof Resolved>> => {
+      if (fixer === "") fixer = await agent.open({ cwd });
+      return narrated(
+        view,
+        agent.turn(fixer, { skill: "resolve-conflicts", prompt }, { result: Resolved }),
+      );
+    };
+
+    /**
+     * The gate open conflicts stop at. The resolver just stopped, so what the person types is its
+     * next instruction, and no bound applies to a turn a person asked for by hand.
+     */
+    const directed = async (notes: string): Promise<boolean> => {
+      let said = notes;
+      for (;;) {
+        const answer = await view.ask(
+          `The conflicts are still open: ${said}\n\nFix them and stage the files, or drop the rebase.`,
+          Fixing,
+        );
+        if (answer === "abort") return false;
+        if (answer === "continue") return true;
+        const fixed = await resolving(`The user says:\n\n${answer}\n\nAnswer it and act on it.`);
+        if (fixed.resolved) return true;
+        said = fixed.notes;
+      }
+    };
 
     const head = await vcs.head({ cwd });
     if (!head.ok) {
@@ -74,27 +104,12 @@ export default workflow({
           return nowhere("the resolution bound ran out");
         }
         turns += 1;
-        const fixer = await agent.open({ cwd });
-        const fixed = await narrated(
-          view,
-          agent.turn(
-            fixer,
-            {
-              skill: "resolve-conflicts",
-              prompt: `The rebase onto ${onto} stopped on these files:\n\n${listed(state.files)}`,
-            },
-            { result: Resolved },
-          ),
+        const fixed = await resolving(
+          `The rebase onto ${onto} stopped on these files:\n\n${listed(state.files)}`,
         );
-        if (!fixed.resolved) {
-          const answer = await view.ask(
-            `The conflicts are still open: ${fixed.notes}\n\nFix them and stage the files, or drop the rebase.`,
-            z.union([z.enum(["continue", "abort"]), z.string()]),
-          );
-          if (answer === "abort") {
-            await vcs.rebase.abort({ cwd });
-            return nowhere("the user dropped the rebase");
-          }
+        if (!fixed.resolved && !(await directed(fixed.notes))) {
+          await vcs.rebase.abort({ cwd });
+          return nowhere("the user dropped the rebase");
         }
         state = await vcs.rebase.continue({ cwd });
       }

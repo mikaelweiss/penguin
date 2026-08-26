@@ -103,6 +103,22 @@ z.object({ title: z.string(), urgent: z.boolean() })  // a form</code></pre>
       records as JSON Schema. No workflow changes between them.
     </p>
 
+    <h2>Free text goes to an agent</h2>
+
+    <p>
+      A union of an enum with <code>z.string()</code> puts the choices and a text box in front of
+      the person at once:
+    </p>
+
+    <pre><code>z.union([z.enum(["go", "skip"]), z.string()])</code></pre>
+
+    <p>
+      Reach for it only where the workflow hands that text to the agent that just stopped, as its
+      next instruction. The text box is a promise that words will be read. A gate that acts on the
+      named choices and drops everything else asks the same question again, which reads as a dead
+      key. Where no agent is waiting to take the words, name the choices and let the person pick.
+    </p>
+
     <h2>Params a person answers</h2>
 
     <p>
