@@ -125,7 +125,7 @@
       <li>project: <code>.penguin</code> workflows, skills, adapters. In git.</li>
       <li>project local: same, kept out of git.</li>
       <li>worktree: the <code>.penguin</code> of the project's other git checkouts, so a workflow written on a branch is startable before it merges. The row says which checkout.</li>
-      <li>A branch may only add a name. Its adapter is ignored unless nothing else claims that role, its skill is ignored when another catalog supplies that name, and a half-written file on a branch is skipped rather than breaking the project.</li>
+      <li>A branch may only add a name. Its adapter runs only once a config line names it and nothing else claims that role, its skill is ignored when another catalog supplies that name, and a half-written file on a branch is skipped rather than breaking the project.</li>
       <li>A skill is a folder under a catalog's <code>skills/</code> holding a SKILL.md, per the Agent Skills spec: name and description frontmatter, instructions below.</li>
     </ul>
 

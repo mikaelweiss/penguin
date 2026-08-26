@@ -94,7 +94,16 @@ function catalogWith(
   return worktree === undefined ? { dir, scope } : { dir, scope, worktree };
 }
 
+/** The one opt-in a worktree adapter has: the config naming it for its role. */
+function chooses(role: string, name: string): void {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-home-"));
+  temps.push(dir);
+  process.env["PENGUIN_HOME"] = dir;
+  fs.writeFileSync(path.join(dir, "config"), `${role} ${name}\n`);
+}
+
 test("a worktree adapter for a role the project already supplies is dropped", async () => {
+  chooses("vcs", "jj");
   const found = await installedIn([
     catalogWith("project", "vcs", "git"),
     catalogWith("worktree", "vcs", "jj", "feature"),
@@ -118,7 +127,16 @@ test("two worktrees claiming one new role drop both, rather than conflicting eve
   expect(found).toEqual([]);
 });
 
-test("a role only one worktree supplies installs from the branch", async () => {
+test("a worktree adapter the config never names is left inert", async () => {
+  const found = await installedIn([
+    catalogWith("project", "vcs", "git"),
+    catalogWith("worktree", "fmt", "ruff", "feature"),
+  ]);
+  expect(found.map((entry) => entry.name)).toEqual(["git"]);
+});
+
+test("a role only one worktree supplies installs once the config names it", async () => {
+  chooses("fmt", "ruff");
   const found = await installedIn([
     catalogWith("project", "vcs", "git"),
     catalogWith("worktree", "fmt", "ruff", "feature"),
@@ -128,6 +146,7 @@ test("a role only one worktree supplies installs from the branch", async () => {
 });
 
 test("a branch's half-written adapter is skipped, never fatal for the project", async () => {
+  chooses("fmt", "ruff");
   const branch = catalogWith("worktree", "fmt", "ruff", "feature");
   fs.writeFileSync(path.join(branch.dir, "adapters", "wip.ts"), "export default 5;");
   const found = await installedIn([catalogWith("project", "vcs", "git"), branch]);

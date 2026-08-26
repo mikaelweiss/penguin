@@ -25,10 +25,11 @@ export async function installedIn(list: catalogs.Catalog[]): Promise<AdapterFoun
   for (const catalog of list) {
     all.push(...(await scan(catalogs.adaptersDir(catalog), catalog.scope)));
   }
+  const chosen = readConfig();
   const seen = new Set<string>();
   const found: AdapterFound[] = [];
   for (const entry of all) {
-    if (entry.scope === "worktree" && !onlyClaim(all, entry.role)) continue;
+    if (entry.scope === "worktree" && !askedFor(all, entry, chosen)) continue;
     const key = `${entry.role}\n${entry.name}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -38,12 +39,15 @@ export async function installedIn(list: catalogs.Catalog[]): Promise<AdapterFoun
 }
 
 /**
- * A branch may add a role, never take one over. Two branches adding the same role would conflict
- * every run in the project, and one shadowing the builtin view would change what already resolves.
+ * Every installed role is built before a workflow's own code runs, and build() is handed the
+ * keychain and the shell, so an adapter sitting in a branch checkout stays inert until the config
+ * names it. Even then a branch may only add a role, never take one over: two branches claiming one
+ * role would conflict every run in the project, and one shadowing the builtin view would change
+ * what already resolves.
  */
-function onlyClaim(all: AdapterFound[], role: string): boolean {
-  const claiming = all.filter((entry) => entry.role === role);
-  return claiming.length === 1 && claiming[0]?.scope === "worktree";
+function askedFor(all: AdapterFound[], entry: AdapterFound, chosen: Map<string, string>): boolean {
+  if (chosen.get(entry.role) !== entry.name) return false;
+  return all.filter((other) => other.role === entry.role).length === 1;
 }
 
 export function searchedAdapters(cwd: string): string[] {

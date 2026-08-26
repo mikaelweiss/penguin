@@ -211,9 +211,12 @@ return definition.run(ctx);</code></pre>
       Worktree catalogs are read from <code>.git/worktrees/</code>, with no <code>git</code>
       subprocess, so the main checkout sees every branch and a branch sees the main checkout and its
       siblings. A checkout with no <code>.penguin</code> folder is skipped, and cwd's own catalog is
-      never listed twice. A branch may only add a name, never take one over: a worktree adapter is
-      dropped unless it is the one and only claim on its role, and a worktree skill is dropped when
-      any other catalog supplies that name. A branch is free to be half written: a file there that
+      never listed twice. Every installed role is built before a workflow's own code runs, and
+      <code>build</code> is handed the keychain and the shell, so a worktree adapter stays inert
+      until a line in <code>~/.penguin/config</code> names it for its role. Even named, a branch may
+      only add a name, never take one over: a worktree adapter is dropped unless it is the one and
+      only claim on its role, and a worktree skill is dropped when any other catalog supplies that
+      name. A branch is free to be half written: a file there that
       refuses to load is skipped, where the same file in the project's own catalog still throws.
       Workflows list one row per file, so a branch's
       <code>ship</code> appears beside the project's, and the run's directory stays the project it
