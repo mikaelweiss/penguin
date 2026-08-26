@@ -18,7 +18,10 @@ export type TurnAsk = string | { skill: string; prompt?: string };
 
 export type Turn<T> = { output: AsyncIterable<Chunk>; value: Promise<T> };
 
-export type Attempt = { ok: true; value: unknown } | { ok: false; error: string };
+export type Attempt =
+  | { ok: true; value: unknown }
+  /** `limited` means the agent hit a usage limit: the turn waits it out instead of retrying. */
+  | { ok: false; error: string; limited?: boolean };
 
 export type TurnFn = {
   (session: string, ask: TurnAsk): Turn<null>;
@@ -92,16 +95,65 @@ export function targetIn(fields: string[]): (input: unknown) => string | undefin
   };
 }
 
+const LIMIT_WAIT_SECONDS = 120;
+
 /**
  * The session machinery every agent adapter shares: open handles, run a turn
- * with one corrected retry, validate a typed result, and stop mid-flight.
- * The adapter supplies runOnce, the one CLI invocation.
+ * with one corrected retry, wait out a usage limit, validate a typed result,
+ * and stop mid-flight. The adapter supplies runOnce, the one CLI invocation.
  */
 export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentApi<Options> {
   const opened = new Map<string, Options>();
   const started = new Set<string>();
   const running = new Map<string, AbortController>();
   const stopped = new Set<string>();
+  let parked = 0;
+
+  const waitSeconds = (): number => {
+    const set = Number(host.config("limit-wait-seconds"));
+    return Number.isFinite(set) && set >= 0 ? set : LIMIT_WAIT_SECONDS;
+  };
+
+  /** Sleeps until the limit is worth testing again. Stopping the session cuts it short. */
+  async function sleep(session: string): Promise<void> {
+    const controller = new AbortController();
+    running.set(session, controller);
+    try {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, waitSeconds() * 1000);
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    } finally {
+      running.delete(session);
+    }
+  }
+
+  /**
+   * The run's one open pause, however many turns are waiting. It stays open
+   * across a turn's repeated tries, so the run file records the wait once.
+   */
+  function parking(): { park: (reason: string) => void; release: () => void } {
+    let held = false;
+    return {
+      park: (reason) => {
+        if (held) return;
+        held = true;
+        if (parked++ === 0) host.note({ limit: { role: "agent", reason } });
+      },
+      release: () => {
+        if (!held) return;
+        held = false;
+        if (--parked === 0) host.note({ limit: { role: "agent", resolved: true } });
+      },
+    };
+  }
 
   const turn = ((session: string, ask: TurnAsk, options?: { result?: z.ZodObject }) => {
     const settings = opened.get(session);
@@ -111,11 +163,18 @@ export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentA
     const prompt = typeof ask === "string" ? ask : withSkill(host.skill(ask.skill), ask.prompt);
     const output = new Channel<Chunk>();
     const schema = options?.result === undefined ? undefined : jsonSchema(options.result);
+    const pause = parking();
     const value = (async () => {
       try {
         stopped.delete(session);
+        const halt = (): void => {
+          if (!stopped.has(session)) return;
+          stopped.delete(session);
+          throw new PenguinError("the turn was stopped");
+        };
         let failure: string | undefined;
-        for (let tries = 0; tries < 2; tries++) {
+        let tries = 0;
+        while (tries < 2) {
           const first = !started.has(session);
           started.add(session);
           const sent =
@@ -133,10 +192,15 @@ export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentA
           } finally {
             running.delete(session);
           }
-          if (stopped.has(session)) {
-            stopped.delete(session);
-            throw new PenguinError("the turn was stopped");
+          halt();
+          if (!attempt.ok && attempt.limited === true) {
+            pause.park(attempt.error);
+            await sleep(session);
+            halt();
+            continue;
           }
+          pause.release();
+          tries++;
           if (!attempt.ok) {
             failure = attempt.error;
             continue;
@@ -148,6 +212,7 @@ export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentA
         }
         throw new PenguinError(`the turn failed twice: ${failure}`);
       } finally {
+        pause.release();
         output.end();
       }
     })();

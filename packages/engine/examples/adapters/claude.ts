@@ -24,8 +24,12 @@ type StreamLine = {
   type?: string;
   is_error?: boolean;
   result?: unknown;
+  errors?: unknown;
   structured_output?: unknown;
   message?: { content?: ContentBlock[] };
+  /** The wrapper fields claude puts beside an assistant message it built from an API error. */
+  is_api_error_message?: boolean;
+  error?: string;
 };
 
 /** Only this adapter knows claude's tool shapes. */
@@ -58,6 +62,16 @@ const KINDS: Record<string, ActionKind> = {
   Agent: "agent",
 };
 
+/** What a failed result says: the success field, else the error subtypes' list. */
+function reported(event: StreamLine): string {
+  if (typeof event.result === "string" && event.result.trim() !== "") return event.result;
+  if (Array.isArray(event.errors)) {
+    const said = event.errors.map(String).filter((line) => line.trim() !== "");
+    if (said.length > 0) return said.join("; ");
+  }
+  return "claude reported an error";
+}
+
 function resultText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -88,6 +102,7 @@ export default adapter({
       let buffer = "";
       let value: unknown;
       let failed: string | undefined;
+      let limited: string | undefined;
       const calls = new Map<string, Action>();
       const handle = (line: string): void => {
         if (line.trim() === "") return;
@@ -98,6 +113,11 @@ export default adapter({
           return;
         }
         if (event.type === "assistant") {
+          // A limit says itself once. Letting it stream would repeat it on every retry.
+          if (event.is_api_error_message === true && event.error === "rate_limit") {
+            limited = resultText(event.message?.content).trim();
+            return;
+          }
           for (const block of event.message?.content ?? []) {
             if (block.type === "text" && block.text !== undefined && block.text !== "") {
               emit({ kind: "text", text: block.text });
@@ -137,9 +157,7 @@ export default adapter({
           }
         }
         if (event.type === "result") {
-          if (event.is_error === true) {
-            failed = typeof event.result === "string" ? event.result : "claude reported an error";
-          }
+          if (event.is_error === true) failed = reported(event);
           value = event.structured_output;
         }
       };
@@ -158,21 +176,27 @@ export default adapter({
       });
       if (buffer.trim() !== "") handle(buffer);
 
-      if (done.code !== 0) {
-        const tail = done.stderr.trim().split("\n").at(-1) ?? "";
-        return {
-          ok: false,
-          error:
-            tail === ""
-              ? `claude exited with code ${done.code}`
-              : `claude exited with code ${done.code}: ${tail}`,
-        };
+      const failure = ((): string | undefined => {
+        if (done.code !== 0) {
+          const tail = done.stderr.trim().split("\n").at(-1) ?? "";
+          return tail === ""
+            ? `claude exited with code ${done.code}`
+            : `claude exited with code ${done.code}: ${tail}`;
+        }
+        if (failed !== undefined) return failed;
+        if (schema !== undefined && value === undefined) {
+          return "claude returned no structured output";
+        }
+        return undefined;
+      })();
+
+      if (failure === undefined) return { ok: true, value: value ?? null };
+      // A limit clears on its own, so the turn waits it out rather than spending a retry.
+      if (limited !== undefined) {
+        const said = limited === "" ? "claude hit its usage limit" : limited;
+        return { ok: false, error: said, limited: true };
       }
-      if (failed !== undefined) return { ok: false, error: failed };
-      if (schema !== undefined && value === undefined) {
-        return { ok: false, error: "claude returned no structured output" };
-      }
-      return { ok: true, value: value ?? null };
+      return { ok: false, error: failure };
     }
 
     return sessions(host, runOnce);

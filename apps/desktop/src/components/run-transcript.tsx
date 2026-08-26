@@ -273,6 +273,17 @@ const ActionsRow = memo(function ActionsRow({ row, live, open, onToggle }: Actio
   );
 });
 
+/**
+ * What the run waits on. A paused run wins over its last status and over an
+ * unfinished action, because the limit is why neither of them is moving.
+ */
+function waitingOn(run: Run, acting: boolean): RunState | undefined {
+  if (run.paused !== undefined) {
+    return { text: run.paused.reason, at: run.paused.at, idle: true };
+  }
+  return acting ? undefined : run.state;
+}
+
 function LiveRow({ state }: { state: RunState }) {
   const now = useSecond();
   return (
@@ -375,7 +386,7 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
   const running = run.status === "running" && run.ask === undefined;
   const tail = run.output.at(-1);
   const acting = running && tail?.type === "action" && tail.status === "running";
-  const live = running && !acting ? run.state : undefined;
+  const live = running ? waitingOn(run, acting) : undefined;
   const problem = run.problem ?? log;
 
   const rows = reuseRows(

@@ -11,16 +11,20 @@ type Call = { argv: string[]; options: ExecOptions | undefined };
 function fakeHost(
   handler: (call: Call, count: number) => Promise<CommandResult>,
   skill?: Host["skill"],
-): { host: Host; calls: Call[] } {
+): { host: Host; calls: Call[]; notes: Record<string, unknown>[] } {
   const calls: Call[] = [];
+  const notes: Record<string, unknown>[] = [];
   const host: Host = {
     cwd: "/",
     home: "/tmp",
     state: "/tmp",
     run: { id: "test", dir: "/tmp" },
-    config: () => undefined,
+    // Tests never wait out a real limit.
+    config: (key) => (key === "limit-wait-seconds" ? "0" : undefined),
     secret: async () => undefined,
-    note: () => {},
+    note: (entry) => {
+      notes.push(entry);
+    },
     skill:
       skill ??
       (() => {
@@ -33,7 +37,7 @@ function fakeHost(
       return handler(call, calls.length);
     },
   };
-  return { host, calls };
+  return { host, calls, notes };
 }
 
 function emit(call: Call, event: unknown): void {
@@ -41,6 +45,19 @@ function emit(call: Call, event: unknown): void {
 }
 
 const OK: CommandResult = { code: 0, stdout: "", stderr: "" };
+
+/** What claude streams when a turn dies on a usage limit. */
+function limit(call: Call, kind: string, text: string): void {
+  emit(call, {
+    type: "assistant",
+    is_api_error_message: true,
+    error: kind,
+    message: { content: [{ type: "text", text }] },
+  });
+  emit(call, { type: "result", subtype: "error_during_execution", is_error: true, errors: [text] });
+}
+
+const RESETS = "You've hit your session limit \u00b7 resets 3pm";
 
 test("streams chunks and returns the schema-checked value", async () => {
   const { host } = fakeHost(async (call) => {
@@ -174,4 +191,114 @@ test("an unopened session is refused with the fix in the message", async () => {
   const agent = definition.build(host);
   expect(() => agent.turn("nope", "go")).toThrow(/no open session/);
   await expect(agent.stop("nope")).rejects.toThrow(/no open session/);
+});
+
+test("a usage limit waits and reruns the turn instead of spending a retry", async () => {
+  const { host, calls, notes } = fakeHost(async (call, count) => {
+    if (count < 3) {
+      limit(call, "rate_limit", RESETS);
+      return OK;
+    }
+    emit(call, { type: "result", structured_output: { n: 7 } });
+    return OK;
+  });
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const turn = agent.turn(session, "go", { result: z.object({ n: z.number() }) });
+  expect(await turn.value).toEqual({ n: 7 });
+  expect(calls).toHaveLength(3);
+  expect(calls[0]?.argv).toContain("--session-id");
+  expect(calls[1]?.argv).toContain("--resume");
+  // The limit is not the agent's mistake, so the prompt is sent again untouched.
+  expect(calls[2]?.options?.stdin).toBe("go");
+  expect(notes).toEqual([
+    { limit: { role: "agent", reason: RESETS } },
+    { limit: { role: "agent", resolved: true } },
+  ]);
+});
+
+test("the limit itself never reaches the story", async () => {
+  const { host } = fakeHost(async (call, count) => {
+    if (count === 1) {
+      limit(call, "rate_limit", RESETS);
+      return OK;
+    }
+    emit(call, { type: "assistant", message: { content: [{ type: "text", text: "back" }] } });
+    emit(call, { type: "result" });
+    return OK;
+  });
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const turn = agent.turn(session, "go");
+  const chunks = [];
+  for await (const chunk of turn.output) chunks.push(chunk);
+  await turn.value;
+  expect(chunks).toEqual([{ kind: "text", text: "back" }]);
+});
+
+test("a limit the CLI recovered from does not pause the turn", async () => {
+  const { host, calls, notes } = fakeHost(async (call) => {
+    emit(call, {
+      type: "assistant",
+      is_api_error_message: true,
+      error: "rate_limit",
+      message: { content: [{ type: "text", text: RESETS }] },
+    });
+    emit(call, { type: "result", structured_output: null });
+    return OK;
+  });
+  const agent = definition.build(host);
+  const session = await agent.open();
+  await agent.turn(session, "go").value;
+  expect(calls).toHaveLength(1);
+  expect(notes).toEqual([]);
+});
+
+test("an error that no wait can clear still fails after two tries", async () => {
+  const { host, calls, notes } = fakeHost(async (call) => {
+    limit(call, "billing_error", "You're out of usage credits.");
+    return OK;
+  });
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const turn = agent.turn(session, "go");
+  await expect(turn.value).rejects.toThrow("You're out of usage credits.");
+  expect(calls).toHaveLength(2);
+  expect(notes).toEqual([]);
+});
+
+test("stop ends a turn that is waiting out a limit", async () => {
+  const { host, notes } = fakeHost(async (call) => {
+    limit(call, "rate_limit", RESETS);
+    return OK;
+  });
+  // Long enough that only the stop can end the wait.
+  host.config = (key) => (key === "limit-wait-seconds" ? "60" : undefined);
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const turn = agent.turn(session, "go");
+  await Bun.sleep(20);
+  await agent.stop(session);
+  await expect(turn.value).rejects.toThrow("the turn was stopped");
+  expect(notes).toEqual([
+    { limit: { role: "agent", reason: RESETS } },
+    { limit: { role: "agent", resolved: true } },
+  ]);
+});
+
+test("an error result without a result field says what claude reported", async () => {
+  const { host } = fakeHost(async (call) => {
+    emit(call, {
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["the model refused", "and gave up"],
+    });
+    return OK;
+  });
+  const agent = definition.build(host);
+  const session = await agent.open();
+  await expect(agent.turn(session, "go").value).rejects.toThrow(
+    "the model refused; and gave up",
+  );
 });

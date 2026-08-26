@@ -66,6 +66,13 @@ export type Auth = {
   at: string;
 };
 
+/** The usage limit a run's agent is waiting out, from its unresolved limit note. */
+export type Paused = {
+  /** What the agent said it hit, in its own words. It usually names the reset time. */
+  reason: string;
+  at: string;
+};
+
 /** One plain-text value the run was started with. */
 export type RunInput = { name: string; text: string };
 
@@ -76,6 +83,8 @@ export type Run = {
   dir: string;
   ask?: Ask;
   auth?: Auth;
+  /** The agent hit a usage limit and the run is waiting for it to reset. */
+  paused?: Paused;
   /** Why the run ended badly, when its own file says. */
   problem?: string;
   /** The run is waiting on view.listen, so it can take a message. */
@@ -105,7 +114,8 @@ export function isLive(run: Run): boolean {
 }
 
 export function isIdle(run: Run): boolean {
-  return run.status === "running" && !needsYou(run) && run.state?.idle === true;
+  if (run.status !== "running" || needsYou(run)) return false;
+  return run.paused !== undefined || run.state?.idle === true;
 }
 
 /** A run and every run inside it, outermost first, the order stopping sends them in. */
@@ -333,6 +343,16 @@ function authOf(notes: Entry[]): Auth | undefined {
   return { role, reason: text(asked["reason"]) ?? "", at: text(last?.["at"]) ?? "" };
 }
 
+/** The usage limit the run is waiting out, when the last limit note is unresolved. */
+function pausedOf(notes: Entry[]): Paused | undefined {
+  const last = notes.findLast((note) => note["limit"] !== undefined);
+  const limit = last?.["limit"];
+  if (limit === null || typeof limit !== "object") return undefined;
+  const held = limit as Record<string, unknown>;
+  if (held["resolved"] === true) return undefined;
+  return { reason: text(held["reason"]) ?? "", at: text(last?.["at"]) ?? "" };
+}
+
 /** The engine's complaint about the last answer, when it came after this question. */
 function problemOf(entries: Entry[], waiting: Entry): string | undefined {
   const refused = entries.slice(entries.indexOf(waiting)).findLast((entry) => "rejected" in entry);
@@ -490,6 +510,7 @@ function place(file: RunFile): Placed | undefined {
   const waiting = status === "running" ? waitingAsk(file.entries) : undefined;
   const ask = waiting === undefined ? undefined : askOf(file.entries, waiting);
   const auth = status === "running" ? authOf(notes) : undefined;
+  const paused = status === "running" ? pausedOf(notes) : undefined;
   const listening = status === "running" && heard?.["listening"] === true;
   const state = status === "running" ? stateOf(file.entries) : undefined;
 
@@ -501,6 +522,7 @@ function place(file: RunFile): Placed | undefined {
       dir: text(moved?.["dir"]) ?? cwd,
       ...(ask === undefined ? {} : { ask }),
       ...(auth === undefined ? {} : { auth }),
+      ...(paused === undefined ? {} : { paused }),
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
       ...(state === undefined ? {} : { state }),

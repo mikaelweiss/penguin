@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { blockedOn, needsYouNotice, newlyBlocked, nextView, toProjects } from "@/lib/runs";
+import { blockedOn, isIdle, needsYouNotice, newlyBlocked, nextView, toProjects } from "@/lib/runs";
 import type { Ask, Auth, Follow, Project, Run, RunFile, RunStatus } from "@/lib/runs";
 
 type Sketch = {
@@ -223,4 +223,50 @@ test("a run newer than the hiding brings the project back", () => {
 
   expect(projects.map((project) => project.dir)).toEqual(["/work"]);
   expect(projects[0]?.runs.map((run) => run.id)).toEqual(["b"]);
+});
+
+/** A live run file, its start entry followed by the notes the run appended. */
+function live(...notes: Record<string, unknown>[]): RunFile {
+  return {
+    id: "a",
+    entries: [
+      { at: "t1", workflow: "/work/ship.ts", params: {}, cwd: "/work", root: "/work" },
+      ...notes,
+    ],
+    alive: true,
+  };
+}
+
+function only(files: RunFile[]): Run {
+  const found = toProjects(files, [])[0]?.runs[0];
+  if (found === undefined) throw new Error("no run");
+  return found;
+}
+
+test("an unresolved limit note reads as a paused run, waiting rather than running", () => {
+  const paused = only([live({ at: "t2", limit: { role: "agent", reason: "resets 3pm" } })]);
+
+  expect(paused.paused).toEqual({ reason: "resets 3pm", at: "t2" });
+  expect(isIdle(paused)).toBe(true);
+});
+
+test("the resolved note clears the pause and the run is plainly running again", () => {
+  const woken = only([
+    live(
+      { at: "t2", limit: { role: "agent", reason: "resets 3pm" } },
+      { at: "t3", limit: { role: "agent", resolved: true } },
+    ),
+  ]);
+
+  expect(woken.paused).toBeUndefined();
+  expect(isIdle(woken)).toBe(false);
+});
+
+test("a run that ended while paused is not shown as waiting", () => {
+  const ended = only([
+    live({ at: "t2", limit: { role: "agent", reason: "resets 3pm" } }, { at: "t3", stopped: true }),
+  ]);
+
+  expect(ended.status).toBe("stopped");
+  expect(ended.paused).toBeUndefined();
 });
