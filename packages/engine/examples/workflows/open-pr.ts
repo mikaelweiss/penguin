@@ -1,5 +1,6 @@
 import { call, workflow } from "penguin";
 import { z } from "zod";
+import { resolveBase } from "../helpers/base.ts";
 import { narrated } from "../helpers/turns.ts";
 import commit from "./commit.ts";
 
@@ -72,6 +73,12 @@ export default workflow({
   description:
     "open the pull request, then watch it: assess every piece of feedback against the code, and answer what you approve until it merges",
   params: z.object({
+    base: z
+      .string()
+      .default("")
+      .describe("the branch the pull request lands on, empty to take the one origin calls default"),
+    /** A rebased branch no longer fast-forwards, so the caller that rebased it says so. */
+    force: z.boolean().default(false).meta({ internal: true }),
     fixes: z.number().int().min(1).default(3).meta({ internal: true }),
   }),
 
@@ -91,17 +98,6 @@ export default workflow({
       );
       return nowhere;
     }
-    const base = await vcs.defaultBranch();
-    if (base.ok && head.branch === base.branch) {
-      for (;;) {
-        const answer = await view.ask(
-          `The checkout is on ${head.branch}, the repository's default branch. Reply ok to open the pull request from it anyway, or stop.`,
-          Confirm,
-        );
-        if (answer === "stop") return nowhere;
-        if (answer === "ok") break;
-      }
-    }
 
     // What blocks a send is often a person's to fix, so the ask retries instead of ending the run.
     async function again(reason: string): Promise<boolean> {
@@ -109,6 +105,19 @@ export default workflow({
         const answer = await view.ask(`${reason}\n\nFix it and reply retry, or stop.`, Retry);
         if (answer === "stop") return false;
         if (answer === "retry") return true;
+      }
+    }
+
+    const base = await resolveBase(ctx, params.base);
+    if (base === "") return nowhere;
+    if (head.branch === base) {
+      for (;;) {
+        const answer = await view.ask(
+          `The checkout is on ${base}, the branch the pull request would land on. Reply ok to open it from ${base} onto itself anyway, or stop.`,
+          Confirm,
+        );
+        if (answer === "stop") return nowhere;
+        if (answer === "ok") break;
       }
     }
 
@@ -147,7 +156,7 @@ export default workflow({
     async function send(): Promise<{ ok: boolean; reason: string; from: "commit" | "push" }> {
       const wrote = await call(ctx, commit, {});
       if (!wrote.ok) return { ok: false, reason: wrote.reason, from: "commit" };
-      const sent = await vcs.push(head.branch);
+      const sent = await vcs.push(head.branch, { force: params.force });
       return { ok: sent.ok, reason: sent.reason, from: "push" };
     }
 
@@ -171,7 +180,7 @@ export default workflow({
     async function pushed(): Promise<boolean> {
       let tries = 0;
       for (;;) {
-        const sent = await vcs.push(head.branch);
+        const sent = await vcs.push(head.branch, { force: params.force });
         if (sent.ok) return true;
         tries += 1;
         const answer = await cleared(sent.reason, tries);
@@ -182,15 +191,26 @@ export default workflow({
 
     if (!(await delivered())) return nowhere;
 
+    // The description reads the range against the base, so the base is current before it is written.
+    for (;;) {
+      const fetched = await vcs.fetch(base);
+      if (fetched.ok) break;
+      if (!(await again(`The fetch of ${base} failed: ${fetched.reason}`))) return nowhere;
+    }
+
     const writer = await agent.open();
     const written = await narrated(
       view,
-      agent.turn(writer, { skill: "open-pr" }, { result: Description }),
+      agent.turn(
+        writer,
+        { skill: "open-pr", prompt: `# Base branch\n\n${base}` },
+        { result: Description },
+      ),
     );
-    let made = await github.pr.create({ title: written.title, body: written.body });
+    let made = await github.pr.create({ title: written.title, body: written.body, base });
     while (!made.ok) {
       if (!(await again(`No pull request: ${made.reason}`))) return nowhere;
-      made = await github.pr.create({ title: written.title, body: written.body });
+      made = await github.pr.create({ title: written.title, body: written.body, base });
     }
 
     const found = await github.pr.get(made.url);

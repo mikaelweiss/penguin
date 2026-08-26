@@ -1,6 +1,7 @@
 import { call, workflow } from "penguin";
 import { z } from "zod";
 import openPr from "./open-pr.ts";
+import rebase from "./rebase.ts";
 import work from "./work.ts";
 
 export default workflow({
@@ -11,6 +12,12 @@ export default workflow({
       .string()
       .describe("the ticket to work, as an id, a url, or the text itself")
       .meta({ multiline: true }),
+    base: z
+      .string()
+      .default("")
+      .describe(
+        "the branch the work starts from and the pull request lands on, empty to take the one origin calls default",
+      ),
     rounds: z
       .number()
       .int()
@@ -20,8 +27,18 @@ export default workflow({
   }),
 
   async run(ctx) {
-    const worked = await call(ctx, work, { ticket: ctx.params.ticket, rounds: ctx.params.rounds });
-    if (!worked.done) return { url: "", state: "", rounds: 0 };
-    return call(ctx, openPr, {}, { cwd: worked.path });
+    const nowhere = { url: "", state: "", rounds: 0 };
+    const worked = await call(ctx, work, {
+      ticket: ctx.params.ticket,
+      base: ctx.params.base,
+      rounds: ctx.params.rounds,
+    });
+    if (!worked.done) return nowhere;
+
+    // Nothing goes up until the branch sits on its base, so no pull request opens off it.
+    const rebased = await call(ctx, rebase, { base: worked.base, dir: worked.path });
+    if (!rebased.rebased) return nowhere;
+
+    return call(ctx, openPr, { base: worked.base, force: true }, { cwd: worked.path });
   },
 });

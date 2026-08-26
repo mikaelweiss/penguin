@@ -1,5 +1,6 @@
 import { call, workflow } from "penguin";
 import { z } from "zod";
+import { resolveBase } from "../helpers/base.ts";
 import { narrated } from "../helpers/turns.ts";
 import baseline from "./baseline.ts";
 import commit from "./commit.ts";
@@ -27,6 +28,10 @@ export default workflow({
       .string()
       .describe("the ticket to work, as an id, a url, or the text itself")
       .meta({ multiline: true }),
+    base: z
+      .string()
+      .default("")
+      .describe("the branch the work starts from, empty to take the one origin calls default"),
     rounds: z
       .number()
       .int()
@@ -37,7 +42,24 @@ export default workflow({
 
   async run(ctx) {
     const { params, agent, vcs, view } = ctx;
-    const nothing = { done: false, path: "", branch: "", acceptance: "", gates: "", base: "" };
+    const nothing = {
+      done: false,
+      path: "",
+      branch: "",
+      acceptance: "",
+      gates: "",
+      from: "",
+      base: "",
+    };
+
+    // The base settles before any agent runs, so a branch nothing can start from costs no turn.
+    const base = await resolveBase(ctx, params.base);
+    if (base === "") return nothing;
+    const fetched = await vcs.fetch(base);
+    if (!fetched.ok) {
+      await view.ask(`The fetch of ${base} failed: ${fetched.reason}`, Ack);
+      return nothing;
+    }
 
     const triaged = await call(ctx, triage, { ticket: ctx.params.ticket });
     if (!triaged.actionable) {
@@ -58,7 +80,7 @@ export default workflow({
       ),
     );
     const branch = slug(named.branch);
-    const ws = await vcs.worktree.add(branch);
+    const ws = await vcs.worktree.add(branch, { from: `origin/${base}` });
     if (!ws.ok) {
       await view.ask(`No worktree: ${ws.reason}`, Ack);
       return nothing;
@@ -126,7 +148,8 @@ export default workflow({
       branch,
       acceptance: checks.join("\n\n"),
       gates: before.gates,
-      base: head.sha,
+      from: head.sha,
+      base,
     };
   },
 });

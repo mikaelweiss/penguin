@@ -3,6 +3,7 @@ import { z } from "zod";
 import commit from "./commit.ts";
 import implement from "./implement.ts";
 import land from "./land.ts";
+import rebase from "./rebase.ts";
 import work from "./work.ts";
 
 function title(message: string): string {
@@ -28,8 +29,16 @@ export default workflow({
 
   async run(ctx) {
     const { params, view } = ctx;
-    const worked = await call(ctx, work, { ticket: params.ticket, rounds: params.rounds });
+    const worked = await call(ctx, work, {
+      ticket: params.ticket,
+      base: params.onto,
+      rounds: params.rounds,
+    });
     if (!worked.done) return { landed: false, sha: "", reason: "the work never started" };
+
+    // The hold is where the person tries the code, so they try it as it will land.
+    const rebased = await call(ctx, rebase, { base: params.onto, dir: worked.path });
+    if (!rebased.rebased) return { landed: false, sha: "", reason: rebased.reason };
 
     for (;;) {
       const written = await call(ctx, commit, {}, { cwd: worked.path });
@@ -48,7 +57,7 @@ export default workflow({
           task: answer,
           acceptance: worked.acceptance,
           baseline: worked.gates,
-          base: worked.base,
+          base: worked.from,
           rounds: params.rounds,
         },
         { cwd: worked.path },

@@ -144,3 +144,46 @@ test("pull fast-forwards when histories have not diverged", async () => {
   expect(pulled.ok).toBe(true);
   expect(fs.existsSync(path.join(ours.dir, "theirs.txt"))).toBe(true);
 });
+
+test("fetch moves the branch's remote-tracking ref", async () => {
+  const bare = tempDir("penguin-bare-");
+  await git(hostFor(bare), ["init", "-q", "--bare"]);
+
+  const ours = await repo();
+  await commitFile(ours, "base.txt", "base");
+  await git(ours.host, ["remote", "add", "origin", bare]);
+  const branch = (await ours.vcs.head()).branch;
+  await git(ours.host, ["push", "-q", "-u", "origin", branch]);
+
+  const theirsDir = tempDir("penguin-theirs-");
+  const theirs = { dir: theirsDir, host: hostFor(theirsDir) };
+  await git(theirs.host, ["clone", "-q", bare, "."]);
+  await git(theirs.host, ["config", "user.email", "test@test"]);
+  await git(theirs.host, ["config", "user.name", "test"]);
+  await commitFile(theirs, "theirs.txt", "theirs");
+  await git(theirs.host, ["push", "-q"]);
+  const sent = await git(theirs.host, ["rev-parse", "HEAD"]);
+
+  const fetched = await ours.vcs.fetch(branch);
+  expect(fetched.ok).toBe(true);
+  expect(await git(ours.host, ["rev-parse", `origin/${branch}`])).toBe(sent);
+});
+
+test("worktree.add starts the branch at the ref it is given", async () => {
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const { dir, host, vcs } = await repo();
+    await commitFile({ dir, host }, "base.txt", "base");
+    const from = await git(host, ["rev-parse", "HEAD"]);
+    await commitFile({ dir, host }, "later.txt", "later");
+
+    const added = await vcs.worktree.add("feature", { from });
+    expect(added.ok).toBe(true);
+    const started = await host.exec(["git", "rev-parse", "HEAD"], { cwd: added.path });
+    expect(started.stdout.trim()).toBe(from);
+    expect(fs.existsSync(path.join(added.path, "later.txt"))).toBe(false);
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});
