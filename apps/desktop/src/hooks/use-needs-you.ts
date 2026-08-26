@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { notifyNeedsYou, onNeedsYouClick } from "@/lib/notifications";
-import { findRun, needsYouNotice, newlyBlocked } from "@/lib/runs";
+import { findRun, needsYou, needsYouNotice, newlyBlocked } from "@/lib/runs";
 import type { Project } from "@/lib/runs";
 
 /** Tells the OS when a run starts waiting on a person, and opens that run when the notice is clicked. */
@@ -43,7 +43,9 @@ export function useNeedsYou(
 
     onNeedsYouClick((id) => {
       const { projects: shown, onOpen: open } = latest.current;
-      if (findRun(shown, id) === undefined) return;
+      // A notification outlives the wait it was posted for, so a stale click moves nothing.
+      const node = findRun(shown, id);
+      if (node === undefined || !needsYou(node.run)) return;
       open(id);
       const window = getCurrentWindow();
       window

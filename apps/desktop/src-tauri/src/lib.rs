@@ -697,6 +697,17 @@ impl Notices {
 /// Carries the run id of the notification that was clicked.
 const NEEDS_YOU_CLICK: &str = "needs-you-click";
 
+/// The notification's one action. Nothing waits on a notification that carries no button, so
+/// without this the click never comes back. XDG fires this id for a body click too.
+const OPEN_ACTION: &str = "default";
+
+fn opens_the_run(response: &notify_rust::NotificationResponse) -> bool {
+    match response {
+        notify_rust::NotificationResponse::Action(key) => key == OPEN_ACTION,
+        clicked => clicked.is_default_action(),
+    }
+}
+
 /// Posts a notification for a waiting run. It takes a thread of its own because macOS only
 /// sends the notification while something waits on the response, and that wait blocks.
 #[tauri::command]
@@ -705,9 +716,14 @@ fn notify_needs_you(app: tauri::AppHandle, id: String, title: String, body: Stri
         return;
     }
     std::thread::spawn(move || {
-        if let Ok(handle) = notify_rust::Notification::new().summary(&title).body(&body).show() {
+        let sent = notify_rust::Notification::new()
+            .summary(&title)
+            .body(&body)
+            .action(OPEN_ACTION, "Show")
+            .show();
+        if let Ok(handle) = sent {
             let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
-                if response.is_default_action() {
+                if opens_the_run(response) {
                     let _ = app.emit(NEEDS_YOU_CLICK, &id);
                 }
             });
@@ -802,6 +818,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("penguin-test-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn the_notification_body_and_its_button_both_open_the_run() {
+        use notify_rust::{CloseReason, NotificationResponse};
+
+        assert!(opens_the_run(&NotificationResponse::Default));
+        assert!(opens_the_run(&NotificationResponse::Action(OPEN_ACTION.into())));
+        assert!(!opens_the_run(&NotificationResponse::Action("snooze".into())));
+        assert!(!opens_the_run(&NotificationResponse::Closed(CloseReason::Expired)));
     }
 
     #[test]
