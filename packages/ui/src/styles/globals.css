@@ -157,5 +157,7 @@
     }
   html {
     @apply font-sans;
+    /* Geist ligates -> into an arrow, which misreads every shell command a run quotes. */
+    font-variant-ligatures: no-common-ligatures;
     }
 }

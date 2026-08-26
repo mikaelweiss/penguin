@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { plain } from "@/lib/ansi";
 import { readRunLog } from "@/lib/run-files";
 import type { Run } from "@/lib/runs";
 
@@ -14,8 +15,9 @@ export function useRunLog(run: Run | undefined): string | undefined {
       return;
     }
     let stopped = false;
-    const take = (text: string) => {
-      if (!stopped) setLog(text.trim() === "" ? undefined : text.trim());
+    const take = (raw: string) => {
+      const text = plain(raw).trim();
+      if (!stopped) setLog(text === "" ? undefined : text);
     };
     readRunLog(id).then(take, () => take(""));
     return () => {

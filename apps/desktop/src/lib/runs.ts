@@ -1,3 +1,4 @@
+import { plain } from "@/lib/ansi";
 import type { Attachment } from "@/lib/attachments";
 import type { Hidden } from "@/lib/directories";
 
@@ -283,7 +284,13 @@ function argsOf(entry: Entry): unknown[] {
 }
 
 function display(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
+  return plain(typeof value === "string" ? value : JSON.stringify(value));
+}
+
+/** A logged string the transcript draws, rather than one it looks something up by. */
+function shown(value: unknown): string | undefined {
+  const written = text(value);
+  return written === undefined ? undefined : plain(written);
 }
 
 function baseName(path: string): string {
@@ -356,7 +363,7 @@ function pausedOf(notes: Entry[]): Paused | undefined {
 /** The engine's complaint about the last answer, when it came after this question. */
 function problemOf(entries: Entry[], waiting: Entry): string | undefined {
   const refused = entries.slice(entries.indexOf(waiting)).findLast((entry) => "rejected" in entry);
-  return refused === undefined ? undefined : text(refused["problem"]);
+  return refused === undefined ? undefined : shown(refused["problem"]);
 }
 
 const KINDS: ReadonlySet<string> = new Set(["run", "read", "edit", "search", "fetch", "agent"]);
@@ -379,7 +386,7 @@ function actionOf(entry: Entry, actions: Map<string, ActionItem>): ActionItem | 
 
   const kind = kindOf(call["kind"]);
   const target = text(call["target"]);
-  const output = text(call["output"]);
+  const output = shown(call["output"]);
   const status = statusOf(call["status"]);
   const at = text(entry["at"]) ?? "";
   const known = actions.get(id);
@@ -465,7 +472,7 @@ function inputOf(head: Entry): RunInput[] {
   const params = head["params"];
   if (params === null || typeof params !== "object" || Array.isArray(params)) return [];
   return Object.entries(params as Record<string, unknown>).flatMap(([name, value]) => {
-    const written = text(value);
+    const written = shown(value);
     return written === undefined || written.trim() === "" ? [] : [{ name, text: written }];
   });
 }
