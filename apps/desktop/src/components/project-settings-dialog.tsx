@@ -35,7 +35,7 @@ export function ProjectSettingsDialog({
     key: workflow.file,
     name: workflow.name,
     detail: workflow.error ?? workflow.description,
-    scope: workflow.scope,
+    scope: workflow.worktree ?? workflow.scope,
   }));
   const skills: Definition[] = catalogs.skills.map((skill) => ({
     key: skill.dir,

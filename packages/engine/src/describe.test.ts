@@ -73,3 +73,21 @@ test("a workflow that refuses to load keeps its slot, with the error", async () 
     "greets by echo",
   );
 });
+
+test("a workflow written on a branch is described, named by the checkout it came from", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-repo-"));
+  temps.push(repo);
+  const main = path.join(repo, "main");
+  const branch = path.join(repo, "feature");
+  const entry = path.join(main, ".git", "worktrees", "feature");
+  fs.mkdirSync(entry, { recursive: true });
+  fs.writeFileSync(path.join(entry, "gitdir"), `${branch}/.git\n`);
+  fs.mkdirSync(path.join(branch, ".penguin", "workflows"), { recursive: true });
+  fs.writeFileSync(path.join(branch, ".git"), `gitdir: ${entry}\n`);
+  fs.writeFileSync(path.join(branch, ".penguin", "workflows", "ship.ts"), HELLO);
+  const described = await describe(main);
+  const ship = described.workflows.find((workflow) => workflow.name === "ship");
+  expect(ship?.scope).toBe("worktree");
+  expect(ship?.worktree).toBe("feature");
+  expect(ship?.description).toBe("greets by echo");
+});

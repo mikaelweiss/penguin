@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Scope = "project" | "home" | "starter" | "catalog" | "builtin";
+export type Scope = "project" | "home" | "starter" | "catalog" | "worktree" | "builtin";
 
 export type Workflow = {
   name: string;
   scope: Scope;
   file: string;
+  /** Which sibling checkout it was found in, on a worktree workflow. */
+  worktree?: string;
   description?: string;
   /** The params schema as JSON Schema, what the params form is built from. */
   params?: Record<string, unknown>;
@@ -60,13 +62,14 @@ export function startRun(
   return invoke<string>("start_run", { file, params, dir, id });
 }
 
-const ORDER: Scope[] = ["project", "home", "catalog", "starter", "builtin"];
+const ORDER: Scope[] = ["project", "home", "catalog", "starter", "worktree", "builtin"];
 
 const TITLES: Record<Scope, string> = {
   project: "project",
   home: "home",
   catalog: "catalogs",
   starter: "starter",
+  worktree: "worktrees",
   builtin: "builtin",
 };
 

@@ -16,14 +16,19 @@ export function foundSkills(cwd: string): SkillFound[] {
 }
 
 export function skillsIn(list: catalogs.Catalog[]): SkillFound[] {
+  const all = list.flatMap((catalog) => scan(catalogs.skillsDir(catalog), catalog.scope));
+  // A branch may add a skill, never shadow one. Builtin is scanned after the worktrees, so a
+  // dropped name has to be looked for across every catalog rather than only the earlier ones.
+  const settled = new Set(
+    all.filter((entry) => entry.scope !== "worktree").map((entry) => entry.name),
+  );
   const seen = new Set<string>();
   const found: SkillFound[] = [];
-  for (const catalog of list) {
-    for (const entry of scan(catalogs.skillsDir(catalog), catalog.scope)) {
-      if (seen.has(entry.name)) continue;
-      seen.add(entry.name);
-      found.push(entry);
-    }
+  for (const entry of all) {
+    if (entry.scope === "worktree" && settled.has(entry.name)) continue;
+    if (seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    found.push(entry);
   }
   return found;
 }

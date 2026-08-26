@@ -35,8 +35,9 @@ function startValue({ workflow }: Startable): string {
   return `start ${workflow.name} ${workflow.description ?? ""} ${workflow.file}`;
 }
 
-/** A project workflow belongs to one project, so its row says which. */
+/** A workflow found in a checkout belongs to one folder, so its row says which. */
 function scopeOf({ workflow, projects }: Startable): string {
+  if (workflow.scope === "worktree") return `${workflow.worktree} · worktree`;
   const only = projects[0];
   if (workflow.scope !== "project" || only === undefined) return workflow.scope;
   return `${only.name} · project`;

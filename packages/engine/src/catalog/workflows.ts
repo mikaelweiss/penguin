@@ -2,10 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import * as catalogs from "./catalogs.ts";
 
-export type WorkflowFound = { name: string; scope: catalogs.CatalogScope; file: string };
+export type WorkflowFound = {
+  name: string;
+  scope: catalogs.CatalogScope;
+  file: string;
+  /** Which sibling checkout it was found in, on a worktree workflow. */
+  worktree?: string;
+};
 
 export function found(cwd: string): WorkflowFound[] {
-  return catalogs.roots(cwd).flatMap((catalog) => scan(catalogs.workflowsDir(catalog), catalog.scope));
+  return catalogs.roots(cwd).flatMap(scan);
 }
 
 export function locate(name: string, cwd: string): string | undefined {
@@ -16,7 +22,8 @@ export function searchedWorkflows(cwd: string): string[] {
   return catalogs.roots(cwd).map(catalogs.workflowsDir);
 }
 
-function scan(dir: string, scope: catalogs.CatalogScope): WorkflowFound[] {
+function scan(catalog: catalogs.Catalog): WorkflowFound[] {
+  const dir = catalogs.workflowsDir(catalog);
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir, { withFileTypes: true })
@@ -26,7 +33,8 @@ function scan(dir: string, scope: catalogs.CatalogScope): WorkflowFound[] {
     .sort()
     .map((name) => ({
       name: name.replace(/\.ts$/, ""),
-      scope,
+      scope: catalog.scope,
       file: path.join(dir, name),
+      worktree: catalog.worktree,
     }));
 }

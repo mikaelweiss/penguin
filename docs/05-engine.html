@@ -187,6 +187,11 @@ return definition.run(ctx);</code></pre>
             <td>The line <code>starter</code> in the catalogs file</td>
           </tr>
           <tr>
+            <td><code>worktree</code></td>
+            <td>The <code>.penguin</code> of every other checkout of cwd's repository</td>
+            <td>Definitions written on a branch, before they merge</td>
+          </tr>
+          <tr>
             <td><code>builtin</code></td>
             <td>The engine package's <code>src/adapters/</code></td>
             <td>Always last: the <code>files</code> view, shadowed by anything installed</td>
@@ -200,6 +205,17 @@ return definition.run(ctx);</code></pre>
       a line pointing at a folder that does not exist is skipped rather than reported. The word
       <code>starter</code> is special: it resolves to the engine's own <code>examples/</code>
       directory, wherever the package is installed.
+    </p>
+
+    <p>
+      Worktree catalogs are read from <code>.git/worktrees/</code>, with no <code>git</code>
+      subprocess, so the main checkout sees every branch and a branch sees the main checkout and its
+      siblings. A checkout with no <code>.penguin</code> folder is skipped, and cwd's own catalog is
+      never listed twice. A branch may only add a name, never take one over: a worktree adapter is
+      dropped unless it is the one and only claim on its role, and a worktree skill is dropped when
+      any other catalog supplies that name. Workflows list one row per file, so a branch's
+      <code>ship</code> appears beside the project's, and the run's directory stays the project it
+      started from.
     </p>
 
     <p>

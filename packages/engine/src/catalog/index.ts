@@ -11,6 +11,7 @@ export {
   skillsDir,
   starterCatalog,
   workflowsDir,
+  worktreeCatalogs,
   type Catalog,
   type CatalogScope,
 } from "./catalogs.ts";

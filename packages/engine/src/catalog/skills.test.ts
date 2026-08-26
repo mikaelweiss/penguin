@@ -65,3 +65,17 @@ test("a skill folder without a SKILL.md refuses to load", () => {
   fs.mkdirSync(path.join(catalog.dir, "skills", "empty"), { recursive: true });
   expect(() => skillsIn([catalog])).toThrow(/no SKILL.md/);
 });
+
+test("a worktree skill with a name nothing else supplies installs", () => {
+  const project = catalogWith({ greet: skillMd("greet") });
+  const branch = catalogWith({ ship: skillMd("ship") }, "worktree");
+  expect(skillsIn([project, branch]).map((entry) => entry.name)).toEqual(["greet", "ship"]);
+});
+
+test("a worktree skill never shadows a name a non-worktree catalog supplies", () => {
+  const branch = catalogWith({ greet: skillMd("greet", "the branch one") }, "worktree");
+  const builtin = catalogWith({ greet: skillMd("greet", "the builtin one") }, "builtin");
+  const found = skillsIn([branch, builtin]);
+  expect(found).toHaveLength(1);
+  expect(found[0]?.description).toBe("the builtin one");
+});

@@ -48,6 +48,30 @@ function rootOf(dir: string, marker: string): string {
   return split === -1 ? dir : resolved.slice(0, split);
 }
 
+export type WorktreeCheckout = { name: string; dir: string };
+
+/** Every linked worktree the repository at root knows about, by git's own key. */
+export function worktreeCheckouts(root: string): WorktreeCheckout[] {
+  const gitdir = path.join(root, ".git");
+  if (!fs.existsSync(gitdir) || !fs.statSync(gitdir).isDirectory()) return [];
+  const dir = path.join(gitdir, "worktrees");
+  if (!fs.existsSync(dir)) return [];
+  const found: WorktreeCheckout[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(dir, entry.name, "gitdir");
+    let linked;
+    try {
+      linked = fs.readFileSync(file, "utf8").trim();
+    } catch {
+      continue;
+    }
+    if (path.basename(linked) !== ".git") continue;
+    found.push({ name: entry.name, dir: path.dirname(linked) });
+  }
+  return found;
+}
+
 export function configFile(): string {
   return path.join(home(), "config");
 }

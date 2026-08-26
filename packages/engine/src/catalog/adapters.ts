@@ -21,17 +21,29 @@ export async function installed(cwd: string): Promise<AdapterFound[]> {
 }
 
 export async function installedIn(list: catalogs.Catalog[]): Promise<AdapterFound[]> {
+  const all: AdapterFound[] = [];
+  for (const catalog of list) {
+    all.push(...(await scan(catalogs.adaptersDir(catalog), catalog.scope)));
+  }
   const seen = new Set<string>();
   const found: AdapterFound[] = [];
-  for (const catalog of list) {
-    for (const entry of await scan(catalogs.adaptersDir(catalog), catalog.scope)) {
-      const key = `${entry.role}\n${entry.name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      found.push(entry);
-    }
+  for (const entry of all) {
+    if (entry.scope === "worktree" && !onlyClaim(all, entry.role)) continue;
+    const key = `${entry.role}\n${entry.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(entry);
   }
   return found;
+}
+
+/**
+ * A branch may add a role, never take one over. Two branches adding the same role would conflict
+ * every run in the project, and one shadowing the builtin view would change what already resolves.
+ */
+function onlyClaim(all: AdapterFound[], role: string): boolean {
+  const claiming = all.filter((entry) => entry.role === role);
+  return claiming.length === 1 && claiming[0]?.scope === "worktree";
 }
 
 export function searchedAdapters(cwd: string): string[] {

@@ -254,12 +254,21 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
                     {shelf.workflows.map((workflow) => (
                       <CommandItem
                         key={workflow.file}
-                        value={`${workflow.scope} ${workflow.name} ${workflow.description ?? ""}`}
+                        value={`${workflow.scope} ${workflow.worktree ?? ""} ${workflow.name} ${
+                          workflow.description ?? ""
+                        }`}
                         disabled={workflow.error !== undefined}
                         onSelect={() => choose(workflow)}
                         className="flex-col items-start gap-0.5"
                       >
-                        <div className="text-sm">{workflow.name}</div>
+                        <div className="flex items-baseline gap-2 text-sm">
+                          {workflow.name}
+                          {workflow.worktree === undefined ? null : (
+                            <span className="text-xs text-muted-foreground">
+                              {workflow.worktree}
+                            </span>
+                          )}
+                        </div>
                         <div
                           className={cn(
                             "text-xs",

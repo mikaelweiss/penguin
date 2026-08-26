@@ -1,13 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { catalogsFile, home, projectHome } from "../paths.ts";
+import { catalogsFile, home, projectHome, projectRoot, worktreeCheckouts } from "../paths.ts";
 
-export type CatalogScope = "project" | "home" | "starter" | "catalog" | "builtin";
+export type CatalogScope = "project" | "home" | "starter" | "catalog" | "worktree" | "builtin";
 
 export type Catalog = {
   dir: string;
   scope: CatalogScope;
+  /** Which sibling checkout this came from, on a worktree catalog. */
+  worktree?: string;
 };
 
 export function projectCatalog(cwd: string): Catalog {
@@ -27,9 +29,33 @@ export function builtinCatalog(): Catalog {
   return { dir: fileURLToPath(new URL("..", import.meta.url)), scope: "builtin" };
 }
 
-/** Project, then home, then catalogs enabled in ~/.penguin/catalogs, then builtin. Earlier wins. */
+/**
+ * The catalogs of every other checkout of cwd's repository, so a definition written on a branch
+ * is startable before it merges. The main checkout is listed too; git keeps no entry for it.
+ */
+export function worktreeCatalogs(cwd: string): Catalog[] {
+  const root = projectRoot(cwd);
+  const self = fs.existsSync(cwd) ? fs.realpathSync(cwd) : path.resolve(cwd);
+  return [{ name: path.basename(root), dir: root }, ...worktreeCheckouts(root)]
+    .sort((a, b) => a.dir.localeCompare(b.dir))
+    .filter((entry) => fs.existsSync(projectHome(entry.dir)))
+    .filter((entry) => fs.realpathSync(entry.dir) !== self)
+    .map((entry): Catalog => ({
+      dir: projectHome(entry.dir),
+      scope: "worktree",
+      worktree: entry.name,
+    }));
+}
+
+/** Project, then home, then enabled catalogs, then sibling checkouts, then builtin. Earlier wins. */
 export function roots(cwd: string): Catalog[] {
-  return [projectCatalog(cwd), homeCatalog(), ...enabled(), builtinCatalog()];
+  return [
+    projectCatalog(cwd),
+    homeCatalog(),
+    ...enabled(),
+    ...worktreeCatalogs(cwd),
+    builtinCatalog(),
+  ];
 }
 
 export function workflowsDir(catalog: Catalog): string {

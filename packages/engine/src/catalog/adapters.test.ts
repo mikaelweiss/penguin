@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pick, type AdapterFound } from "./adapters.ts";
+import { installedIn, pick, type AdapterFound } from "./adapters.ts";
+import type { Catalog } from "./catalogs.ts";
 
 function entry(role: string, name: string): AdapterFound {
   return {
@@ -67,4 +68,61 @@ test("a builtin is a fallback: one installed implementation shadows it", () => {
   expect("found" in alone && alone.found.name).toBe("files");
   const shadowed = pick([builtin, entry("view", "web")], "view");
   expect("found" in shadowed && shadowed.found.name).toBe("web");
+});
+
+function adapterFile(role: string, name: string): string {
+  return `import { adapter } from "penguin";
+export default adapter({
+  role: "${role}",
+  name: "${name}",
+  description: "a test adapter",
+  build: () => ({}),
+});
+`;
+}
+
+function catalogWith(
+  scope: Catalog["scope"],
+  role: string,
+  name: string,
+  worktree?: string,
+): Catalog {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-adapters-"));
+  temps.push(dir);
+  fs.mkdirSync(path.join(dir, "adapters"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "adapters", `${name}.ts`), adapterFile(role, name));
+  return worktree === undefined ? { dir, scope } : { dir, scope, worktree };
+}
+
+test("a worktree adapter for a role the project already supplies is dropped", async () => {
+  const found = await installedIn([
+    catalogWith("project", "vcs", "git"),
+    catalogWith("worktree", "vcs", "jj", "feature"),
+  ]);
+  expect(found.map((entry) => entry.name)).toEqual(["git"]);
+});
+
+test("a worktree adapter for a role only the builtin supplies is dropped", async () => {
+  const found = await installedIn([
+    catalogWith("worktree", "view", "web", "feature"),
+    catalogWith("builtin", "view", "files-view"),
+  ]);
+  expect(found.map((entry) => entry.name)).toEqual(["files-view"]);
+});
+
+test("two worktrees claiming one new role drop both, rather than conflicting every run", async () => {
+  const found = await installedIn([
+    catalogWith("worktree", "fmt", "black", "alpha"),
+    catalogWith("worktree", "fmt", "ruff", "beta"),
+  ]);
+  expect(found).toEqual([]);
+});
+
+test("a role only one worktree supplies installs from the branch", async () => {
+  const found = await installedIn([
+    catalogWith("project", "vcs", "git"),
+    catalogWith("worktree", "fmt", "ruff", "feature"),
+  ]);
+  expect(found.map((entry) => entry.name)).toEqual(["git", "ruff"]);
+  expect(found[1]?.scope).toBe("worktree");
 });
