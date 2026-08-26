@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { catalogsFile, home, projectHome, projectRoot, worktreeCheckouts } from "../paths.ts";
+import { catalogsFile, home, projectHome, projectRoot, real, worktreeCheckouts } from "../paths.ts";
 
 export type CatalogScope = "project" | "home" | "starter" | "catalog" | "worktree" | "builtin";
 
@@ -35,16 +35,31 @@ export function builtinCatalog(): Catalog {
  */
 export function worktreeCatalogs(cwd: string): Catalog[] {
   const root = projectRoot(cwd);
-  const self = fs.existsSync(cwd) ? fs.realpathSync(cwd) : path.resolve(cwd);
+  const self = real(cwd);
   return [{ name: path.basename(root), dir: root }, ...worktreeCheckouts(root)]
     .sort((a, b) => a.dir.localeCompare(b.dir))
     .filter((entry) => fs.existsSync(projectHome(entry.dir)))
-    .filter((entry) => fs.realpathSync(entry.dir) !== self)
+    .filter((entry) => real(entry.dir) !== self)
     .map((entry): Catalog => ({
       dir: projectHome(entry.dir),
       scope: "worktree",
       worktree: entry.name,
     }));
+}
+
+/** How far each catalog sits from the run, nearest first. roots() lists them in this order. */
+const DISTANCE: CatalogScope[] = ["project", "home", "catalog", "starter", "worktree", "builtin"];
+
+/** How far a scope sits from the run. Lower is nearer, and the nearest claim on a role wins. */
+export function nearness(scope: CatalogScope): number {
+  return DISTANCE.indexOf(scope);
+}
+
+/** The checkout a workflow file lives in, when the catalog holding it is a sibling's. */
+export function checkoutOf(list: Catalog[], file: string): string | undefined {
+  const owner = path.dirname(path.dirname(real(file)));
+  const held = list.find((catalog) => catalog.scope === "worktree" && real(catalog.dir) === owner);
+  return held === undefined ? undefined : path.dirname(held.dir);
 }
 
 /** Project, then home, then enabled catalogs, then sibling checkouts, then builtin. Earlier wins. */

@@ -18,6 +18,11 @@ export function projectHome(cwd: string): string {
   return path.join(cwd, ".penguin");
 }
 
+/** A folder as the filesystem knows it, so two spellings of one place compare equal. */
+export function real(dir: string): string {
+  return fs.existsSync(dir) ? fs.realpathSync(dir) : path.resolve(dir);
+}
+
 export function runsDir(): string {
   return path.join(stateRoot(), "runs");
 }

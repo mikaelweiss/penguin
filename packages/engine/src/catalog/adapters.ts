@@ -85,9 +85,13 @@ export function pick(list: AdapterFound[], role: string, name?: string): Picked 
     const fix = name === undefined ? ` Edit ${configFile()} to choose one.` : "";
     return { missing: `no ${role} adapter named ${wanted}. Installed: ${names}.${fix}` };
   }
-  // A builtin is a fallback: one installed implementation shadows it without a config line.
-  const installed = implementations.filter((entry) => entry.scope !== "builtin");
-  const candidates = installed.length > 0 ? installed : implementations;
+  // The catalogs are a search path: the nearest one claiming the role wins, so a project's
+  // adapter shadows a starter's the way any installed one already shadowed the builtin. Two
+  // names at one distance is the ambiguity nobody can rank, so that still asks for a line.
+  const nearest = Math.min(...implementations.map((entry) => catalogs.nearness(entry.scope)));
+  const candidates = implementations.filter(
+    (entry) => catalogs.nearness(entry.scope) === nearest,
+  );
   const first = candidates[0];
   if (first === undefined) {
     return { missing: `no ${role} adapter is installed` };

@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -55,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env["XDG_STATE_HOME"];
+  delete process.env["PENGUIN_HOME"];
   delete process.env["PENGUIN_TEST_TALLY"];
   for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true });
   temps = [];
@@ -79,6 +81,26 @@ test("two implementations of one role refuse to run, naming both", async () => {
   });
   await expect(run(workflow, { name: "pip" }, { catalogs: list })).rejects.toThrow(
     /2 echo adapters/,
+  );
+});
+
+const NEEDY = `import { workflow } from "penguin";
+import { z } from "zod";
+type Ledger = { write(text: string): Promise<void> };
+export default workflow({
+  description: "writes to a role nothing installs",
+  params: z.object({ name: z.string().describe("who to greet") }),
+  async run(ctx) {
+    const ledger = (ctx as unknown as { ledger: Ledger }).ledger;
+    await ledger.write(ctx.params.name);
+  },
+});
+`;
+
+test("a role nothing installed is named where the workflow reads it", async () => {
+  const { list, workflow } = catalog({ "adapters/echo.ts": ECHO, "workflows/hello.ts": NEEDY });
+  await expect(run(workflow, { name: "pip" }, { catalogs: list })).rejects.toThrow(
+    /no ledger adapter is installed/,
   );
 });
 
@@ -222,3 +244,81 @@ test("a child takes the folder call names, resolved against the parent's", async
   expect(parent?.["cwd"]).toBe(base);
   expect(child?.["cwd"]).toBe(path.join(base, "sub"));
 }, 20000);
+
+function git(cwd: string, args: string[]): void {
+  const done = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (done.status !== 0) throw new Error(`git ${args.join(" ")}: ${done.stderr}`);
+}
+
+/** A repository holding one commit, so a checkout can be cut from it. */
+function repository(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-repo-"));
+  temps.push(dir);
+  git(dir, ["init", "-b", "main"]);
+  git(dir, ["config", "user.email", "penguin@test"]);
+  git(dir, ["config", "user.name", "penguin"]);
+  fs.writeFileSync(path.join(dir, "readme.md"), "a repository\n");
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "first"]);
+  return dir;
+}
+
+/** The catalog files a checkout carries, written where that checkout's runs will look. */
+function stock(checkout: string, files: Record<string, string>): string {
+  const home = path.join(checkout, ".penguin");
+  fs.mkdirSync(path.join(home, "adapters"), { recursive: true });
+  fs.mkdirSync(path.join(home, "workflows"), { recursive: true });
+  for (const [name, content] of Object.entries(files)) {
+    fs.writeFileSync(path.join(home, name), content);
+  }
+  return path.join(home, "workflows/hello.ts");
+}
+
+/** A sibling checkout of root, on a branch of its own. */
+function sibling(root: string, name: string): string {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-branch-")), name);
+  temps.push(path.dirname(dir));
+  git(root, ["worktree", "add", "-b", name, dir]);
+  return dir;
+}
+
+/** A home of its own, so the user's real catalogs stay out of the run. */
+function bare(): void {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-home-"));
+  temps.push(dir);
+  process.env["PENGUIN_HOME"] = dir;
+}
+
+function head(): Record<string, unknown> {
+  const dirs = fs.readdirSync(runsDir());
+  const first = dirs[0];
+  if (dirs.length !== 1 || first === undefined) throw new Error("no single run folder");
+  const line = fs.readFileSync(path.join(runsDir(), first, "run.jsonl"), "utf8").split("\n")[0];
+  return JSON.parse(line ?? "{}") as Record<string, unknown>;
+}
+
+test("a workflow a sibling checkout holds runs in that checkout, with its adapters", async () => {
+  bare();
+  const root = repository();
+  const checkout = sibling(root, "feature");
+  const workflow = stock(checkout, { "adapters/echo.ts": ECHO, "workflows/hello.ts": HELLO });
+
+  // Only the branch has an echo adapter, so an answer at all is the branch's catalog answering.
+  const result = await run(workflow, { name: "pip" }, { cwd: root });
+
+  expect(result).toEqual({ ok: true, text: "hello pip" });
+  expect(head()["cwd"]).toBe(fs.realpathSync(checkout));
+  expect(head()["root"]).toBe(fs.realpathSync(root));
+});
+
+test("a workflow the run's own checkout holds stays where the run started", async () => {
+  bare();
+  const root = repository();
+  sibling(root, "feature");
+  const workflow = stock(root, { "adapters/echo.ts": ECHO, "workflows/hello.ts": HELLO });
+
+  const result = await run(workflow, { name: "pip" }, { cwd: root });
+
+  expect(result).toEqual({ ok: true, text: "hello pip" });
+  expect(head()["cwd"]).toBe(root);
+});

@@ -290,8 +290,10 @@ output.end();         // when they stop</code></pre>
 
     <p>
       Ship a second <code>name</code> under the same <code>role</code> and both are installed.
-      Penguin will not choose between them. It reports the conflict and names the file to edit,
-      except a builtin, which any single installed implementation shadows without a config line.
+      Distance decides first: the catalogs are a search path, so a project's adapter shadows a
+      home one, a home one shadows a starter, and anything shadows a builtin, all without a config
+      line. Two names at the same distance is the ambiguity nobody can rank, and penguin will not
+      choose between them: it reports the conflict and names the file to edit.
       See <a href="/engine">The engine</a>.
     </p>
   </body>

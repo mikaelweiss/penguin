@@ -78,7 +78,8 @@
       wiring function, exported as <code>penguin/run</code>. Its whole body:
     </p>
 
-    <pre><code>const definition = await load(file);
+    <pre><code>const { cwd, list } = where(file, options.cwd ?? process.cwd(), options.catalogs);
+const definition = await load(file);
 const parsed = definition.params.parse(params);
 const trace = createTrace({ id, workflow: file, params: parsed, cwd, root, parent });
 const host = createHost(cwd, { id, dir: trace.dir }, list);
@@ -89,15 +90,24 @@ for (const role of new Set(found.map((entry) =&gt; entry.role))) {
   if ("conflict" in picked) throw new PenguinError(picked.conflict);
   ctx[role] = trace.wrap(role, picked.found.definition.build(host));
 }
-return definition.run(ctx);</code></pre>
+return definition.run(reached(ctx));</code></pre>
 
     <p>
-      Load a definition, parse its params, open the run file, make a host, resolve one
-      implementation per role through <code>pick</code>, build it onto <code>ctx</code>, await
-      <code>run</code>. Ambiguity is reported, never guessed: a role with two installed
-      implementations and no recorded choice refuses to run and names the file to edit, except a
-      builtin, which any single installed implementation shadows. Each built adapter is wrapped by
-      the run file on the way in, so every call it receives lands there.
+      Settle the folder, load a definition, parse its params, open the run file, make a host,
+      resolve one implementation per role through <code>pick</code>, build it onto
+      <code>ctx</code>, await <code>run</code>. Ambiguity is reported, never guessed: a role with
+      two implementations at one distance and no recorded choice refuses to run and names the file
+      to edit, while a nearer catalog shadows a farther one outright. Each built adapter is wrapped
+      by the run file on the way in, so every call it receives lands there, and <code>reached</code>
+      wraps <code>ctx</code> so a role nothing installed is named where the workflow reads it,
+      rather than passing as <code>undefined</code> until the first call.
+    </p>
+
+    <p>
+      <code>where</code> settles the folder before anything is built. A workflow a sibling checkout
+      holds runs in that checkout, so the catalog it came from is the project's and its adapters
+      are live, exactly as they will be once it merges. Everything else runs where it was started,
+      and a sub-run is handed its catalogs by the parent, which already chose its folder.
     </p>
 
     <p>
@@ -194,7 +204,7 @@ return definition.run(ctx);</code></pre>
           <tr>
             <td><code>builtin</code></td>
             <td>The engine package's <code>src/adapters/</code></td>
-            <td>Always last: the <code>files</code> view, shadowed by anything installed</td>
+            <td>Always last: the <code>files</code> view, shadowed by any nearer catalog</td>
           </tr>
         </tbody>
       </table>
@@ -219,8 +229,9 @@ return definition.run(ctx);</code></pre>
       name. A branch is free to be half written: a file there that
       refuses to load is skipped, where the same file in the project's own catalog still throws.
       Workflows list one row per file, so a branch's
-      <code>ship</code> appears beside the project's, and the run's directory stays the project it
-      started from.
+      <code>ship</code> appears beside the project's, and starting it moves the run into that
+      branch's checkout, where the branch's own catalog is the project one and its adapters need no
+      config line at all.
     </p>
 
     <p>
@@ -247,7 +258,7 @@ return definition.run(ctx);</code></pre>
 
     <pre><code>export type Picked = { found: AdapterFound } | { missing: string } | { conflict: string };</code></pre>
 
-    <p>It tries an explicit <code>name</code>, then the role's line in <code>~/.penguin/config</code>, then the only installed implementation, a builtin counting only when nothing shadows it. With more than one and no choice recorded, it names them and says how to fix it:</p>
+    <p>It tries an explicit <code>name</code>, then the role's line in <code>~/.penguin/config</code>, then the nearest catalog claiming the role, a builtin counting only when nothing nearer does. With more than one at that distance and no choice recorded, it names them and says how to fix it:</p>
 
     <pre><code>2 vcs adapters are installed (git, jj).
 Write "vcs jj" to /Users/you/.penguin/config to choose one.</code></pre>

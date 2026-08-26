@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { installedIn, pick } from "./catalog/adapters.ts";
-import { builtinCatalog, roots, type Catalog } from "./catalog/catalogs.ts";
+import { builtinCatalog, checkoutOf, roots, type Catalog } from "./catalog/catalogs.ts";
 import { load } from "./catalog/loader.ts";
 import { skillLookup } from "./catalog/skills.ts";
 import { PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
@@ -34,7 +34,7 @@ export async function run(
   params: unknown = {},
   options?: RunOptions,
 ): Promise<unknown> {
-  const cwd = options?.cwd ?? process.cwd();
+  const { cwd, list } = where(file, options?.cwd ?? process.cwd(), options?.catalogs);
   const definition = await load(file);
   const parsed: unknown = definition.params.parse(params);
   const id = options?.id ?? runId();
@@ -44,8 +44,6 @@ export async function run(
     { id, workflow: file, params: parsed, cwd, root: projectRoot(cwd), parent: options?.parent },
     journal,
   );
-  const list =
-    options?.catalogs === undefined ? roots(cwd) : [...options.catalogs, builtinCatalog()];
   const host = createHost(cwd, { id, dir: trace.dir }, skillLookup(list));
   const found = await installedIn(list);
   const ctx: Record<PropertyKey, unknown> = { params: parsed };
@@ -59,13 +57,45 @@ export async function run(
   ctx[RUN] = hooks(trace, id, cwd, list);
   try {
     // The loader duck-typed the definition, so its schema's static type is gone here.
-    const result = await definition.run(ctx as never);
+    const result = await definition.run(reached(ctx) as never);
     trace.note({ outcome: result ?? null });
     return result;
   } catch (error) {
     trace.note({ threw: error instanceof Error ? error.message : String(error) });
     throw error;
   }
+}
+
+/**
+ * Where the run happens and what it can reach. A workflow written on a branch runs in that
+ * branch's checkout, so the catalog it came from is the project's and its adapters are live,
+ * exactly as they will be once it merges. A sub-run is handed catalogs by the parent, which
+ * already chose its folder, so nothing here moves it.
+ */
+function where(
+  file: string,
+  cwd: string,
+  given: Catalog[] | undefined,
+): { cwd: string; list: Catalog[] } {
+  if (given !== undefined) return { cwd, list: [...given, builtinCatalog()] };
+  const list = roots(cwd);
+  const checkout = checkoutOf(list, file);
+  return checkout === undefined ? { cwd, list } : { cwd: checkout, list: roots(checkout) };
+}
+
+/**
+ * The ctx a workflow reads its adapters from. A role nothing installed is named on the read,
+ * because it otherwise passes as undefined and surfaces as a type error at the first call,
+ * whole agent turns after the run began.
+ */
+function reached(ctx: Record<PropertyKey, unknown>): Record<PropertyKey, unknown> {
+  return new Proxy(ctx, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (typeof key === "string") throw new PenguinError(`no ${key} adapter is installed`);
+      return undefined;
+    },
+  });
 }
 
 type Job = { workflow: string; params: unknown; cwd?: string };

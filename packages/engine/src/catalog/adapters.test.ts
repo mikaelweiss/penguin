@@ -62,6 +62,14 @@ test("the config file chooses a role's implementation", () => {
   expect("found" in picked && picked.found.name).toBe("jj");
 });
 
+test("a nearer catalog shadows a farther one, whichever order they are scanned in", () => {
+  const starter: AdapterFound = { ...entry("vcs", "git"), scope: "starter" };
+  const near = pick([starter, entry("vcs", "jj")], "vcs");
+  expect("found" in near && near.found.name).toBe("jj");
+  const far = pick([entry("vcs", "jj"), starter], "vcs");
+  expect("found" in far && far.found.name).toBe("jj");
+});
+
 test("a builtin is a fallback: one installed implementation shadows it", () => {
   const builtin: AdapterFound = { ...entry("view", "files"), scope: "builtin" };
   const alone = pick([builtin], "view");
