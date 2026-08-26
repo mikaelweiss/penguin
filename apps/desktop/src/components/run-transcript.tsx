@@ -291,10 +291,23 @@ const ClosingRow = memo(function ClosingRow({ text }: { text: string }) {
   );
 });
 
+/** The step the run just handed an agent, ruled off so its story does not run into the last one. */
+const TurnRow = memo(function TurnRow({ label }: { label: string }) {
+  return (
+    <Marker variant="separator">
+      <MarkerIcon>
+        <BotIcon />
+      </MarkerIcon>
+      <MarkerContent>{label}</MarkerContent>
+    </Marker>
+  );
+});
+
 /** Work rows sit tight against each other; prose and turns get room to breathe. */
 function spacing(row: TranscriptRow): string {
   if (row.kind === "actions" || row.kind === "live") return `pb-0.5 ${ONE_LINE}`;
   if (row.kind === "closing") return `pt-2 pb-0.5 ${ONE_LINE}`;
+  if (row.kind === "turn") return `pt-4 pb-4 ${ONE_LINE}`;
   return "pb-4";
 }
 
@@ -308,6 +321,8 @@ function Row({ row, live, open, onToggle }: RowProps) {
       return <LineRow line={row.line} />;
     case "actions":
       return <ActionsRow row={row} live={live} open={open} onToggle={onToggle} />;
+    case "turn":
+      return <TurnRow label={row.label} />;
     case "live":
       return <LiveRow state={row.state} />;
     case "closing":

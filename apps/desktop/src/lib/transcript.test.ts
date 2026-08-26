@@ -29,6 +29,10 @@ function said(id: string, kind: OutputLine["kind"], at: string): TranscriptItem 
   return { type: "line", line: line(id, kind, at) };
 }
 
+function turn(id: string, agent: number, at: string, skill?: string): TranscriptItem {
+  return { type: "turn", id, agent, at, ...(skill === undefined ? {} : { skill }) };
+}
+
 test("a question and its answer share a call id but never a row key", () => {
   const rows = toRows(run([said("c4", "ask", "t1"), said("c4", "answer", "t2")]), [], undefined);
 
@@ -150,4 +154,52 @@ test("the scroller anchors on what the person sent, not on the run's own output"
     "input",
     "line:message:sent:0",
   ]);
+});
+
+test("a turn boundary breaks the fold, so the next step's work is its own group", () => {
+  const rows = toRows(
+    run([act("a1", "run", "t1"), turn("t1", 1, "t2", "implement"), act("a2", "run", "t3")]),
+    [],
+    undefined,
+  );
+
+  expect(rows.map((row) => row.key)).toEqual(["actions:a1", "turn:t1", "actions:a2"]);
+});
+
+test("one agent working alone is named by its step, with no number to tell it apart", () => {
+  const rows = toRows(run([turn("t1", 1, "t1", "plan")]), [], undefined);
+
+  expect(rows[0]).toMatchObject({ kind: "turn", label: "plan" });
+});
+
+test("a run passing work between agents says which one took each step", () => {
+  const rows = toRows(
+    run([turn("t1", 1, "t1", "implement"), turn("t2", 2, "t2", "review")]),
+    [],
+    undefined,
+  );
+
+  expect(rows.map((row) => (row.kind === "turn" ? row.label : row.key))).toEqual([
+    "implement · agent 1",
+    "review · agent 2",
+  ]);
+});
+
+test("a turn on a bare prompt falls back to naming the agent", () => {
+  const rows = toRows(run([turn("t1", 1, "t1"), turn("t2", 2, "t2")]), [], undefined);
+
+  expect(rows.map((row) => (row.kind === "turn" ? row.label : row.key))).toEqual([
+    "agent 1",
+    "agent 2",
+  ]);
+});
+
+test("the scroller anchors on each new step", () => {
+  const rows = toRows(
+    run([said("c1", "show", "t1"), turn("t1", 1, "t2", "review")]),
+    [],
+    undefined,
+  );
+
+  expect(rows.filter(startsTurn).map((row) => row.key)).toEqual(["turn:t1"]);
 });

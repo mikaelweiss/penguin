@@ -36,7 +36,18 @@ export type ActionItem = {
   doneAt?: string;
 };
 
-export type TranscriptItem = { type: "line"; line: OutputLine } | ActionItem;
+/** Where the run handed work to an agent. The step boundary the story otherwise runs straight through. */
+export type TurnMark = {
+  type: "turn";
+  id: string;
+  /** The skill the turn runs, when the workflow named one instead of a bare prompt. */
+  skill?: string;
+  /** Which agent took it, in the order the run first gave each one work. */
+  agent: number;
+  at: string;
+};
+
+export type TranscriptItem = { type: "line"; line: OutputLine } | ActionItem | TurnMark;
 
 export type Ask = {
   prompt: string;
@@ -375,9 +386,35 @@ function actionOf(entry: Entry, actions: Map<string, ActionItem>): ActionItem | 
   return action;
 }
 
+function agentOf(session: string, agents: Map<string, number>): number {
+  const known = agents.get(session);
+  if (known !== undefined) return known;
+  const ordinal = agents.size + 1;
+  agents.set(session, ordinal);
+  return ordinal;
+}
+
+function turnOf(entry: Entry, agents: Map<string, number>, id: string): TurnMark | undefined {
+  const args = argsOf(entry);
+  const session = text(args[0]);
+  if (session === undefined) return undefined;
+  const ask = args[1];
+  const named = ask === null || typeof ask !== "object" ? undefined : (ask as Entry)["skill"];
+  const skill = text(named);
+  return {
+    type: "turn",
+    id,
+    agent: agentOf(session, agents),
+    ...(skill === undefined ? {} : { skill }),
+    at: text(entry["at"]) ?? "",
+  };
+}
+
 function outputOf(entries: Entry[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const actions = new Map<string, ActionItem>();
+  const agents = new Map<string, number>();
+  let turns = 0;
   for (const entry of entries) {
     const args = argsOf(entry);
     const at = text(entry["at"]) ?? "";
@@ -394,6 +431,9 @@ function outputOf(entries: Entry[]): TranscriptItem[] {
       line("ask", display(args[0]));
     } else if (entry["call"] === "view.ask" && "outcome" in entry) {
       line("answer", display(entry["outcome"]));
+    } else if (entry["call"] === "agent.turn" && entry["handle"] === true) {
+      const mark = turnOf(entry, agents, `t${++turns}`);
+      if (mark !== undefined) items.push(mark);
     }
   }
   return items;

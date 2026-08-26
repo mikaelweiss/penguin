@@ -6,12 +6,14 @@ import type {
   RunInput,
   RunState,
   TranscriptItem,
+  TurnMark,
 } from "@/lib/runs";
 
 export type TranscriptRow =
   | { kind: "input"; key: string; input: RunInput[] }
   | { kind: "line"; key: string; line: OutputLine }
   | { kind: "actions"; key: string; actions: ActionItem[]; summary: string; failures: number }
+  | { kind: "turn"; key: string; label: string }
   | { kind: "live"; key: string; state: RunState }
   | { kind: "closing"; key: string; text: string };
 
@@ -80,6 +82,13 @@ export function summarizeActions(actions: ActionItem[]): string {
   return join(clauses);
 }
 
+/** The step, and who took it. One agent working alone needs no number to tell it apart. */
+function labelTurn(turn: TurnMark, agents: number): string {
+  const who = agents > 1 ? `agent ${turn.agent}` : undefined;
+  if (turn.skill === undefined) return who ?? "agent";
+  return who === undefined ? turn.skill : `${turn.skill} · ${who}`;
+}
+
 function at(item: TranscriptItem): string {
   return item.type === "line" ? item.line.at : item.at;
 }
@@ -95,7 +104,13 @@ export function toRows(run: Run, sent: OutputLine[], live: RunState | undefined)
   const rows: TranscriptRow[] = [];
   if (run.input.length > 0) rows.push({ kind: "input", key: "input", input: run.input });
 
+  const agents = new Set(run.output.flatMap((item) => (item.type === "turn" ? [item.agent] : [])));
+
   for (const item of ordered(run, sent)) {
+    if (item.type === "turn") {
+      rows.push({ kind: "turn", key: `turn:${item.id}`, label: labelTurn(item, agents.size) });
+      continue;
+    }
     if (item.type === "action") {
       const tail = rows.at(-1);
       if (tail?.kind === "actions") {
@@ -139,7 +154,7 @@ export function toRows(run: Run, sent: OutputLine[], live: RunState | undefined)
 
 /** Where a turn begins. The scroller parks these near the top instead of chasing the tail. */
 export function startsTurn(row: TranscriptRow): boolean {
-  if (row.kind === "input") return true;
+  if (row.kind === "input" || row.kind === "turn") return true;
   return row.kind === "line" && row.line.kind === "message";
 }
 
@@ -181,6 +196,8 @@ function same(a: TranscriptRow, b: TranscriptRow): boolean {
         sameActions(a.actions, other.actions)
       );
     }
+    case "turn":
+      return a.label === (b as typeof a).label;
     case "live": {
       const other = (b as typeof a).state;
       return a.state.text === other.text && a.state.at === other.at && a.state.idle === other.idle;
