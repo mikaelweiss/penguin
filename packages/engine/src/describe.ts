@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { installedIn } from "./catalog/adapters.ts";
 import { roots, type CatalogScope } from "./catalog/catalogs.ts";
+import { writeEditorFiles } from "./catalog/editor.ts";
 import { load } from "./catalog/loader.ts";
 import { skillsIn, type SkillFound } from "./catalog/skills.ts";
 import { found, type WorkflowFound } from "./catalog/workflows.ts";
@@ -31,7 +32,10 @@ export type Described = {
   errors: string[];
 };
 
-/** Everything the catalogs hold for one folder, as plain JSON. */
+/**
+ * Everything the catalogs hold for one folder, as plain JSON. Reading a catalog
+ * is also the moment its editor files can be true, so this refreshes them.
+ */
 export async function describe(cwd: string): Promise<Described> {
   const list = roots(cwd);
   const errors: string[] = [];
@@ -63,6 +67,11 @@ export async function describe(cwd: string): Promise<Described> {
       scope,
       file,
     }));
+  } catch (error) {
+    errors.push(messageOf(error));
+  }
+  try {
+    await writeEditorFiles(list);
   } catch (error) {
     errors.push(messageOf(error));
   }

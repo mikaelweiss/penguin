@@ -38,7 +38,7 @@ function fresh(source: string, target: string): boolean {
   return fs.statSync(target).mtimeMs >= fs.statSync(source).mtimeMs;
 }
 
-/** The engine runs from source on the bundled bun, so it ships as source, zod included. */
+/** The engine runs from source on the bundled bun, so it ships as source, zod and types included. */
 function stageEngine(): void {
   const target = path.join(tauri, "engine");
   fs.rmSync(target, { recursive: true, force: true });
@@ -50,14 +50,31 @@ function stageEngine(): void {
     filter: (from) => !from.endsWith(".test.ts"),
   });
   fs.cpSync(path.join(engine, "examples"), path.join(target, "examples"), { recursive: true });
-  for (const dependency of ["zod", "bun-pty"]) {
-    fs.cpSync(
-      path.join(repo, "node_modules", dependency),
-      path.join(target, "node_modules", dependency),
-      { recursive: true, dereference: true },
-    );
+  const staged = new Set<string>();
+  // The types are here because penguin points a catalog's tsconfig at them, so an
+  // author editing definition files gets the same resolution a checkout gives.
+  for (const dependency of ["zod", "bun-pty", "@types/bun", "@types/node"]) {
+    stagePackage(dependency, target, staged);
   }
   console.log(`staged ${engine}`);
+}
+
+/** Copies one package and what it depends on, flat, the way bun's hoisted install reads. */
+function stagePackage(name: string, target: string, staged: Set<string>): void {
+  if (staged.has(name)) return;
+  staged.add(name);
+  const source = path.join(repo, "node_modules", name);
+  if (!fs.existsSync(source)) fail(`${name} is not installed, so the bundle cannot carry it`);
+  fs.cpSync(source, path.join(target, "node_modules", name), {
+    recursive: true,
+    dereference: true,
+  });
+  const manifest = JSON.parse(fs.readFileSync(path.join(source, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+  };
+  for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+    stagePackage(dependency, target, staged);
+  }
 }
 
 stageBun();
