@@ -6,6 +6,7 @@ const WATCHED_FIELDS = "state,isDraft,body,headRefOid,url,comments,reviews";
 const QUEUE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){isInMergeQueue}}}";
 const QUEUE_PATH = ".data.repository.pullRequest.isInMergeQueue";
+const OPENED_FIELDS = "number,baseRefName,url";
 const REQUESTED_FIELDS = "number,title,url";
 const REQUESTED_LIMIT = 100;
 const POLL_MS = 30_000;
@@ -33,6 +34,12 @@ type Comment = {
   author: string;
   at: string;
   body: string;
+};
+
+type Opened = {
+  number: number;
+  baseRefName: string;
+  url: string;
 };
 
 type Requested = {
@@ -248,6 +255,21 @@ export default adapter({
           const done = await gh(["pr", "view", pr, "--json", "comments"]);
           if (done.code !== 0) return { ok: false, comments: [], reason: reasonOf(done) };
           return { ok: true, comments: commentsOf(done.stdout), reason: "" };
+        },
+        /** What the branch already has open, with the base each one lands on. None is an answer. */
+        async of(branch: string): Promise<{ ok: boolean; prs: Opened[]; reason: string }> {
+          const done = await gh([
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            OPENED_FIELDS,
+          ]);
+          if (done.code !== 0) return { ok: false, prs: [], reason: reasonOf(done) };
+          return { ok: true, prs: JSON.parse(done.stdout) as Opened[], reason: "" };
         },
         /** The branch's pull request. One that is open already is the answer, not a failure. */
         async create(options?: {

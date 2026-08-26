@@ -109,8 +109,30 @@ export default workflow({
       }
     }
 
-    const base = await resolveBase(ctx, params.base);
+    let base = await resolveBase(ctx, params.base);
     if (base === "") return nowhere;
+    // A branch that already has a pull request lands where that pull request says. Rebasing it
+    // anywhere else force-pushes a stacked branch out from under the one it was opened on.
+    for (;;) {
+      const open = await github.pr.of(head.branch);
+      if (!open.ok) {
+        if (!(await again(`The pull requests on ${head.branch} did not read: ${open.reason}`))) {
+          return nowhere;
+        }
+        continue;
+      }
+      const other = open.prs[0];
+      if (other === undefined || open.prs.some((one) => one.baseRefName === base)) break;
+      const answer = await view.ask(
+        `PR #${other.number} is open from ${head.branch} onto ${other.baseRefName}, not ${base}. Reply ok to land it on ${other.baseRefName}, or stop.`,
+        Confirm,
+      );
+      if (answer === "stop") return nowhere;
+      if (answer === "ok") {
+        base = other.baseRefName;
+        break;
+      }
+    }
     if (head.branch === base) {
       for (;;) {
         const answer = await view.ask(
@@ -342,7 +364,7 @@ export default workflow({
       for (;;) {
         // Ahead of the feedback round, so an agent assessing feedback reads a branch that
         // already sits on the base it will land on.
-        if (ahead !== "" && !paused) {
+        if (ahead !== "") {
           // The base moving is also what a merge of this pull request looks like, so what to do
           // with the move turns on a read of the pull request as it stands right now.
           const now = await github.pr.get(pr.url);
@@ -356,15 +378,22 @@ export default workflow({
             await view.show(`PR #${pr.number} is ${now.pr.state}`);
             break;
           }
-          if (now.pr.isInMergeQueue) {
-            // The move is held, not dropped, so leaving the queue is what acts on it.
-            paused = true;
-            await view.show(`PR #${pr.number} is queued to merge, so the move on ${base} holds`);
+          // This read is what the queue is, in and out of it. The changes watch reports only the
+          // edge it polls across, and an entry that starts and ends between two polls has none.
+          if (now.pr.isInMergeQueue !== paused) {
+            paused = now.pr.isInMergeQueue;
+            await view.show(
+              paused
+                ? `PR #${pr.number} is queued to merge, so the move on ${base} holds`
+                : `PR #${pr.number} left the merge queue`,
+            );
+          }
+          // The held move waits on the watch below, not on another read, so the gate cannot spin.
+          if (!paused) {
+            ahead = "";
+            await followed();
             continue;
           }
-          ahead = "";
-          await followed();
-          continue;
         }
 
         if (pending.length > 0 && !inDraft && !paused) {

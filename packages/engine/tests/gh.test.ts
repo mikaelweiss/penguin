@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { changedBetween, movesOf } from "../examples/adapters/gh.ts";
+import type { CommandResult, Host } from "../src/core/adapter.ts";
+import definition, { changedBetween, movesOf } from "../examples/adapters/gh.ts";
 
 const ME = "mikael";
 
@@ -125,4 +126,39 @@ test("a poll the branch cannot be read on reports nothing and keeps watching", a
   const moves = movesOf(poll.read, poll.rest);
   expect(await moves.next()).toEqual({ sha: "def" });
   expect(poll.reads()).toBe(3);
+});
+
+/** A gh that answers one canned result and keeps what it was asked. */
+function fakeGh(reply: CommandResult): { gh: ReturnType<typeof definition.build>; args: string[][] } {
+  const args: string[][] = [];
+  const host: Host = {
+    cwd: "/",
+    home: "/tmp",
+    state: "/tmp",
+    run: { id: "test", dir: "/tmp" },
+    config: () => undefined,
+    secret: async () => undefined,
+    note: () => {},
+    skill: () => {
+      throw new Error("no skills installed");
+    },
+    shell: async () => ({ code: 0, stdout: "", stderr: "" }),
+    exec: async (argv) => {
+      args.push(argv);
+      return reply;
+    },
+  };
+  return { gh: definition.build(host), args };
+}
+
+test("a branch with no pull request open on it comes back empty, not failed", async () => {
+  const { gh } = fakeGh({ code: 0, stdout: "[]\n", stderr: "" });
+  expect(await gh.pr.of("feature")).toEqual({ ok: true, prs: [], reason: "" });
+});
+
+test("the base an open pull request lands on comes back with it", async () => {
+  const listed = [{ number: 7, baseRefName: "stack-below", url: "https://github.com/o/r/pull/7" }];
+  const { gh, args } = fakeGh({ code: 0, stdout: JSON.stringify(listed), stderr: "" });
+  expect(await gh.pr.of("feature")).toEqual({ ok: true, prs: listed, reason: "" });
+  expect(args[0]).toContain("feature");
 });
