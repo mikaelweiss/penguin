@@ -70,7 +70,7 @@ function TranscriptLine({ line }: { line: OutputLine }) {
         {MARKERS[line.kind]}
       </span>
       <MessageContent className={cn("gap-1.5", line.kind === "problem" && "text-destructive")}>
-        {line.kind === "show" ? (
+        {line.kind === "show" || line.kind === "ask" ? (
           <Markdown>{line.text}</Markdown>
         ) : (
           <span className="whitespace-pre-wrap">{line.text}</span>
