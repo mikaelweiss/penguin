@@ -70,7 +70,7 @@ export function SettingsShell({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <SidebarProvider
-          className="h-full min-h-0 items-start"
+          className="h-full min-h-0"
           style={{ "--sidebar-width": "11rem" } as React.CSSProperties}
         >
           <Sidebar collapsible="none" className="border-r">
