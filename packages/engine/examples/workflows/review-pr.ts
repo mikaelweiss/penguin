@@ -1,6 +1,7 @@
 import { workflow } from "penguin";
 import { z } from "zod";
 import { narrate, narrated } from "../helpers/turns.ts";
+import { openWorktree } from "../helpers/worktree.ts";
 
 const Ack = z.union([z.enum(["ok"]), z.string()]);
 
@@ -48,7 +49,8 @@ export default workflow({
     "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until your approval lands or it closes",
   params: z.object({ pr: z.string().describe("the pull request, as a number or a url") }),
 
-  async run({ params, agent, vcs, github, view }) {
+  async run(ctx) {
+    const { params, agent, vcs, github, view } = ctx;
     const found = await github.pr.get(params.pr);
     if (!found.ok || found.pr === null) {
       await view.ask(`gh pr view ${params.pr} failed: ${found.reason}`, Ack);
@@ -95,25 +97,8 @@ export default workflow({
 
     const ref = `pull/${pr.number}/head`;
     const name = `review-pr-${pr.number}`;
-    let ws = await vcs.worktree.add(name, { ref });
-    while (!ws.ok) {
-      if (!ws.exists) {
-        await view.ask(`The worktree failed: ${ws.reason}`, Ack);
-        return { rounds: 0, posted: 0 };
-      }
-      const choice = await view.ask(
-        `A worktree already sits at ${ws.path}. Type use to review in it, replace to delete it and cut a fresh one, or exit to stop.`,
-        z.enum(["use", "replace", "exit"]),
-      );
-      if (choice === "exit") return { rounds: 0, posted: 0 };
-      if (choice === "use") break;
-      const gone = await vcs.worktree.remove(ws.path, { force: true });
-      if (!gone.ok) {
-        await view.show(`The worktree did not delete: ${gone.reason}`);
-        continue;
-      }
-      ws = await vcs.worktree.add(name, { ref });
-    }
+    const dir = await openWorktree(ctx, name, { ref });
+    if (dir === "") return { rounds: 0, posted: 0 };
 
     const changes = github.pr.changes(params.pr);
     let inbound = changes.next();
@@ -130,7 +115,7 @@ export default workflow({
         : `New code arrived since the last review, and the working tree holds it. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, review what changed, and return the full updated findings.\n\n${briefing()}`;
 
     const pulled = async (): Promise<void> => {
-      const done = await vcs.pull(ref, { cwd: ws.path });
+      const done = await vcs.pull(ref, { cwd: dir });
       if (!done.ok)
         await view.ask(
           `The pull failed: ${done.reason} The review goes on with the last fetched code.`,
@@ -149,7 +134,7 @@ export default workflow({
 
     const review = async (): Promise<"approved" | "sent" | "closed" | "draft" | "queued"> => {
       await pulled();
-      const reviewer = await agent.open({ cwd: ws.path });
+      const reviewer = await agent.open({ cwd: dir });
       let turn = agent.turn(reviewer, { skill: "review-pr", prompt: opening() }, { result: Findings });
       let shown = narrate(view, turn.output);
       const stopTurn = async (): Promise<void> => {
@@ -285,7 +270,7 @@ export default workflow({
         if (change.kind === "comments") notes = notes.concat(change.comments);
       }
     } finally {
-      await vcs.worktree.remove(ws.path);
+      await vcs.worktree.remove(dir);
     }
     return { rounds, posted };
   },
