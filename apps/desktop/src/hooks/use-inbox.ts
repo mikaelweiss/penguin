@@ -27,13 +27,17 @@ export function useInbox(): Inbox {
 
   const send = useCallback((runId: string, entry: InboxEntry, files: Attachment[]) => {
     if ("message" in entry) {
-      const line: OutputLine = {
-        kind: "message",
-        text: echo(entry.message, files),
-        at: new Date().toISOString(),
-        attachments: files,
-      };
-      setSent((current) => ({ ...current, [runId]: [...(current[runId] ?? []), line] }));
+      setSent((current) => {
+        const before = current[runId] ?? [];
+        const line: OutputLine = {
+          id: `sent:${before.length}`,
+          kind: "message",
+          text: echo(entry.message, files),
+          at: new Date().toISOString(),
+          attachments: files,
+        };
+        return { ...current, [runId]: [...before, line] };
+      });
     }
     appendInbox(runId, entry).then(
       () => setError(undefined),

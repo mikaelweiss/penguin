@@ -2,7 +2,6 @@ import {
   ActivityIcon,
   BotIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   EyeIcon,
   GlobeIcon,
   ListTreeIcon,
@@ -12,8 +11,13 @@ import {
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@workspace/ui/components/collapsible";
 import {
   Empty,
   EmptyDescription,
@@ -22,6 +26,7 @@ import {
   EmptyTitle,
 } from "@workspace/ui/components/empty";
 import { Markdown } from "@workspace/ui/components/markdown";
+import { Marker, MarkerContent, MarkerIcon } from "@workspace/ui/components/marker";
 import { Message, MessageContent } from "@workspace/ui/components/message";
 import {
   MessageScroller,
@@ -36,57 +41,30 @@ import { cn } from "@workspace/ui/lib/utils";
 
 import { AttachmentRow } from "@/components/attachment-row";
 import { useRunLog } from "@/hooks/use-run-log";
-import type {
-  ActionItem,
-  ActionKind,
-  OutputLine,
-  Run,
-  RunInput,
-  RunState,
-  TranscriptItem,
-} from "@/lib/runs";
+import type { ActionItem, ActionKind, OutputLine, Run, RunInput, RunState } from "@/lib/runs";
+import { reuseRows, startsTurn, toRows, type TranscriptRow } from "@/lib/transcript";
 
-const MARKERS: Record<OutputLine["kind"], string> = {
-  show: "",
-  ask: "?",
-  answer: ">",
-  message: ">",
-  problem: "!",
+/** The column every row shares, so prose and work sit on one grid. */
+const COLUMN = "mx-auto w-full min-w-0 max-w-3xl";
+
+/** A work row is one line tall, where the scroller's stock reserve assumes a whole message. */
+const ONE_LINE = "[contain-intrinsic-size:auto_2rem]";
+
+const ICONS: Record<ActionKind, LucideIcon> = {
+  run: SquareTerminalIcon,
+  read: EyeIcon,
+  edit: SquarePenIcon,
+  search: SearchIcon,
+  fetch: GlobeIcon,
+  agent: BotIcon,
 };
 
-/** A run reads as a log, so every line is a message with a one-glyph speaker column. */
-const LINE = "gap-2 font-mono text-sm/6";
-
-function markerColor(kind: OutputLine["kind"]): string {
-  if (kind === "ask") return "text-warning";
-  if (kind === "problem") return "text-destructive";
-  return "text-muted-foreground";
-}
-
-function TranscriptLine({ line }: { line: OutputLine }) {
-  return (
-    <Message className={LINE}>
-      <span aria-hidden="true" className={cn("w-3 shrink-0 select-none", markerColor(line.kind))}>
-        {MARKERS[line.kind]}
-      </span>
-      <MessageContent className={cn("gap-1.5", line.kind === "problem" && "text-destructive")}>
-        {line.kind === "show" || line.kind === "ask" ? (
-          <Markdown>{line.text}</Markdown>
-        ) : (
-          <span className="whitespace-pre-wrap">{line.text}</span>
-        )}
-        {line.attachments ? <AttachmentRow files={line.attachments} /> : null}
-      </MessageContent>
-    </Message>
-  );
-}
-
-function ClosingLine({ children }: { children: string }) {
-  return (
-    <Message className={LINE}>
-      <MessageContent className="text-muted-foreground">{children}</MessageContent>
-    </Message>
-  );
+function took(action: ActionItem): string | undefined {
+  if (action.doneAt === undefined) return undefined;
+  const ms = Date.parse(action.doneAt) - Date.parse(action.at);
+  if (!Number.isFinite(ms) || ms < 1000) return undefined;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.floor(ms / 60_000)}m ${String(Math.round((ms % 60_000) / 1000)).padStart(2, "0")}s`;
 }
 
 function elapsed(since: string, now: number): string {
@@ -108,124 +86,17 @@ function useSecond(): number {
   return now;
 }
 
-function LiveLine({ state }: { state: RunState }) {
-  const now = useSecond();
+/** Everything the run wrote is prose in one column. Only a problem carries its own colour. */
+const LineRow = memo(function LineRow({ line }: { line: OutputLine }) {
   return (
-    <Message className={LINE}>
-      <span aria-hidden="true" className="flex w-3 shrink-0 items-center">
-        <Spinner className="size-3 text-muted-foreground" />
-      </span>
-      <MessageContent className="flex-row items-baseline gap-2 text-muted-foreground">
-        <span className="min-w-0 truncate">{state.text}</span>
-        <span className="shrink-0 tabular-nums">{elapsed(state.at, now)}</span>
+    <Message>
+      <MessageContent className={line.kind === "problem" ? "text-destructive" : undefined}>
+        <Markdown>{line.text}</Markdown>
+        {line.attachments ? <AttachmentRow files={line.attachments} /> : null}
       </MessageContent>
     </Message>
   );
-}
-
-const ICONS: Record<ActionKind, LucideIcon> = {
-  run: SquareTerminalIcon,
-  read: EyeIcon,
-  edit: SquarePenIcon,
-  search: SearchIcon,
-  fetch: GlobeIcon,
-  agent: BotIcon,
-};
-
-function ActionRow({ action, spinning }: { action: ActionItem; spinning: boolean }) {
-  const [open, setOpen] = useState(false);
-  const Icon = action.kind === undefined ? WrenchIcon : ICONS[action.kind];
-  const failed = action.status === "failed";
-  const label = (
-    <>
-      {spinning ? (
-        <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
-      ) : (
-        <Icon
-          className={cn("size-3.5 shrink-0", failed ? "text-destructive" : "text-muted-foreground")}
-        />
-      )}
-      <span className={cn("truncate", failed ? "text-destructive" : "text-muted-foreground")}>
-        {action.name}
-        {action.target === undefined ? null : <span className="ms-2">{action.target}</span>}
-      </span>
-      {action.output === undefined ? null : (
-        <ChevronDownIcon
-          className={cn(
-            "size-3 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
-        />
-      )}
-    </>
-  );
-
-  return (
-    <Message className={LINE}>
-      <span aria-hidden="true" className="w-3 shrink-0" />
-      <MessageContent className="min-w-0 gap-1">
-        {action.output === undefined ? (
-          <span className="flex min-w-0 items-center gap-2">{label}</span>
-        ) : (
-          <button
-            type="button"
-            className="flex min-w-0 cursor-pointer items-center gap-2 text-start"
-            aria-expanded={open}
-            onClick={() => setOpen((showing) => !showing)}
-          >
-            {label}
-          </button>
-        )}
-        {open && action.output !== undefined ? (
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-s ps-3 text-xs/5 text-muted-foreground">
-            {action.output}
-          </pre>
-        ) : null}
-      </MessageContent>
-    </Message>
-  );
-}
-
-/** Contiguous tool calls fold into one summary row; the newest stays visible while it runs. */
-function ActionGroup({ actions, live }: { actions: ActionItem[]; live: boolean }) {
-  const [open, setOpen] = useState(false);
-  const last = actions.at(-1);
-  if (last === undefined) return null;
-  const streaming = live && last.status === "running";
-
-  if (actions.length === 1) return <ActionRow action={last} spinning={streaming} />;
-
-  const failures = actions.filter((action) => action.status === "failed").length;
-  const shown = open ? actions : streaming ? [last] : [];
-  return (
-    <div>
-      <Message className={LINE}>
-        <span aria-hidden="true" className="w-3 shrink-0" />
-        <MessageContent>
-          <button
-            type="button"
-            className="flex cursor-pointer items-center gap-2 text-muted-foreground"
-            aria-expanded={open}
-            onClick={() => setOpen((showing) => !showing)}
-          >
-            <ChevronRightIcon
-              className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
-            />
-            <span>{actions.length} actions</span>
-            {failures > 0 ? <span className="text-destructive">{failures} failed</span> : null}
-          </button>
-        </MessageContent>
-      </Message>
-      {shown.map((action) => (
-        <ActionRow
-          key={action.id}
-          action={action}
-          spinning={streaming && action.id === last.id}
-        />
-      ))}
-    </div>
-  );
-}
+});
 
 const FOLD_LINES = 3;
 const FOLD_CHARS = 300;
@@ -234,90 +105,215 @@ function folded(value: string): boolean {
   return value.length > FOLD_CHARS || value.split("\n").length > FOLD_LINES;
 }
 
-function InputValue({ entry, label }: { entry: RunInput; label: boolean }) {
-  const [open, setOpen] = useState(false);
-  const name = label ? (
-    <span className="text-xs text-muted-foreground">{entry.name}</span>
-  ) : null;
+/**
+ * Only rows that own a disclosure take this. Prose rows do not, so toggling one open never
+ * re-renders a markdown block.
+ */
+type DisclosureProps = { open: ReadonlySet<string>; onToggle: (key: string) => void };
+
+/** One shared instance, so a run with nothing open does not hand its rows a new set each tick. */
+const NOTHING_OPEN: ReadonlySet<string> = new Set();
+
+function InputValue({
+  entry,
+  label,
+  open,
+  onToggle,
+}: { entry: RunInput; label: boolean } & DisclosureProps) {
+  const name = label ? <span className="text-xs text-muted-foreground">{entry.name}</span> : null;
+  const key = `input:${entry.name}`;
+  const showing = open.has(key);
 
   if (!folded(entry.text)) {
     return (
       <div className="flex min-w-0 flex-col gap-1">
         {name}
-        <span className="whitespace-pre-wrap">{entry.text}</span>
+        <Markdown>{entry.text}</Markdown>
       </div>
     );
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <button
-        type="button"
-        className="flex min-w-0 cursor-pointer items-center gap-2 text-start"
-        aria-expanded={open}
-        onClick={() => setOpen((showing) => !showing)}
-      >
+    <Collapsible
+      open={showing}
+      onOpenChange={() => onToggle(key)}
+      className="flex min-w-0 flex-col gap-1"
+    >
+      <CollapsibleTrigger className="flex min-w-0 cursor-pointer items-center gap-2 text-start">
         <ChevronDownIcon
-          className={cn(
-            "size-3 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
+          className={cn("size-4 shrink-0 transition-transform", showing && "rotate-180")}
         />
         {name}
         <span className="truncate">{entry.text.split("\n")[0]}</span>
-      </button>
-      {open ? (
-        <div className="max-h-96 overflow-auto whitespace-pre-wrap border-s ps-3 text-muted-foreground">
-          {entry.text}
-        </div>
-      ) : null}
-    </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="max-h-96 overflow-auto border-s ps-3">
+        <Markdown>{entry.text}</Markdown>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
 /** What the run was started with, so the prompt outlives the dialog that sent it. */
-function InputBlock({ input }: { input: RunInput[] }) {
+const InputRow = memo(function InputRow({
+  input,
+  open,
+  onToggle,
+}: { input: RunInput[] } & DisclosureProps) {
   return (
-    <Message className={LINE}>
-      <span aria-hidden="true" className="w-3 shrink-0 select-none text-muted-foreground">
-        {MARKERS.message}
-      </span>
-      <MessageContent className="gap-2">
+    <Message>
+      <MessageContent>
         {input.map((entry) => (
-          <InputValue key={entry.name} entry={entry} label={input.length > 1} />
+          <InputValue
+            key={entry.name}
+            entry={entry}
+            label={input.length > 1}
+            open={open}
+            onToggle={onToggle}
+          />
         ))}
       </MessageContent>
     </Message>
   );
+});
+
+function ActionRow({
+  action,
+  spinning,
+  open,
+  onToggle,
+}: { action: ActionItem; spinning: boolean } & DisclosureProps) {
+  const Icon = action.kind === undefined ? WrenchIcon : ICONS[action.kind];
+  const failed = action.status === "failed";
+  const duration = took(action);
+  const key = `action:${action.id}`;
+  const showing = open.has(key);
+
+  const label = (
+    <>
+      <MarkerIcon className={failed ? "text-destructive" : undefined}>
+        {spinning ? <Spinner /> : <Icon />}
+      </MarkerIcon>
+      <MarkerContent className={cn("flex-1 truncate", failed && "text-destructive")}>
+        {action.name}
+        {action.target === undefined ? null : (
+          <span className="ms-2 font-mono">{action.target}</span>
+        )}
+      </MarkerContent>
+      {duration === undefined ? null : <span className="shrink-0 tabular-nums">{duration}</span>}
+      {action.output === undefined ? null : (
+        <ChevronDownIcon className={cn("transition-transform", showing && "rotate-180")} />
+      )}
+    </>
+  );
+
+  if (action.output === undefined) return <Marker>{label}</Marker>;
+
+  return (
+    <Collapsible open={showing} onOpenChange={() => onToggle(key)}>
+      <CollapsibleTrigger asChild>
+        <Marker asChild>
+          <button type="button" className="cursor-pointer">
+            {label}
+          </button>
+        </Marker>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap border-s ps-3 font-mono text-xs/5">
+          {action.output}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
-type Block =
-  | { type: "line"; line: OutputLine; key: string }
-  | { type: "actions"; actions: ActionItem[]; key: string };
+type ActionsRowProps = {
+  row: Extract<TranscriptRow, { kind: "actions" }>;
+  live: boolean;
+} & DisclosureProps;
 
-function toBlocks(items: TranscriptItem[]): Block[] {
-  const blocks: Block[] = [];
-  items.forEach((item, index) => {
-    if (item.type === "action") {
-      const tail = blocks.at(-1);
-      if (tail?.type === "actions") {
-        tail.actions.push(item);
-        return;
-      }
-      blocks.push({ type: "actions", actions: [item], key: `actions-${item.id}` });
-      return;
-    }
-    blocks.push({ type: "line", line: item.line, key: `line-${index}` });
-  });
-  return blocks;
+/** Contiguous tool calls fold into one summary row; the newest stays visible while it runs. */
+const ActionsRow = memo(function ActionsRow({ row, live, open, onToggle }: ActionsRowProps) {
+  const last = row.actions.at(-1)!;
+  const streaming = live && last.status === "running";
+  const showing = open.has(row.key);
+
+  if (row.actions.length === 1) {
+    return <ActionRow action={last} spinning={streaming} open={open} onToggle={onToggle} />;
+  }
+
+  const shown = showing ? row.actions : streaming ? [last] : [];
+  return (
+    <Collapsible open={showing} onOpenChange={() => onToggle(row.key)}>
+      <CollapsibleTrigger asChild>
+        <Marker asChild>
+          <button type="button" className="cursor-pointer">
+            <MarkerIcon>
+              <ChevronDownIcon className={cn("transition-transform", showing && "rotate-180")} />
+            </MarkerIcon>
+            <MarkerContent className="flex-1 truncate text-foreground">{row.summary}</MarkerContent>
+            {row.failures > 0 ? (
+              <span className="shrink-0 text-destructive">{row.failures} failed</span>
+            ) : null}
+          </button>
+        </Marker>
+      </CollapsibleTrigger>
+      {shown.map((action) => (
+        <ActionRow
+          key={action.id}
+          action={action}
+          spinning={streaming && action.id === last.id}
+          open={open}
+          onToggle={onToggle}
+        />
+      ))}
+    </Collapsible>
+  );
+});
+
+function LiveRow({ state }: { state: RunState }) {
+  const now = useSecond();
+  return (
+    <Marker>
+      <MarkerIcon>
+        <Spinner />
+      </MarkerIcon>
+      <MarkerContent className="flex-1 truncate">{state.text}</MarkerContent>
+      <span className="shrink-0 tabular-nums">{elapsed(state.at, now)}</span>
+    </Marker>
+  );
 }
 
-const CLOSING: Partial<Record<Run["status"], string>> = {
-  done: "run finished",
-  failed: "run failed",
-  stopped: "run stopped",
-  crashed: "run crashed",
-};
+const ClosingRow = memo(function ClosingRow({ text }: { text: string }) {
+  return (
+    <Marker variant="separator">
+      <MarkerContent>{text}</MarkerContent>
+    </Marker>
+  );
+});
+
+/** Work rows sit tight against each other; prose and turns get room to breathe. */
+function spacing(row: TranscriptRow): string {
+  if (row.kind === "actions" || row.kind === "live") return `pb-0.5 ${ONE_LINE}`;
+  if (row.kind === "closing") return `pt-2 pb-0.5 ${ONE_LINE}`;
+  return "pb-4";
+}
+
+type RowProps = { row: TranscriptRow; live: boolean } & DisclosureProps;
+
+function Row({ row, live, open, onToggle }: RowProps) {
+  switch (row.kind) {
+    case "input":
+      return <InputRow input={row.input} open={open} onToggle={onToggle} />;
+    case "line":
+      return <LineRow line={row.line} />;
+    case "actions":
+      return <ActionsRow row={row} live={live} open={open} onToggle={onToggle} />;
+    case "live":
+      return <LiveRow state={row.state} />;
+    case "closing":
+      return <ClosingRow text={row.text} />;
+  }
+}
 
 type RunTranscriptProps = {
   run: Run | undefined;
@@ -326,6 +322,17 @@ type RunTranscriptProps = {
 
 export function RunTranscript({ run, sent }: RunTranscriptProps) {
   const log = useRunLog(run);
+  const kept = useRef<{ id: string; rows: TranscriptRow[] }>({ id: "", rows: [] });
+  const [expanded, setExpanded] = useState<Record<string, Set<string>>>({});
+
+  const onToggle = useCallback((key: string) => {
+    setExpanded((current) => {
+      const runId = kept.current.id;
+      const showing = new Set(current[runId] ?? []);
+      if (!showing.delete(key)) showing.add(key);
+      return { ...current, [runId]: showing };
+    });
+  }, []);
 
   if (!run) {
     return (
@@ -341,23 +348,19 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
     );
   }
 
-  const closing = CLOSING[run.status];
-  const reason = run.problem ?? log;
-  const items: TranscriptItem[] = [
-    ...run.output,
-    ...sent.map((line): TranscriptItem => ({ type: "line", line })),
-  ];
   const running = run.status === "running" && run.ask === undefined;
-  const tail = items.at(-1);
+  const tail = run.output.at(-1);
   const acting = running && tail?.type === "action" && tail.status === "running";
   const live = running && !acting ? run.state : undefined;
+  const problem = run.problem ?? log;
 
-  if (
-    items.length === 0 &&
-    run.input.length === 0 &&
-    run.status === "running" &&
-    live === undefined
-  ) {
+  const rows = reuseRows(
+    kept.current.id === run.id ? kept.current.rows : undefined,
+    toRows({ ...run, problem }, sent, live),
+  );
+  kept.current = { id: run.id, rows };
+
+  if (rows.length === 0 && run.status === "running") {
     return (
       <Empty className="flex-1">
         <EmptyHeader>
@@ -371,47 +374,24 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
     );
   }
 
-  const blocks = toBlocks(items);
+  const open = expanded[run.id] ?? NOTHING_OPEN;
   return (
-    <MessageScrollerProvider>
+    <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
       <MessageScroller className="flex-1">
         <MessageScrollerViewport>
           <MessageScrollerContent className="gap-0 p-4">
-            {run.input.length === 0 ? null : (
+            {rows.map((row) => (
               <MessageScrollerItem
-                key={`${run.id}-input`}
-                className={blocks.length > 0 ? "pb-2" : undefined}
+                key={`${run.id}-${row.key}`}
+                messageId={row.key}
+                scrollAnchor={startsTurn(row)}
+                className={spacing(row)}
               >
-                <InputBlock input={run.input} />
-              </MessageScrollerItem>
-            )}
-            {blocks.map((block, index) => (
-              <MessageScrollerItem
-                key={`${run.id}-${block.key}`}
-                scrollAnchor={live === undefined && index === blocks.length - 1}
-              >
-                {block.type === "line" ? (
-                  <TranscriptLine line={block.line} />
-                ) : (
-                  <ActionGroup actions={block.actions} live={running} />
-                )}
+                <div className={COLUMN}>
+                  <Row row={row} live={running} open={open} onToggle={onToggle} />
+                </div>
               </MessageScrollerItem>
             ))}
-            {closing ? (
-              <MessageScrollerItem className="pt-2">
-                <ClosingLine>{closing}</ClosingLine>
-              </MessageScrollerItem>
-            ) : null}
-            {reason === undefined ? null : (
-              <MessageScrollerItem>
-                <TranscriptLine line={{ kind: "problem", text: reason, at: "" }} />
-              </MessageScrollerItem>
-            )}
-            {live === undefined ? null : (
-              <MessageScrollerItem scrollAnchor className={blocks.length > 0 ? "pt-2" : undefined}>
-                <LiveLine state={live} />
-              </MessageScrollerItem>
-            )}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />

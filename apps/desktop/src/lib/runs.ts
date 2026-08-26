@@ -3,6 +3,8 @@ import type { Attachment } from "@/lib/attachments";
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
 
 export type OutputLine = {
+  /** The call that wrote the line. A question and its answer share one, so both key on the kind too. */
+  id: string;
   kind: "show" | "ask" | "answer" | "message" | "problem";
   text: string;
   at: string;
@@ -30,6 +32,8 @@ export type ActionItem = {
   target?: string;
   output?: string;
   at: string;
+  /** When the call settled. The engine's own elapsedMs times its bookkeeping, not the tool. */
+  doneAt?: string;
 };
 
 export type TranscriptItem = { type: "line"; line: OutputLine } | ActionItem;
@@ -344,24 +348,28 @@ function actionOf(entry: Entry, actions: Map<string, ActionItem>): ActionItem | 
   const kind = kindOf(call["kind"]);
   const target = text(call["target"]);
   const output = text(call["output"]);
+  const status = statusOf(call["status"]);
+  const at = text(entry["at"]) ?? "";
   const known = actions.get(id);
   if (known !== undefined) {
     known.name = name;
-    known.status = statusOf(call["status"]);
+    known.status = status;
     if (kind !== undefined) known.kind = kind;
     if (target !== undefined) known.target = target;
     if (output !== undefined) known.output = output;
+    if (status !== "running") known.doneAt = at;
     return undefined;
   }
   const action: ActionItem = {
     type: "action",
     id,
     name,
-    status: statusOf(call["status"]),
-    at: text(entry["at"]) ?? "",
+    status,
+    at,
     ...(kind === undefined ? {} : { kind }),
     ...(target === undefined ? {} : { target }),
     ...(output === undefined ? {} : { output }),
+    ...(status === "running" ? {} : { doneAt: at }),
   };
   actions.set(id, action);
   return action;
@@ -370,21 +378,22 @@ function actionOf(entry: Entry, actions: Map<string, ActionItem>): ActionItem | 
 function outputOf(entries: Entry[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const actions = new Map<string, ActionItem>();
-  const line = (kind: OutputLine["kind"], value: string, at: string): void => {
-    items.push({ type: "line", line: { kind, text: value, at } });
-  };
   for (const entry of entries) {
     const args = argsOf(entry);
     const at = text(entry["at"]) ?? "";
+    const id = text(entry["id"]) ?? at;
+    const line = (kind: OutputLine["kind"], value: string): void => {
+      items.push({ type: "line", line: { id, kind, text: value, at } });
+    };
     if (entry["call"] === "view.show" && entry["pending"] === true && args[1] === undefined) {
-      line("show", display(args[0]), at);
+      line("show", display(args[0]));
     } else if (entry["call"] === "view.act" && entry["pending"] === true) {
       const action = actionOf(entry, actions);
       if (action !== undefined) items.push(action);
     } else if (entry["call"] === "view.ask" && entry["pending"] === true) {
-      line("ask", display(args[0]), at);
+      line("ask", display(args[0]));
     } else if (entry["call"] === "view.ask" && "outcome" in entry) {
-      line("answer", display(entry["outcome"]), at);
+      line("answer", display(entry["outcome"]));
     }
   }
   return items;

@@ -38,10 +38,12 @@ export function useRuns(dirs: string[]): Runs {
       const next = new Map<string, Tracked>();
       for (const update of updates) {
         const prior = tracked.get(update.id);
-        if (prior === undefined || update.text !== "" || prior.alive !== update.alive) {
+        // A file that shrank was re-read from its start, so its old entries would double up.
+        const rewound = prior !== undefined && update.offset < prior.offset;
+        if (prior === undefined || update.text !== "" || prior.alive !== update.alive || rewound) {
           changed = true;
         }
-        const entries = prior?.entries ?? [];
+        const entries = rewound || prior === undefined ? [] : prior.entries;
         if (update.text !== "") entries.push(...parseEntries(update.text));
         next.set(update.id, {
           id: update.id,
