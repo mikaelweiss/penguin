@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "penguin",
-        "width": 800,
-        "height": 600,
+        "width": 1100,
+        "height": 780,
+        "minWidth": 840,
+        "minHeight": 620,
         "visible": false
       }
     ],
