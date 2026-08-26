@@ -1,4 +1,5 @@
 import type { Attachment } from "@/lib/attachments";
+import type { Hidden } from "@/lib/directories";
 
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
 
@@ -513,14 +514,20 @@ function place(file: RunFile): Placed | undefined {
   };
 }
 
+/** A hidden root keeps out the runs it already held, so only a newer one brings the project back. */
+function shows(entry: Placed, hidden: Hidden): boolean {
+  const at = hidden[entry.root];
+  return at === undefined || entry.at > at;
+}
+
 /**
  * The run files as a tree of projects, grouped by each run's git root and linked by parent id.
  * The directories the user added come through even before they hold a run.
  */
-export function toProjects(files: RunFile[], dirs: string[]): Project[] {
+export function toProjects(files: RunFile[], dirs: string[], hidden: Hidden = {}): Project[] {
   const placed = files
     .map(place)
-    .filter((entry): entry is Placed => entry !== undefined)
+    .filter((entry): entry is Placed => entry !== undefined && shows(entry, hidden))
     .sort((a, b) => a.at.localeCompare(b.at));
   const byId = new Map(placed.map((entry) => [entry.run.id, entry]));
   const projects = new Map<string, Project>();

@@ -17,6 +17,11 @@ export function stopRuns(ids: string[]): Promise<void> {
   return invoke("stop_runs", { ids });
 }
 
+/** Stops each run and deletes its folder. */
+export function forgetRuns(ids: string[]): Promise<void> {
+  return invoke("forget_runs", { ids });
+}
+
 /** Appends a `{"name": ...}` note to the run's file. The newest one is the run's name. */
 export function renameRun(id: string, name: string): Promise<void> {
   return invoke("rename_run", { id, name });

@@ -66,10 +66,17 @@ type AppSettingsDialogProps = {
   onClose: () => void;
   config: Config;
   directories: Directories;
+  onRemoveDirectory: (dir: string) => void;
 };
 
 /** The settings every project shares: the theme, the default agent, and where worktrees go. */
-export function AppSettingsDialog({ open, onClose, config, directories }: AppSettingsDialogProps) {
+export function AppSettingsDialog({
+  open,
+  onClose,
+  config,
+  directories,
+  onRemoveDirectory,
+}: AppSettingsDialogProps) {
   const { setTheme } = useTheme();
   const dark = useDark();
   const home = useHome(open);
@@ -178,7 +185,7 @@ export function AppSettingsDialog({ open, onClose, config, directories }: AppSet
                     variant="ghost"
                     size="icon-sm"
                     aria-label={`Remove ${dir}`}
-                    onClick={() => directories.remove(dir)}
+                    onClick={() => onRemoveDirectory(dir)}
                   >
                     <Trash2Icon />
                   </Button>

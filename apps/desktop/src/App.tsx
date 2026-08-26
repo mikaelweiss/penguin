@@ -20,6 +20,7 @@ import { RunAuth } from "@/components/run-auth";
 import { RunBreadcrumb } from "@/components/run-breadcrumb";
 import { RunComposer } from "@/components/run-composer";
 import { RunSidebar } from "@/components/run-sidebar";
+import { RemoveProjectDialog } from "@/components/remove-project-dialog";
 import { RunTranscript } from "@/components/run-transcript";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { useConfig } from "@/hooks/use-config";
@@ -27,6 +28,7 @@ import { useDirectories } from "@/hooks/use-directories";
 import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
 import { useNeedsYou } from "@/hooks/use-needs-you";
+import { useRemoveProject } from "@/hooks/use-remove-project";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
 import { useRunTree } from "@/hooks/use-run-tree";
@@ -45,7 +47,8 @@ type Starting = {
 export function App() {
   useWindowBackground();
   const directories = useDirectories();
-  const { projects, published, error } = useRuns(directories.dirs);
+  const { projects, published, error } = useRuns(directories.dirs, directories.hidden);
+  const removing = useRemoveProject(projects, directories);
   const inbox = useInbox();
   const actions = useRunActions();
   const config = useConfig();
@@ -110,11 +113,11 @@ export function App() {
           onSelect={select}
           onNewWorkflow={(dir) => setStarting({ dir })}
           onAddDirectory={directories.add}
-          onRemoveDirectory={directories.remove}
+          onRemoveDirectory={removing.ask}
           onProjectSettings={setSettingProject}
           onAppSettings={() => setAppSettings(true)}
           onPalette={() => setPalette(true)}
-          error={directories.error}
+          error={directories.error ?? removing.error}
         />
         <CommandPalette
           open={palette}
@@ -128,13 +131,20 @@ export function App() {
         <ProjectSettingsDialog
           project={settingProject}
           onClose={() => setSettingProject(undefined)}
-          onRemove={directories.remove}
+          onRemove={removing.ask}
+        />
+        <RemoveProjectDialog
+          project={removing.asking}
+          onCancel={removing.cancel}
+          onHide={removing.hide}
+          onDelete={removing.deleteRuns}
         />
         <AppSettingsDialog
           open={appSettings}
           onClose={() => setAppSettings(false)}
           config={config}
           directories={directories}
+          onRemoveDirectory={removing.ask}
         />
         <NewWorkflowDialog
           dir={starting?.dir}

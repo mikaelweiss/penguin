@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import type { Hidden } from "@/lib/directories";
 import { readRuns } from "@/lib/run-files";
 import { parseEntries, toProjects } from "@/lib/runs";
 import type { Project, RunFile } from "@/lib/runs";
@@ -16,7 +17,7 @@ export type Runs = {
 };
 
 /** Follows every run file, re-reading only the bytes each one has grown by. */
-export function useRuns(dirs: string[]): Runs {
+export function useRuns(dirs: string[], hidden: Hidden): Runs {
   const [projects, setProjects] = useState<Project[]>([]);
   const [published, setPublished] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -56,7 +57,7 @@ export function useRuns(dirs: string[]): Runs {
       tracked = next;
       if (!changed) return;
       drawn = true;
-      setProjects(toProjects([...next.values()], dirs));
+      setProjects(toProjects([...next.values()], dirs, hidden));
       setPublished(true);
     };
 
@@ -75,7 +76,7 @@ export function useRuns(dirs: string[]): Runs {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [dirs]);
+  }, [dirs, hidden]);
 
   return { projects, published, error };
 }

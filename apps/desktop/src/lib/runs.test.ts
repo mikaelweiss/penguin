@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { blockedOn, needsYouNotice, newlyBlocked, nextView } from "@/lib/runs";
-import type { Ask, Auth, Follow, Project, Run, RunStatus } from "@/lib/runs";
+import { blockedOn, needsYouNotice, newlyBlocked, nextView, toProjects } from "@/lib/runs";
+import type { Ask, Auth, Follow, Project, Run, RunFile, RunStatus } from "@/lib/runs";
 
 type Sketch = {
   id: string;
@@ -195,4 +195,32 @@ test("a long or many-lined question is flattened to one capped line", () => {
   const long = needsYouNotice(run({ id: "plan", ask: { prompt: "x".repeat(400) } }));
   expect(long?.body).toHaveLength(200);
   expect(long?.body.endsWith("\u2026")).toBe(true);
+});
+
+function file(id: string, root: string, at: string): RunFile {
+  return {
+    id,
+    entries: [{ at, workflow: `${root}/ship.ts`, params: {}, cwd: root, root }],
+    alive: false,
+  };
+}
+
+test("a directory with no run still gets a row, and a run invents the project it names", () => {
+  const projects = toProjects([file("a", "/work", "t2")], ["/idle"]);
+
+  expect(projects.map((project) => project.dir)).toEqual(["/idle", "/work"]);
+});
+
+test("a hidden root keeps out the runs it held, so nothing invents the project again", () => {
+  const files = [file("a", "/work", "t1"), file("b", "/other", "t1")];
+
+  expect(toProjects(files, [], { "/work": "t1" }).map((project) => project.dir)).toEqual(["/other"]);
+});
+
+test("a run newer than the hiding brings the project back", () => {
+  const files = [file("a", "/work", "t1"), file("b", "/work", "t3")];
+  const projects = toProjects(files, [], { "/work": "t2" });
+
+  expect(projects.map((project) => project.dir)).toEqual(["/work"]);
+  expect(projects[0]?.runs.map((run) => run.id)).toEqual(["b"]);
 });

@@ -380,6 +380,32 @@ fn write_dirs(app: tauri::AppHandle, dirs: Vec<String>) -> Result<(), String> {
     std::fs::write(&file, text).map_err(|cause| cause.to_string())
 }
 
+fn hidden_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|cause| cause.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|cause| cause.to_string())?;
+    Ok(dir.join("hidden.json"))
+}
+
+/// Each project root the user hid, against the instant it was hidden. Runs older than it stay out.
+#[tauri::command]
+fn read_hidden(app: tauri::AppHandle) -> Result<HashMap<String, String>, String> {
+    let file = hidden_file(&app)?;
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        return Ok(HashMap::new());
+    };
+    serde_json::from_str(&text).map_err(|cause| cause.to_string())
+}
+
+#[tauri::command]
+fn write_hidden(app: tauri::AppHandle, hidden: HashMap<String, String>) -> Result<(), String> {
+    let file = hidden_file(&app)?;
+    let text = serde_json::to_string(&hidden).map_err(|cause| cause.to_string())?;
+    std::fs::write(&file, text).map_err(|cause| cause.to_string())
+}
+
 /// The git project's root, walking up from dir. A folder outside any repository is its own root.
 #[tauri::command]
 fn project_root(dir: String) -> String {
@@ -525,6 +551,48 @@ fn discard_run(app: tauri::AppHandle, id: String) -> Result<(), String> {
         .and_then(|runs| run_folder(runs, &id))
         .ok_or_else(|| format!("no run named {id}"))?;
     discard(&folder).map_err(|cause| cause.to_string())
+}
+
+/// A run still writing would put its file back, so the folder goes only once the process has left.
+fn leaves(folder: &Path) -> bool {
+    let file = folder.join("run.jsonl");
+    let Some(pid) = head_pid(&file) else {
+        return true;
+    };
+    for _ in 0..40 {
+        if !pid_alive(pid) {
+            return true;
+        }
+        signal_group(pid);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    !pid_alive(pid)
+}
+
+/// Drops the run folders for good, so the projects they name stop reappearing in the sidebar.
+#[tauri::command]
+async fn forget_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runs = runs_dir(&app).ok_or("no runs directory")?;
+        let mut missed = Vec::new();
+        for id in ids {
+            let folder = run_folder(runs.clone(), &id);
+            let gone = match folder {
+                Some(folder) if !folder.exists() => true,
+                Some(folder) => leaves(&folder) && std::fs::remove_dir_all(&folder).is_ok(),
+                None => false,
+            };
+            if !gone {
+                missed.push(id);
+            }
+        }
+        if missed.is_empty() {
+            return Ok(());
+        }
+        Err(format!("could not forget {}", missed.join(", ")))
+    })
+    .await
+    .map_err(|cause| cause.to_string())?
 }
 
 #[cfg(unix)]
@@ -756,10 +824,13 @@ pub fn run() {
             append_inbox,
             read_dirs,
             write_dirs,
+            read_hidden,
+            write_hidden,
             project_root,
             describe,
             claim_run,
             discard_run,
+            forget_runs,
             start_run,
             rename_run,
             write_run_file,
