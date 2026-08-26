@@ -23,6 +23,8 @@ import type { Attachment } from "@/lib/attachments";
 import type { InboxEntry } from "@/lib/inbox";
 import type { Run } from "@/lib/runs";
 
+const CHOICE = "[role=radio], [role=checkbox]";
+
 type RunComposerProps = {
   run: Run;
   onSend: (entry: InboxEntry, files: Attachment[]) => void;
@@ -43,7 +45,7 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
   const hovering = useFileDrop(group, attach.drop);
 
   useEffect(() => {
-    const first = choices.current?.querySelector<HTMLElement>("[role=radio], [role=checkbox]");
+    const first = choices.current?.querySelector<HTMLElement>(CHOICE);
     if (first !== null && first !== undefined) first.focus();
     else field.current?.focus();
   }, []);
@@ -92,16 +94,34 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
     attach.paste(pasted);
   }
 
-  /** Enter answers from the choices, and running off the end of them reaches the text field. */
+  function step(rows: HTMLElement[], from: number, by: number): void {
+    const next = from + by;
+    if (next >= rows.length) {
+      if (typing) field.current?.focus();
+      return;
+    }
+    if (next < 0) return;
+    rows[next]?.focus();
+    if (menu !== undefined && !menu.many) setChosen(String(next));
+  }
+
+  /** Enter answers from the choices, j and k walk them, and running off the end reaches the text field. */
   function onChoiceKeys(event: React.KeyboardEvent): void {
     if (event.key === "Enter") {
       event.preventDefault();
       submit();
       return;
     }
+    const rows = Array.from(choices.current?.querySelectorAll<HTMLElement>(CHOICE) ?? []);
+    const at = rows.indexOf(document.activeElement as HTMLElement);
+    const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+    if (plain && (event.key === "j" || event.key === "k")) {
+      event.preventDefault();
+      step(rows, at, event.key === "j" ? 1 : -1);
+      return;
+    }
     if (!typing || (event.key !== "ArrowDown" && event.key !== "Tab")) return;
-    const rows = choices.current?.querySelectorAll("[role=radio], [role=checkbox]") ?? [];
-    if (event.shiftKey || document.activeElement !== rows[rows.length - 1]) return;
+    if (event.shiftKey || at !== rows.length - 1) return;
     event.preventDefault();
     field.current?.focus();
   }
@@ -115,7 +135,7 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
     const atStart = event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0;
     if (event.key !== "ArrowUp" || menu === undefined || !atStart) return;
     event.preventDefault();
-    const rows = choices.current?.querySelectorAll<HTMLElement>("[role=radio], [role=checkbox]");
+    const rows = choices.current?.querySelectorAll<HTMLElement>(CHOICE);
     rows?.[rows.length - 1]?.focus();
   }
 
@@ -203,7 +223,7 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
 
         <InputGroupAddon align="block-end" className="border-t">
           <InputGroupText className={cn("text-xs", problem !== undefined && "text-destructive")}>
-            {problem ?? (menu ? "arrows move, enter sends" : "enter sends, shift enter adds a line")}
+            {problem ?? (menu ? "j k or arrows move, enter sends" : "enter sends, shift enter adds a line")}
           </InputGroupText>
           <InputGroupButton variant="default" className="ml-auto" onClick={submit}>
             {run.ask ? "Answer" : "Send"}
