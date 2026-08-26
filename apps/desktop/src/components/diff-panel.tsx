@@ -332,7 +332,11 @@ function FileChevron({
       className="-ms-0.5"
       aria-label={collapsed ? `Expand ${path}` : `Collapse ${path}`}
       aria-expanded={!collapsed}
-      onClick={() => onToggle(item.id)}
+      onClick={(event) => {
+        // The header behind this button folds on click too. Let it through and the two cancel.
+        event.stopPropagation();
+        onToggle(item.id);
+      }}
     >
       {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}
     </Button>
