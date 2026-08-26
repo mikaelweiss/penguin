@@ -87,7 +87,7 @@ export function App() {
     clearFollow();
     show(id);
   };
-  useNeedsYou(projects, published, select);
+  useNeedsYou(projects, published, selectedId, select);
 
   const hasRun = run !== undefined;
   const { toggle } = panels;
