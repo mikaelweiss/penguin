@@ -22,7 +22,7 @@ import { Textarea } from "@workspace/ui/components/textarea";
 
 import { AttachmentRow } from "@/components/attachment-row";
 import type { Attachment } from "@/lib/attachments";
-import { canAttach } from "@/lib/params";
+import { canAttach, freeform } from "@/lib/params";
 import type { Control, Param, Values } from "@/lib/params";
 
 type ControlProps = {
@@ -45,6 +45,14 @@ function pasted(onPaste: ((files: File[]) => void) | undefined) {
 }
 
 const hints: Partial<Record<Control["kind"], string>> = { lines: "one per line", json: "JSON" };
+
+/** A field holding a branch, a slug, or a path is one the keyboard must not correct or capitalize. */
+const literal = {
+  autoCapitalize: "off",
+  autoCorrect: "off",
+  autoComplete: "off",
+  spellCheck: false,
+} as const;
 
 function ParamControl({ id, control, value, invalid, onChange, onPaste }: ControlProps) {
   if (control.kind === "choice") {
@@ -71,6 +79,7 @@ function ParamControl({ id, control, value, invalid, onChange, onPaste }: Contro
       <Textarea
         id={id}
         rows={3}
+        {...(freeform(control) ? {} : literal)}
         value={value}
         aria-invalid={invalid}
         placeholder={hints[control.kind]}
@@ -84,6 +93,7 @@ function ParamControl({ id, control, value, invalid, onChange, onPaste }: Contro
   return (
     <Input
       id={id}
+      {...literal}
       type={control.kind === "number" ? "number" : "text"}
       value={value}
       aria-invalid={invalid}

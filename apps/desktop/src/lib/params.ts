@@ -84,6 +84,11 @@ export function initialValues(params: Param[]): Values {
   return Object.fromEntries(params.map((param) => [param.name, param.initial]));
 }
 
+/** Prose is the one control a person writes sentences in; every other field holds an identifier. */
+export function freeform(control: Control): boolean {
+  return control.kind === "prose";
+}
+
 /** A pasted path reads as a value only where a line of text is one. */
 export function canAttach(control: Control): boolean {
   return control.kind === "text" || control.kind === "prose" || control.kind === "lines";

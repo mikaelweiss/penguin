@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
 import type { Attachment } from "@/lib/attachments";
-import { canAttach, fill, initialValues, paramsOf, withAttachments } from "@/lib/params";
-import type { Param } from "@/lib/params";
+import { canAttach, fill, freeform, initialValues, paramsOf, withAttachments } from "@/lib/params";
+import type { Control, Param } from "@/lib/params";
 
 function schema(properties: Record<string, unknown>, required: string[] = []) {
   return { type: "object", properties, required };
@@ -75,4 +75,19 @@ test("a prose value fills as one trimmed string", () => {
   expect(fill([param], { ticket: "\nline one\n\nline two\n" })).toEqual({
     params: { ticket: "line one\n\nline two" },
   });
+});
+
+test("prose is the only control a keyboard may correct", () => {
+  expect(freeform({ kind: "prose" })).toBe(true);
+  const rest: Control[] = [
+    { kind: "text" },
+    { kind: "number" },
+    { kind: "lines" },
+    { kind: "json" },
+    { kind: "boolean" },
+    { kind: "choice", choices: ["one"] },
+  ];
+  for (const control of rest) {
+    expect(freeform(control)).toBe(false);
+  }
 });
