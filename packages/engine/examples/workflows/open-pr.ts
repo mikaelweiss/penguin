@@ -3,6 +3,7 @@ import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
 import { narrated } from "../helpers/turns.ts";
 import commit from "./commit.ts";
+import rebase from "./rebase.ts";
 
 const Ack = z.union([z.enum(["ok"]), z.string()]);
 const Confirm = z.union([z.enum(["ok", "stop"]), z.string()]);
@@ -77,8 +78,6 @@ export default workflow({
       .string()
       .default("")
       .describe("the branch the pull request lands on, empty to take the one origin calls default"),
-    /** A rebased branch no longer fast-forwards, so the caller that rebased it says so. */
-    force: z.boolean().default(false).meta({ internal: true }),
     fixes: z.number().int().min(1).default(3).meta({ internal: true }),
   }),
 
@@ -120,6 +119,8 @@ export default workflow({
         if (answer === "ok") break;
       }
     }
+    // A branch that is its own base has nothing to sit on, and force-pushing it would be a footgun.
+    const rebasing = head.branch !== base;
 
     let fixer = "";
 
@@ -152,35 +153,22 @@ export default workflow({
       return { retry: true, reason: fix.notes };
     }
 
-    // The pull request reads the remote, so every local change goes up before it is asked for.
-    async function send(): Promise<{ ok: boolean; reason: string; from: "commit" | "push" }> {
-      const wrote = await call(ctx, commit, {});
-      if (!wrote.ok) return { ok: false, reason: wrote.reason, from: "commit" };
-      const sent = await vcs.push(head.branch, { force: params.force });
-      return { ok: sent.ok, reason: sent.reason, from: "push" };
-    }
-
-    async function delivered(): Promise<boolean> {
-      let tries = 0;
-      for (;;) {
-        const sent = await send();
-        if (sent.ok) return true;
-        if (sent.from === "commit") {
-          if (!(await again(`The commit failed: ${sent.reason}`))) return false;
-          continue;
-        }
-        tries += 1;
-        const answer = await cleared(sent.reason, tries);
-        if (answer.retry) continue;
-        if (!(await again(`The branch did not reach the remote: ${answer.reason}`))) return false;
-      }
-    }
-
-    /** The gated push: the commit is already written and a person has already seen it. */
+    /**
+     * The one way anything reaches origin. The branch sits on its base first, so no pull request
+     * opens off a stale one, and the lease rides along because a rebased branch no longer
+     * fast-forwards. A rebase that does not come back clean is a person's call, not a push.
+     */
     async function pushed(): Promise<boolean> {
       let tries = 0;
       for (;;) {
-        const sent = await vcs.push(head.branch, { force: params.force });
+        if (rebasing) {
+          const landed = await call(ctx, rebase, { base });
+          if (!landed.rebased) {
+            if (!(await again(`The rebase onto ${base} failed: ${landed.reason}`))) return false;
+            continue;
+          }
+        }
+        const sent = await vcs.push(head.branch, { force: rebasing });
         if (sent.ok) return true;
         tries += 1;
         const answer = await cleared(sent.reason, tries);
@@ -189,14 +177,17 @@ export default workflow({
       }
     }
 
-    if (!(await delivered())) return nowhere;
-
-    // The description reads the range against the base, so the base is current before it is written.
-    for (;;) {
-      const fetched = await vcs.fetch(base);
-      if (fetched.ok) break;
-      if (!(await again(`The fetch of ${base} failed: ${fetched.reason}`))) return nowhere;
+    // The pull request reads the remote, so every local change goes up before it is asked for.
+    async function delivered(): Promise<boolean> {
+      for (;;) {
+        const wrote = await call(ctx, commit, {});
+        if (wrote.ok) break;
+        if (!(await again(`The commit failed: ${wrote.reason}`))) return false;
+      }
+      return pushed();
     }
+
+    if (!(await delivered())) return nowhere;
 
     const writer = await agent.open();
     const written = await narrated(

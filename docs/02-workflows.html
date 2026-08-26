@@ -285,16 +285,18 @@ if (!state.dirty) {
     </ol>
 
     <p>
-      <code>open-pr</code> does this across a composition boundary. Before every push it calls
-      <code>commit</code> again, which reconciles itself against the tree, so a send after an edit
-      or a crash picks up exactly what is missing:
+      <code>open-pr</code> does this across a composition boundary. Before it sends anything it calls
+      <code>commit</code>, which reconciles itself against the tree, so a send after an edit or a
+      crash picks up exactly what is missing:
     </p>
 
-    <pre><code>async function send(): Promise&lt;{ ok: boolean; reason: string; from: "commit" | "push" }&gt; {
-  const wrote = await call(ctx, commit, {});
-  if (!wrote.ok) return { ok: false, reason: wrote.reason, from: "commit" };
-  const sent = await vcs.push(head.branch);
-  return { ok: sent.ok, reason: sent.reason, from: "push" };
+    <pre><code>async function delivered(): Promise&lt;boolean&gt; {
+  for (;;) {
+    const wrote = await call(ctx, commit, {});
+    if (wrote.ok) break;
+    if (!(await again(`The commit failed: ${wrote.reason}`))) return false;
+  }
+  return pushed();
 }</code></pre>
 
     <p>

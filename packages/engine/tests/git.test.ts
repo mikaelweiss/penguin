@@ -234,3 +234,68 @@ test("a base ahead of origin takes the branch only when the branch rebased onto 
     delete process.env["PENGUIN_HOME"];
   }
 });
+
+async function origin(): Promise<{ bare: string; ours: Awaited<ReturnType<typeof repo>>; base: string }> {
+  const bare = tempDir("penguin-bare-");
+  await git(hostFor(bare), ["init", "-q", "--bare"]);
+  const ours = await repo();
+  await commitFile(ours, "base.txt", "base");
+  await git(ours.host, ["remote", "add", "origin", bare]);
+  const base = (await ours.vcs.head()).branch;
+  await git(ours.host, ["push", "-q", "-u", "origin", base]);
+  return { bare, ours, base };
+}
+
+test("a rebased branch reaches the remote only when the push carries force", async () => {
+  const { ours, base } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+  expect((await ours.vcs.push("feature")).ok).toBe(true);
+
+  await git(ours.host, ["checkout", "-q", base]);
+  await commitFile(ours, "moved.txt", "moved");
+  await git(ours.host, ["checkout", "-q", "feature"]);
+  expect((await ours.vcs.rebase.onto(base)).ok).toBe(true);
+
+  expect((await ours.vcs.push("feature")).ok).toBe(false);
+  expect((await ours.vcs.push("feature", { force: true })).ok).toBe(true);
+  expect(await git(ours.host, ["rev-parse", "origin/feature"])).toBe(
+    await git(ours.host, ["rev-parse", "HEAD"]),
+  );
+});
+
+test("force leaves a commit this clone never saw alone", async () => {
+  const { bare, ours } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+  expect((await ours.vcs.push("feature")).ok).toBe(true);
+
+  const theirsDir = tempDir("penguin-theirs-");
+  const theirs = { dir: theirsDir, host: hostFor(theirsDir) };
+  await git(theirs.host, ["clone", "-q", bare, "."]);
+  await git(theirs.host, ["config", "user.email", "test@test"]);
+  await git(theirs.host, ["config", "user.name", "test"]);
+  await git(theirs.host, ["checkout", "-q", "feature"]);
+  await commitFile(theirs, "reviewed.txt", "reviewed");
+  await git(theirs.host, ["push", "-q"]);
+  const sent = await git(theirs.host, ["rev-parse", "HEAD"]);
+
+  await commitFile(ours, "more.txt", "more");
+  expect((await ours.vcs.push("feature", { force: true })).ok).toBe(false);
+  expect(await git(hostFor(bare), ["rev-parse", "feature"])).toBe(sent);
+});
+
+test("force still opens a branch the remote does not have yet", async () => {
+  const bare = tempDir("penguin-bare-");
+  await git(hostFor(bare), ["init", "-q", "--bare"]);
+  const ours = await repo();
+  await commitFile(ours, "base.txt", "base");
+  await git(ours.host, ["remote", "add", "origin", bare]);
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+
+  expect((await ours.vcs.push("feature", { force: true })).ok).toBe(true);
+  expect(await git(hostFor(bare), ["rev-parse", "feature"])).toBe(
+    await git(ours.host, ["rev-parse", "HEAD"]),
+  );
+});

@@ -1,7 +1,6 @@
 import { call, workflow } from "penguin";
 import { z } from "zod";
 import openPr from "./open-pr.ts";
-import rebase from "./rebase.ts";
 import work from "./work.ts";
 
 export default workflow({
@@ -35,10 +34,6 @@ export default workflow({
     });
     if (!worked.done) return nowhere;
 
-    // Nothing goes up until the branch sits on its base, so no pull request opens off it.
-    const rebased = await call(ctx, rebase, { base: worked.base, dir: worked.path });
-    if (!rebased.rebased) return nowhere;
-
-    return call(ctx, openPr, { base: worked.base, force: true }, { cwd: worked.path });
+    return call(ctx, openPr, { base: worked.base }, { cwd: worked.path });
   },
 });
