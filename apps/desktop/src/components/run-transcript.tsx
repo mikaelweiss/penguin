@@ -47,8 +47,11 @@ import { reuseRows, startsTurn, toRows, type TranscriptRow } from "@/lib/transcr
 /** The column every row shares, so prose and work sit on one grid. */
 const COLUMN = "mx-auto w-full min-w-0 max-w-3xl";
 
-/** A work row is one line tall, where the scroller's stock reserve assumes a whole message. */
-const ONE_LINE = "[contain-intrinsic-size:auto_2rem]";
+/**
+ * The scroller skips a row it has not reached yet and reserves a guessed height for it. Scrolling
+ * up corrects those guesses above the viewport, which shoves the text the reader is looking at.
+ */
+const EAGER = "[content-visibility:visible]";
 
 const ICONS: Record<ActionKind, LucideIcon> = {
   run: SquareTerminalIcon,
@@ -305,9 +308,9 @@ const TurnRow = memo(function TurnRow({ label }: { label: string }) {
 
 /** Work rows sit tight against each other; prose and turns get room to breathe. */
 function spacing(row: TranscriptRow): string {
-  if (row.kind === "actions" || row.kind === "live") return `pb-0.5 ${ONE_LINE}`;
-  if (row.kind === "closing") return `pt-2 pb-0.5 ${ONE_LINE}`;
-  if (row.kind === "turn") return `pt-4 pb-4 ${ONE_LINE}`;
+  if (row.kind === "actions" || row.kind === "live") return "pb-0.5";
+  if (row.kind === "closing") return "pt-2 pb-0.5";
+  if (row.kind === "turn") return "pt-4 pb-4";
   return "pb-4";
 }
 
@@ -400,7 +403,7 @@ export function RunTranscript({ run, sent }: RunTranscriptProps) {
                 key={`${run.id}-${row.key}`}
                 messageId={row.key}
                 scrollAnchor={startsTurn(row)}
-                className={spacing(row)}
+                className={cn(EAGER, spacing(row))}
               >
                 <div className={COLUMN}>
                   <Row row={row} live={running} open={open} onToggle={onToggle} />
