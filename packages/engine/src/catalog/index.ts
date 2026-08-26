@@ -38,3 +38,5 @@ export {
 } from "./skills.ts";
 
 export { load } from "./loader.ts";
+
+export { writeEditorFiles } from "./editor.ts";

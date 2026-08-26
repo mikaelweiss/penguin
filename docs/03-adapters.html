@@ -254,6 +254,15 @@ output.end();         // when they stop</code></pre>
       implementation is the contract, and there is nothing to keep in sync.
     </p>
 
+    <p>
+      A catalog of your own writes itself. Reading a catalog refreshes its
+      <code>penguin-env.d.ts</code> from the adapters that catalog resolves, and its
+      <code>tsconfig.json</code> so <code>penguin</code> and <code>zod</code> point at the running
+      install. Both carry paths that belong to one machine, so penguin ignores them in the
+      <code>.gitignore</code> it keeps beside them. The starter catalog is the package's own files
+      and is left alone.
+    </p>
+
     <h2>What lives in the implementation, not the model</h2>
 
     <p>
