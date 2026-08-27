@@ -11,6 +11,15 @@ export function labelOf(tabId: string): string {
 export type Rect = { x: number; y: number; width: number; height: number };
 
 /**
+ * A rect plus the viewport it was measured in. Rust places a page against the window's content
+ * area, which on macOS can reach up under the title bar; comparing the two heights is what tells
+ * it how far apart the two are, without either side hard-coding a title bar.
+ */
+function bounds(rect: Rect): Rect & { viewport: number } {
+  return { ...rect, viewport: window.innerHeight };
+}
+
+/**
  * Closes every page the window still holds. A reloaded frontend has forgotten the tabs it opened,
  * and nothing else can reach them, so this runs before the first tab of a session.
  */
@@ -19,11 +28,11 @@ export function browserReset(): Promise<void> {
 }
 
 export function browserOpen(tabId: string, url: string, rect: Rect): Promise<void> {
-  return invoke("browser_open", { label: labelOf(tabId), url, ...rect });
+  return invoke("browser_open", { label: labelOf(tabId), url, at: bounds(rect) });
 }
 
 export function browserBounds(tabId: string, rect: Rect): Promise<void> {
-  return invoke("browser_bounds", { label: labelOf(tabId), ...rect });
+  return invoke("browser_bounds", { label: labelOf(tabId), at: bounds(rect) });
 }
 
 export function browserShow(tabId: string): Promise<void> {

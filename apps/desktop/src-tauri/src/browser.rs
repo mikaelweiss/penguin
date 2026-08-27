@@ -43,15 +43,45 @@ fn webview(app: &tauri::AppHandle, label: &str) -> Result<tauri::webview::Webvie
         .ok_or_else(|| format!("no browser tab named {label}"))
 }
 
-fn rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
-    Rect {
-        position: LogicalPosition::new(x, y).into(),
-        size: LogicalSize::new(width, height).into(),
+/// How far the window's content area sits above the page's own viewport.
+///
+/// The panel measures a rect with getBoundingClientRect, which is relative to the viewport it is
+/// drawn in. A child webview is placed against the window's content area, and on macOS that area
+/// can reach up under the title bar, which the viewport does not. Rather than hard-code a title
+/// bar height that is wrong on the next platform, the two heights are compared: whatever the
+/// content area has that the viewport does not is the inset, and zero means they already agree.
+fn inset(window: &tauri::Window, viewport: f64) -> f64 {
+    let scale = match window.scale_factor() {
+        Ok(scale) => scale,
+        Err(_) => return 0.0,
+    };
+    match window.inner_size() {
+        Ok(size) => size.to_logical::<f64>(scale).height - viewport,
+        Err(_) => 0.0,
     }
 }
 
-/// Always both at once. macOS measures a subview's origin from the bottom, so the top a caller
-/// asked for is a function of the height, and setting either alone moves the page.
+fn rect(window: &tauri::Window, at: Bounds) -> Rect {
+    Rect {
+        position: LogicalPosition::new(at.x, at.y + inset(window, at.viewport)).into(),
+        size: LogicalSize::new(at.width, at.height).into(),
+    }
+}
+
+/// Where the panel wants a page, in the coordinates its own viewport measures.
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    /// The height of the viewport the rect was measured in, which calibrates the inset.
+    viewport: f64,
+}
+
+/// Always position and size at once. macOS measures a subview's origin from the bottom, so the top
+/// a caller asked for is a function of the height, and setting either alone moves the page.
 fn place(view: &tauri::webview::Webview, at: Rect) -> Result<(), String> {
     view.set_bounds(at).map_err(|cause| cause.to_string())
 }
@@ -73,10 +103,7 @@ pub fn browser_open(
     app: tauri::AppHandle,
     label: String,
     url: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    at: Bounds,
 ) -> Result<(), String> {
     if !label.starts_with(PREFIX) {
         return Err(format!("{label} is not a browser tab"));
@@ -118,29 +145,24 @@ pub fn browser_open(
             }
         });
 
-    let at = rect(x, y, width, height);
     let made = window
         .add_child(
             builder,
-            LogicalPosition::new(x, y),
-            LogicalSize::new(width, height),
+            LogicalPosition::new(at.x, at.y),
+            LogicalSize::new(at.width, at.height),
         )
         .map_err(|cause| cause.to_string())?;
-    // The frame a child is born with does not go through set_bounds, and the panel only pushes a
-    // rect that changed, so a page placed wrong at birth would stay wrong. This settles it once.
-    place(&made, at)
+    // After the child exists, never before. Until a window has one, tauri answers inner_size with
+    // the main webview's own frame, which hides the very gap the inset is measuring. The frame a
+    // child is born with also skips set_bounds, and the panel only pushes a rect that moved, so a
+    // page placed wrong here would have no second chance.
+    place(&made, rect(&window, at))
 }
 
 #[tauri::command]
-pub fn browser_bounds(
-    app: tauri::AppHandle,
-    label: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    place(&webview(&app, &label)?, rect(x, y, width, height))
+pub fn browser_bounds(app: tauri::AppHandle, label: String, at: Bounds) -> Result<(), String> {
+    let window = app.get_window("main").ok_or("no main window")?;
+    place(&webview(&app, &label)?, rect(&window, at))
 }
 
 #[tauri::command]
