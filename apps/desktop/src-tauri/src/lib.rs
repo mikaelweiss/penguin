@@ -192,17 +192,21 @@ fn read_run_log(app: tauri::AppHandle, id: String) -> Result<String, String> {
 }
 
 #[cfg(unix)]
-fn signal_group(pid: i32) -> bool {
-    // The run leads its own group, so this reaches the agents it spawned with it.
-    unsafe { libc::killpg(pid, libc::SIGTERM) == 0 }
+fn signal_run(pid: i32) -> bool {
+    // A run the app started leads its own group, so this reaches the agents it spawned with it.
+    if unsafe { libc::killpg(pid, libc::SIGTERM) } == 0 {
+        return true;
+    }
+    // A run started by hand shares its shell's group, which must never be signalled.
+    unsafe { libc::kill(pid, libc::SIGTERM) == 0 }
 }
 
 #[cfg(not(unix))]
-fn signal_group(_pid: i32) -> bool {
+fn signal_run(_pid: i32) -> bool {
     false
 }
 
-/// SIGTERM to each run's process group. Callers pass a run and every run inside it, outermost first.
+/// SIGTERM to each run. Callers pass a run and every run inside it, outermost first.
 #[tauri::command]
 fn stop_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
     let runs = runs_dir(&app).ok_or("no runs directory")?;
@@ -215,7 +219,7 @@ fn stop_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
         match pid {
             // A run that already left has nothing to stop.
             Some(pid) if !pid_alive(pid) => {}
-            Some(pid) if signal_group(pid) => {}
+            Some(pid) if signal_run(pid) => {}
             _ => missed.push(id),
         }
     }
@@ -715,7 +719,7 @@ fn leaves(folder: &Path) -> bool {
         if !pid_alive(pid) {
             return true;
         }
-        signal_group(pid);
+        signal_run(pid);
         std::thread::sleep(Duration::from_millis(50));
     }
     !pid_alive(pid)
