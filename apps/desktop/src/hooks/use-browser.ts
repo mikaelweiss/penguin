@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import {
+  blankTab,
   closeTab,
   forgetGone,
   freshOpens,
@@ -30,7 +31,7 @@ export type BrowserState = {
   open: (runId: string, url: string) => void;
   close: (runId: string, tabId: string) => void;
   select: (runId: string, tabId: string) => void;
-  /** Leaves the run's tabs open with none of them showing, so the url field starts empty. */
+  /** Opens a tab with nowhere to go yet, so the url field starts empty over the landing page. */
   newTab: (runId: string) => void;
   go: (runId: string, tabId: string, url: string) => void;
   /**
@@ -135,7 +136,7 @@ export function useBrowser(): BrowserState {
     open: (runId, url) => change(runId, (one) => openTab(one, url)),
     close: (runId, tabId) => change(runId, (one) => closeTab(one, tabId)),
     select: (runId, tabId) => change(runId, (one) => ({ ...one, active: tabId })),
-    newTab: (runId) => change(runId, (one) => ({ ...one, active: undefined })),
+    newTab: (runId) => change(runId, blankTab),
     go: (runId, tabId, url) => change(runId, (one) => navigate(one, tabId, url)),
     apply,
     prune,

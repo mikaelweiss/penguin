@@ -1,9 +1,14 @@
 export type Tab = {
   /** Also the native webview's label, so it must stay label-safe: a uuid is. */
   id: string;
+  /** Empty on a tab opened with nowhere to go yet, which is what the landing page is for. */
   url: string;
   title: string;
 };
+
+export function isBlank(tab: Tab): boolean {
+  return tab.url === "";
+}
 
 /**
  * One run's browser. `applied` counts the open notes already landed, so a run you were not
@@ -27,10 +32,28 @@ function newTab(url: string): Tab {
   return { id: crypto.randomUUID(), url, title: "" };
 }
 
+/** The tab a url would land in: the one already holding it, or one waiting to be told where to go. */
+function landing(held: RunTabs, url: string): Tab | undefined {
+  return (
+    held.tabs.find((tab) => tab.url === url) ??
+    held.tabs.find((tab) => tab.id === held.active && isBlank(tab))
+  );
+}
+
 export function openTab(held: RunTabs, url: string): RunTabs {
-  const known = held.tabs.find((tab) => tab.url === url);
-  if (known !== undefined) return { ...held, active: known.id };
-  const tab = newTab(url);
+  const known = landing(held, url);
+  if (known === undefined) {
+    const tab = newTab(url);
+    return { ...held, tabs: [...held.tabs, tab], active: tab.id };
+  }
+  return { ...navigate(held, known.id, url), active: known.id };
+}
+
+/** A tab with nowhere to go yet. One already open is the one you get, rather than a second. */
+export function blankTab(held: RunTabs): RunTabs {
+  const empty = held.tabs.find(isBlank);
+  if (empty !== undefined) return { ...held, active: empty.id };
+  const tab = newTab("");
   return { ...held, tabs: [...held.tabs, tab], active: tab.id };
 }
 

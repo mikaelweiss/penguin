@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   applyOpens,
+  blankTab,
   closeTab,
   forgetGone,
   NO_TABS,
@@ -61,6 +62,37 @@ test("urls a run opened in one tick all arrive, however the polls fall across th
     held = applyOpens(held, caught).next;
   }
   expect(urls(held)).toEqual(all);
+});
+
+test("a new tab is a tab you can see, waiting to be told where to go", () => {
+  const held = blankTab(openTab(NO_TABS, "https://a.test/"));
+  expect(held.tabs).toHaveLength(2);
+  expect(held.tabs[1]?.url).toBe("");
+  expect(held.active).toBe(held.tabs[1]!.id);
+});
+
+test("asking for a new tab again lands on the empty one already open", () => {
+  const first = blankTab(NO_TABS);
+  const again = blankTab(first);
+  expect(again.tabs).toHaveLength(1);
+  expect(again.active).toBe(first.tabs[0]!.id);
+});
+
+test("a url goes into the empty tab that is waiting, not a second one", () => {
+  const held = openTab(blankTab(openTab(NO_TABS, "https://a.test/")), "https://b.test/");
+  expect(urls(held)).toEqual(["https://a.test/", "https://b.test/"]);
+  expect(activeUrl(held)).toBe("https://b.test/");
+});
+
+test("an empty tab nobody is looking at keeps its place", () => {
+  const page = openTab(NO_TABS, "https://a.test/");
+  const empty = blankTab(page);
+  // Look away from the empty tab, then open a url. It belongs to no one now, so it is not taken.
+  const looking = { ...empty, active: page.tabs[0]!.id };
+  const opened = openTab(looking, "https://b.test/");
+  expect(opened.tabs).toHaveLength(3);
+  expect(opened.tabs.filter((tab) => tab.url === "")).toHaveLength(1);
+  expect(activeUrl(opened)).toBe("https://b.test/");
 });
 
 test("closing the selected tab selects the one that took its place", () => {

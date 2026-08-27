@@ -31,8 +31,14 @@ import { Spinner } from "@workspace/ui/components/spinner";
 import { PanelChrome } from "@/components/panel-chrome";
 import { useBrowserSurface } from "@/hooks/use-browser-surface";
 import { useLocalServers } from "@/hooks/use-local-servers";
-import { typedUrl, type RunTabs } from "@/lib/browser";
-import { browserBack, browserForward, browserReload, onBrowserLoading } from "@/lib/webview";
+import { isBlank, typedUrl, type RunTabs } from "@/lib/browser";
+import {
+  browserBack,
+  browserForward,
+  browserNavigate,
+  browserReload,
+  onBrowserLoading,
+} from "@/lib/webview";
 
 type BrowserPanelProps = {
   runId: string;
@@ -49,8 +55,9 @@ type BrowserPanelProps = {
   onClose: () => void;
 };
 
-/** What a tab is called before its page says. A url reads better than "New tab". */
+/** What a tab is called before its page says. A url reads better than a placeholder. */
 function tabName(url: string, title: string): string {
+  if (url === "") return "New tab";
   if (title !== "") return title;
   try {
     const { host, pathname } = new URL(url);
@@ -75,12 +82,14 @@ export function BrowserPanel({
 }: BrowserPanelProps) {
   const mount = useRef<HTMLDivElement>(null);
   const active = held.tabs.find((tab) => tab.id === held.active);
-  const loading = useLoading(held.active);
+  // A tab with nowhere to go yet has no page to draw, so the landing page keeps the space.
+  const showingPage = active !== undefined && !isBlank(active);
+  const loading = useLoading(showingPage ? held.active : undefined);
   const surfaceError = useBrowserSurface({
     mount,
     runId,
     tabs: held.tabs,
-    active: held.active,
+    active: showingPage ? held.active : undefined,
     showing,
   });
 
@@ -136,10 +145,10 @@ export function BrowserPanel({
         onNewTab={onNewTab}
       />
 
-      {active === undefined ? (
-        <Landing looking={showing} onOpen={onOpen} />
-      ) : (
+      {showingPage ? (
         <div ref={mount} className="min-h-0 flex-1 bg-background" />
+      ) : (
+        <Landing looking={showing} onOpen={onOpen} />
       )}
     </PanelChrome>
   );
@@ -185,13 +194,21 @@ function UrlRow({
     if (!editing) setTyped(url);
   }, [url, editing]);
 
+  // A tab with no page yet has no history to walk and nothing to reload.
+  const live = tabId !== undefined && url !== "";
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const target = typedUrl(typed);
     if (target === undefined) return;
-    if (tabId === undefined) onOpen(target);
-    else onGo(tabId, target);
     setEditing(false);
+    if (tabId === undefined) {
+      onOpen(target);
+      return;
+    }
+    onGo(tabId, target);
+    // A tab with no page yet gets one built at this url. One already showing has to be told.
+    if (url !== "") void browserNavigate(tabId, target);
   };
 
   return (
@@ -200,7 +217,7 @@ function UrlRow({
         variant="ghost"
         size="icon-sm"
         aria-label="Back"
-        disabled={tabId === undefined}
+        disabled={!live}
         onClick={() => tabId !== undefined && void browserBack(tabId)}
         type="button"
       >
@@ -210,7 +227,7 @@ function UrlRow({
         variant="ghost"
         size="icon-sm"
         aria-label="Forward"
-        disabled={tabId === undefined}
+        disabled={!live}
         onClick={() => tabId !== undefined && void browserForward(tabId)}
         type="button"
       >
@@ -220,7 +237,7 @@ function UrlRow({
         variant="ghost"
         size="icon-sm"
         aria-label="Reload"
-        disabled={tabId === undefined}
+        disabled={!live}
         onClick={() => tabId !== undefined && void browserReload(tabId)}
         type="button"
       >
@@ -254,7 +271,6 @@ function UrlRow({
         variant="ghost"
         size="icon-sm"
         aria-label="New tab"
-        disabled={tabId === undefined}
         onClick={onNewTab}
         type="button"
       >
