@@ -51,6 +51,11 @@ export type PanelState = {
 export function usePanels(runId: string | undefined): PanelState {
   const [held, setHeld] = useState<Record<string, Panels>>({});
   const panels = useRef<Partial<Record<Sized, PanelImperativeHandle>>>({});
+  // A panel joins its group's layout a render after it mounts. Resizing it any earlier throws.
+  // So a size reaches a panel on the pass after the one that met it. An attachment schedules that
+  // pass, before the switched run is painted.
+  const known = useRef<Partial<Record<Sized, PanelImperativeHandle>>>({});
+  const [attached, setAttached] = useState(0);
   const mine = runId === undefined ? SHUT : (held[runId] ?? SHUT);
   const size = mine.size;
 
@@ -102,9 +107,13 @@ export function usePanels(runId: string | undefined): PanelState {
   // Sizes go on before paint, so a switched run never flashes the last run's layout.
   useLayoutEffect(() => {
     for (const which of ["terminal", "right", "browser"] as const) {
-      panels.current[which]?.resize(size[which] ?? PANEL_DEFAULTS[which]);
+      const panel = panels.current[which];
+      if (panel !== undefined && panel === known.current[which]) {
+        panel.resize(size[which] ?? PANEL_DEFAULTS[which]);
+      }
     }
-  }, [runId, size]);
+    known.current = { ...panels.current };
+  }, [runId, size, attached]);
 
   const onDragged = useCallback(
     (_layout: unknown, meta: { isUserInteraction: boolean }) => {
@@ -125,16 +134,19 @@ export function usePanels(runId: string | undefined): PanelState {
   const terminalRef = useCallback((panel: PanelImperativeHandle | null) => {
     if (panel === null) delete panels.current.terminal;
     else panels.current.terminal = panel;
+    setAttached((count) => count + 1);
   }, []);
 
   const rightRef = useCallback((panel: PanelImperativeHandle | null) => {
     if (panel === null) delete panels.current.right;
     else panels.current.right = panel;
+    setAttached((count) => count + 1);
   }, []);
 
   const browserRef = useCallback((panel: PanelImperativeHandle | null) => {
     if (panel === null) delete panels.current.browser;
     else panels.current.browser = panel;
+    setAttached((count) => count + 1);
   }, []);
 
   return {
