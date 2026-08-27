@@ -1,12 +1,19 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
-export type PanelName = "terminal" | "diff";
+export type PanelName = "terminal" | "browser" | "diff";
 
-export const PANEL_DEFAULTS = { terminal: 224, right: 460 } as const;
-export const PANEL_MINIMUMS = { output: 240, terminal: 120, right: 320 } as const;
+/** The browser and the diff share the right column, so the browser's size is a height. */
+export const PANEL_DEFAULTS = { terminal: 224, right: 460, browser: 420 } as const;
+export const PANEL_MINIMUMS = {
+  output: 240,
+  terminal: 120,
+  right: 320,
+  browser: 160,
+  diff: 160,
+} as const;
 
-type Sized = "terminal" | "right";
+type Sized = "terminal" | "right" | "browser";
 
 /** What one run remembers: which panels it had open, which one filled the area, and their sizes. */
 type Panels = {
@@ -15,17 +22,24 @@ type Panels = {
   size: Partial<Record<Sized, number>>;
 };
 
-const SHUT: Panels = { open: { terminal: false, diff: false }, full: undefined, size: {} };
+const SHUT: Panels = {
+  open: { terminal: false, browser: false, diff: false },
+  full: undefined,
+  size: {},
+};
 
 export type PanelState = {
   open: (name: PanelName) => boolean;
   full: PanelName | undefined;
   toggle: (name: PanelName) => void;
+  /** Opens the panel. One already open is left where it is, at the size it was left. */
+  show: (name: PanelName) => void;
   close: (name: PanelName) => void;
   toggleFull: (name: PanelName) => void;
-  /** Attach to the terminal and right-hand panels so their sizes can be read and restored. */
+  /** Attach to the sized panels so their sizes can be read and restored. */
   terminalRef: (panel: PanelImperativeHandle | null) => void;
   rightRef: (panel: PanelImperativeHandle | null) => void;
+  browserRef: (panel: PanelImperativeHandle | null) => void;
   /** Hand both groups' onLayoutChanged, so a finished drag is what the run remembers. */
   onDragged: (layout: unknown, meta: { isUserInteraction: boolean }) => void;
 };
@@ -61,6 +75,14 @@ export function usePanels(runId: string | undefined): PanelState {
     [change],
   );
 
+  const show = useCallback(
+    (name: PanelName) =>
+      change((panels) =>
+        panels.open[name] ? panels : { ...panels, open: { ...panels.open, [name]: true } },
+      ),
+    [change],
+  );
+
   const close = useCallback(
     (name: PanelName) =>
       change((panels) => ({
@@ -79,7 +101,7 @@ export function usePanels(runId: string | undefined): PanelState {
 
   // Sizes go on before paint, so a switched run never flashes the last run's layout.
   useLayoutEffect(() => {
-    for (const which of ["terminal", "right"] as const) {
+    for (const which of ["terminal", "right", "browser"] as const) {
       panels.current[which]?.resize(size[which] ?? PANEL_DEFAULTS[which]);
     }
   }, [runId, size]);
@@ -90,7 +112,7 @@ export function usePanels(runId: string | undefined): PanelState {
       if (!meta.isUserInteraction) return;
       change((held) => {
         const size = { ...held.size };
-        for (const which of ["terminal", "right"] as const) {
+        for (const which of ["terminal", "right", "browser"] as const) {
           const found = panels.current[which]?.getSize().inPixels;
           if (found !== undefined) size[which] = Math.round(found);
         }
@@ -110,14 +132,21 @@ export function usePanels(runId: string | undefined): PanelState {
     else panels.current.right = panel;
   }, []);
 
+  const browserRef = useCallback((panel: PanelImperativeHandle | null) => {
+    if (panel === null) delete panels.current.browser;
+    else panels.current.browser = panel;
+  }, []);
+
   return {
     open: (name) => mine.open[name],
     full: mine.full,
     toggle,
+    show,
     close,
     toggleFull,
     terminalRef,
     rightRef,
+    browserRef,
     onDragged,
   };
 }

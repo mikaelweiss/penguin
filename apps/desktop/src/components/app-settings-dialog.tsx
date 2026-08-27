@@ -41,6 +41,7 @@ import { useCatalogs } from "@/hooks/use-catalogs";
 import type { Config } from "@/hooks/use-config";
 import { useDark } from "@/hooks/use-dark";
 import type { Directories } from "@/hooks/use-directories";
+import { autoShows, AUTO_SHOW, openIn, OPEN_IN } from "@/lib/settings";
 
 const SECTIONS = [
   { value: "general", label: "General" },
@@ -139,6 +140,42 @@ export function AppSettingsDialog({
                 ))}
               </SelectContent>
             </Select>
+          </Field>
+
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor="open-in">Open links in</FieldLabel>
+              <FieldDescription>
+                Where a url a run opens goes, and where a link in the terminal goes.
+              </FieldDescription>
+            </FieldContent>
+            <Select
+              value={openIn(config.values)}
+              onValueChange={(next) => config.set(OPEN_IN, next === "system" ? "system" : "")}
+            >
+              <SelectTrigger id="open-in" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="app">penguin</SelectItem>
+                <SelectItem value="system">Default browser</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor="browser-auto">Show the browser panel</FieldLabel>
+              <FieldDescription>
+                Open the panel when a run opens a url. Off still puts it in a tab.
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id="browser-auto"
+              checked={autoShows(config.values)}
+              disabled={openIn(config.values) === "system"}
+              onCheckedChange={(next) => config.set(AUTO_SHOW, next ? "" : "off")}
+            />
           </Field>
 
           <Field>

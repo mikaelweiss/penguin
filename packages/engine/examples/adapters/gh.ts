@@ -230,7 +230,9 @@ export default adapter({
         async get(ref: string): Promise<{ ok: boolean; issue: Issue | null; reason: string }> {
           const done = await gh(["issue", "view", ref, "--json", ISSUE_FIELDS]);
           if (done.code !== 0) return { ok: false, issue: null, reason: reasonOf(done) };
-          return { ok: true, issue: JSON.parse(done.stdout) as Issue, reason: "" };
+          const found = JSON.parse(done.stdout) as Issue;
+          host.open(found.url);
+          return { ok: true, issue: found, reason: "" };
         },
         async comments(ref: string): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
           const done = await gh(["issue", "view", ref, "--json", "comments"]);
@@ -249,6 +251,7 @@ export default adapter({
           const asked = await gh(queueRead(place));
           if (asked.code !== 0) return { ok: false, pr: null, reason: reasonOf(asked) };
           found.isInMergeQueue = asked.stdout.trim() === "true";
+          host.open(found.url);
           return { ok: true, pr: found, reason: "" };
         },
         async comments(pr: string): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
@@ -291,7 +294,9 @@ export default adapter({
                   stdin: options.body ?? "",
                 });
           if (done.code === 0) {
-            return { ok: true, url: done.stdout.trim(), existed: false, reason: "" };
+            const made = done.stdout.trim();
+            host.open(made);
+            return { ok: true, url: made, existed: false, reason: "" };
           }
           const reason = reasonOf(done);
           if (!/already exists/.test(done.stderr)) {
@@ -302,6 +307,7 @@ export default adapter({
           if (open.code !== 0) return { ok: false, url: "", existed: false, reason };
           const url = String((JSON.parse(open.stdout) as { url?: unknown }).url ?? "");
           if (url === "") return { ok: false, url: "", existed: false, reason };
+          host.open(url);
           return { ok: true, url, existed: true, reason: "" };
         },
         async diff(pr: string): Promise<{ ok: boolean; diff: string; reason: string }> {

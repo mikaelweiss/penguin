@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { FileDiffIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { FileDiffIcon, GlobeIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
 import { Button } from "@workspace/ui/components/button";
@@ -18,6 +19,7 @@ import {
 } from "@workspace/ui/components/tooltip";
 
 import { AppSettingsDialog } from "@/components/app-settings-dialog";
+import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { DiffPanel } from "@/components/diff-panel";
 import { DiffWorkerPool } from "@/components/diff-worker-pool";
@@ -30,12 +32,14 @@ import { RunSidebar } from "@/components/run-sidebar";
 import { RemoveProjectDialog } from "@/components/remove-project-dialog";
 import { RunTranscript } from "@/components/run-transcript";
 import { TerminalPanel } from "@/components/terminal-panel";
+import { useBrowser } from "@/hooks/use-browser";
 import { useConfig } from "@/hooks/use-config";
 import { useDiffView } from "@/hooks/use-diff-view";
 import { useDirectories } from "@/hooks/use-directories";
 import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
 import { useNeedsYou } from "@/hooks/use-needs-you";
+import { useOverlay } from "@/hooks/use-overlay";
 import { PANEL_DEFAULTS, PANEL_MINIMUMS, usePanels } from "@/hooks/use-panels";
 import { useRemoveProject } from "@/hooks/use-remove-project";
 import { useRunActions } from "@/hooks/use-run-actions";
@@ -43,7 +47,8 @@ import { useRuns } from "@/hooks/use-runs";
 import { useRunTree } from "@/hooks/use-run-tree";
 import { useWindowBackground } from "@/hooks/use-window-background";
 import { useWorkflowIndex } from "@/hooks/use-workflow-index";
-import { findRun } from "@/lib/runs";
+import { autoShows, openIn } from "@/lib/settings";
+import { findRun, subtree } from "@/lib/runs";
 import type { Project } from "@/lib/runs";
 import type { Workflow } from "@/lib/workflows";
 
@@ -72,10 +77,16 @@ export function App() {
   const run = selected?.run;
   const panels = usePanels(run?.id);
   const diffView = useDiffView();
+  const browser = useBrowser();
+  const overlay = useOverlay();
   const showTerminal = panels.open("terminal") && run !== undefined;
+  const showBrowser = panels.open("browser") && run !== undefined;
   const showDiff = panels.open("diff") && run !== undefined;
   const fullTerminal = panels.full === "terminal" && showTerminal;
+  const fullBrowser = panels.full === "browser" && showBrowser;
   const fullDiff = panels.full === "diff" && showDiff;
+  const fullRight = fullBrowser || fullDiff;
+  const showRight = showBrowser || showDiff;
 
   const show = (id: string) => {
     const node = findRun(projects, id);
@@ -88,6 +99,37 @@ export function App() {
     show(id);
   };
   useNeedsYou(projects, published, selectedId, select);
+
+  const into = openIn(config.values);
+  const auto = autoShows(config.values);
+  const { apply: applyOpens, prune } = browser;
+  const { show: showPanel } = panels;
+  const opens = run?.opens;
+  const openerId = run?.id;
+  useEffect(() => {
+    if (openerId === undefined || opens === undefined) return;
+    const landed = applyOpens(openerId, opens, into);
+    if (landed && into === "app" && auto) showPanel("browser");
+  }, [openerId, opens, into, auto, applyOpens, showPanel]);
+
+  // Only once the first tree has landed. An empty list before that is the app still reading, and
+  // pruning against it would throw away every tab the last session left. A project the user hid or
+  // dropped is gone from the tree on purpose, and its tabs go with it.
+  useEffect(() => {
+    if (!published) return;
+    prune(new Set(projects.flatMap((project) => project.runs.flatMap(subtree))));
+  }, [projects, published, prune]);
+
+  // A link someone clicked is a link they want to see, so it shows the panel whatever the setting
+  // for a run's own urls says.
+  const followLink = (runId: string, url: string) => {
+    if (into === "system") {
+      openUrl(url).catch(() => {});
+      return;
+    }
+    browser.open(runId, url);
+    showPanel("browser");
+  };
 
   const hasRun = run !== undefined;
   const { toggle } = panels;
@@ -179,6 +221,14 @@ export function App() {
             ) : null}
             <span className="flex-1" />
             <PanelButton
+              label="Toggle browser"
+              showing={showBrowser}
+              disabled={run === undefined}
+              onClick={() => panels.toggle("browser")}
+            >
+              <GlobeIcon />
+            </PanelButton>
+            <PanelButton
               label="Toggle diff"
               showing={showDiff}
               disabled={run === undefined}
@@ -219,7 +269,7 @@ export function App() {
                     className="min-h-0 flex-1"
                     onLayoutChanged={panels.onDragged}
                   >
-                    {fullDiff ? null : (
+                    {fullRight ? null : (
                       <ResizablePanel
                         key="output"
                         id="output"
@@ -242,8 +292,8 @@ export function App() {
                         ) : null}
                       </ResizablePanel>
                     )}
-                    {showDiff && !fullDiff ? <ResizableHandle key="right-handle" /> : null}
-                    {showDiff ? (
+                    {showRight && !fullRight ? <ResizableHandle key="right-handle" /> : null}
+                    {showRight ? (
                       <ResizablePanel
                         key="right"
                         id="right"
@@ -252,16 +302,58 @@ export function App() {
                         minSize={PANEL_MINIMUMS.right}
                         className="flex min-h-0 min-w-0 flex-col"
                       >
-                        <DiffWorkerPool>
-                          <DiffPanel
-                            dir={run.dir}
-                            wrote={wrote}
-                            view={diffView}
-                            full={fullDiff}
-                            onToggleFull={() => panels.toggleFull("diff")}
-                            onClose={() => panels.close("diff")}
-                          />
-                        </DiffWorkerPool>
+                        <ResizablePanelGroup
+                          orientation="vertical"
+                          className="min-h-0 flex-1"
+                          onLayoutChanged={panels.onDragged}
+                        >
+                          {showBrowser && !fullDiff ? (
+                            <ResizablePanel
+                              key="browser"
+                              id="browser"
+                              panelRef={panels.browserRef}
+                              defaultSize={PANEL_DEFAULTS.browser}
+                              minSize={PANEL_MINIMUMS.browser}
+                              className="flex min-h-0 min-w-0 flex-col"
+                            >
+                              <BrowserPanel
+                                runId={run.id}
+                                held={browser.of(run.id)}
+                                full={fullBrowser}
+                                showing={!overlay}
+                                onOpen={(url) => browser.open(run.id, url)}
+                                onCloseTab={(tabId) => browser.close(run.id, tabId)}
+                                onSelect={(tabId) => browser.select(run.id, tabId)}
+                                onNewTab={() => browser.newTab(run.id)}
+                                onGo={(tabId, url) => browser.go(run.id, tabId, url)}
+                                onToggleFull={() => panels.toggleFull("browser")}
+                                onClose={() => panels.close("browser")}
+                              />
+                            </ResizablePanel>
+                          ) : null}
+                          {showBrowser && showDiff && !fullRight ? (
+                            <ResizableHandle key="stack-handle" />
+                          ) : null}
+                          {showDiff && !fullBrowser ? (
+                            <ResizablePanel
+                              key="diff"
+                              id="diff"
+                              minSize={PANEL_MINIMUMS.diff}
+                              className="flex min-h-0 min-w-0 flex-col"
+                            >
+                              <DiffWorkerPool>
+                                <DiffPanel
+                                  dir={run.dir}
+                                  wrote={wrote}
+                                  view={diffView}
+                                  full={fullDiff}
+                                  onToggleFull={() => panels.toggleFull("diff")}
+                                  onClose={() => panels.close("diff")}
+                                />
+                              </DiffWorkerPool>
+                            </ResizablePanel>
+                          ) : null}
+                        </ResizablePanelGroup>
                       </ResizablePanel>
                     ) : null}
                   </ResizablePanelGroup>
@@ -281,6 +373,7 @@ export function App() {
                     runId={run.id}
                     dir={run.dir}
                     full={fullTerminal}
+                    onOpenUrl={(url) => followLink(run.id, url)}
                     onToggleFull={() => panels.toggleFull("terminal")}
                     onClose={() => panels.close("terminal")}
                   />

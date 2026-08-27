@@ -1,0 +1,92 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+import type { Held } from "@/lib/browser";
+
+/** Rust knows a tab by this. It matches what the startup sweep looks for. */
+export function labelOf(tabId: string): string {
+  return `browser:${tabId}`;
+}
+
+export type Rect = { x: number; y: number; width: number; height: number };
+
+/**
+ * Closes every page the window still holds. A reloaded frontend has forgotten the tabs it opened,
+ * and nothing else can reach them, so this runs before the first tab of a session.
+ */
+export function browserReset(): Promise<void> {
+  return invoke("browser_reset");
+}
+
+export function browserOpen(tabId: string, url: string, rect: Rect): Promise<void> {
+  return invoke("browser_open", { label: labelOf(tabId), url, ...rect });
+}
+
+export function browserBounds(tabId: string, rect: Rect): Promise<void> {
+  return invoke("browser_bounds", { label: labelOf(tabId), ...rect });
+}
+
+export function browserShow(tabId: string): Promise<void> {
+  return invoke("browser_show", { label: labelOf(tabId) });
+}
+
+export function browserHide(tabId: string): Promise<void> {
+  return invoke("browser_hide", { label: labelOf(tabId) });
+}
+
+export function browserClose(tabId: string): Promise<void> {
+  return invoke("browser_close", { label: labelOf(tabId) });
+}
+
+export function browserNavigate(tabId: string, url: string): Promise<void> {
+  return invoke("browser_navigate", { label: labelOf(tabId), url });
+}
+
+export function browserReload(tabId: string): Promise<void> {
+  return invoke("browser_reload", { label: labelOf(tabId) });
+}
+
+export function browserBack(tabId: string): Promise<void> {
+  return invoke("browser_back", { label: labelOf(tabId) });
+}
+
+export function browserForward(tabId: string): Promise<void> {
+  return invoke("browser_forward", { label: labelOf(tabId) });
+}
+
+type Said<T> = { label: string; said: T };
+
+function onBrowser<T>(event: string, handle: (tabId: string, said: T) => void): Promise<UnlistenFn> {
+  return listen<Said<T>>(event, ({ payload }) => {
+    handle(payload.label.replace(/^browser:/, ""), payload.said);
+  });
+}
+
+/** Where a tab went, whether the panel sent it or the page did. */
+export function onBrowserUrl(handle: (tabId: string, url: string) => void): Promise<UnlistenFn> {
+  return onBrowser("browser-url", handle);
+}
+
+export function onBrowserTitle(handle: (tabId: string, title: string) => void): Promise<UnlistenFn> {
+  return onBrowser("browser-title", handle);
+}
+
+export function onBrowserLoading(
+  handle: (tabId: string, loading: boolean) => void,
+): Promise<UnlistenFn> {
+  return onBrowser("browser-loading", handle);
+}
+
+/** A page the tab asked to open in a window of its own. The panel makes it a tab instead. */
+export function onBrowserPopup(handle: (tabId: string, url: string) => void): Promise<UnlistenFn> {
+  return onBrowser("browser-popup", handle);
+}
+
+/** Each run's tabs, kept in the app's own config so a quit does not lose them. */
+export function readBrowser(): Promise<Held> {
+  return invoke<Held>("read_browser");
+}
+
+export function writeBrowser(tabs: Held): Promise<void> {
+  return invoke("write_browser", { tabs });
+}

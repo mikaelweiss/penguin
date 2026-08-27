@@ -124,3 +124,31 @@ test("aborting the signal kills the process", async () => {
   expect(done.code).not.toBe(0);
   expect(Date.now() - begun).toBeLessThan(3000);
 });
+
+function opens(dir: string): unknown[] {
+  return fs
+    .readFileSync(path.join(dir, "run.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((entry) => "open" in entry)
+    .map((entry) => entry["open"]);
+}
+
+test("open notes a url once, however many times the adapter asks", () => {
+  const dir = tempDir();
+  const host = hostFor(dir);
+  host.open("https://github.com/o/r/pull/1");
+  host.open("https://github.com/o/r/pull/1");
+  host.open("https://github.com/o/r/pull/2");
+  expect(opens(dir)).toEqual(["https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"]);
+});
+
+test("open ignores what no browser can show", () => {
+  const dir = tempDir();
+  const host = hostFor(dir);
+  host.open("");
+  host.open("file:///etc/passwd");
+  host.open("not a url");
+  expect(fs.existsSync(path.join(dir, "run.jsonl"))).toBe(false);
+});

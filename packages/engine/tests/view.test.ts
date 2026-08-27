@@ -105,6 +105,21 @@ test("an answer line settles the ask, message lines reach the listener", async (
   await messages.return?.(undefined);
 });
 
+test("open notes the url, and a workflow that means it twice says it twice", async () => {
+  const { view, dir } = filesView();
+  await view.open("http://localhost:5173");
+  await view.open("http://localhost:5173");
+  const opened = written(dir)
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((entry) => "open" in entry);
+  expect(opened.map((entry) => entry["open"])).toEqual([
+    "http://localhost:5173",
+    "http://localhost:5173",
+  ]);
+});
+
 test("a boolean shape maps to yes and no", () => {
   const menu = menuOf(z.boolean());
   expect(menu?.choices.map((choice) => choice.label)).toEqual(["yes", "no"]);

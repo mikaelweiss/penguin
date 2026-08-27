@@ -6,6 +6,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+mod browser;
+mod servers;
+
 use tauri::path::BaseDirectory;
 use tauri::window::Color;
 use tauri::{Emitter, Manager, Theme};
@@ -403,6 +406,33 @@ fn read_hidden(app: tauri::AppHandle) -> Result<HashMap<String, String>, String>
 fn write_hidden(app: tauri::AppHandle, hidden: HashMap<String, String>) -> Result<(), String> {
     let file = hidden_file(&app)?;
     let text = serde_json::to_string(&hidden).map_err(|cause| cause.to_string())?;
+    std::fs::write(&file, text).map_err(|cause| cause.to_string())
+}
+
+fn browser_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|cause| cause.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|cause| cause.to_string())?;
+    Ok(dir.join("browser.json"))
+}
+
+/// Each run's browser tabs, against the run id. App-only state, so it lives beside the theme.
+/// The shape is the frontend's; this only carries it across a quit.
+#[tauri::command]
+fn read_browser(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let file = browser_file(&app)?;
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        return Ok(serde_json::json!({}));
+    };
+    Ok(serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({})))
+}
+
+#[tauri::command]
+fn write_browser(app: tauri::AppHandle, tabs: serde_json::Value) -> Result<(), String> {
+    let file = browser_file(&app)?;
+    let text = serde_json::to_string(&tabs).map_err(|cause| cause.to_string())?;
     std::fs::write(&file, text).map_err(|cause| cause.to_string())
 }
 
@@ -964,7 +994,20 @@ pub fn run() {
             write_config,
             store_auth_secret,
             terminal_host,
-            notify_needs_you
+            notify_needs_you,
+            read_browser,
+            write_browser,
+            servers::local_servers,
+            browser::browser_reset,
+            browser::browser_open,
+            browser::browser_bounds,
+            browser::browser_show,
+            browser::browser_hide,
+            browser::browser_close,
+            browser::browser_navigate,
+            browser::browser_reload,
+            browser::browser_back,
+            browser::browser_forward
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

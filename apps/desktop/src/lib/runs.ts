@@ -77,6 +77,7 @@ export type Paused = {
 /** One plain-text value the run was started with. */
 export type RunInput = { name: string; text: string };
 
+
 export type Run = {
   id: string;
   name: string;
@@ -93,6 +94,8 @@ export type Run = {
   state?: RunState;
   input: RunInput[];
   output: TranscriptItem[];
+  /** The pages the run put in front of you, in the order it opened them. */
+  opens: string[];
   children: Run[];
 };
 
@@ -477,6 +480,22 @@ function inputOf(head: Entry): RunInput[] {
   });
 }
 
+/** A page a browser can show. A run file is not the app's to trust, so anything else is dropped. */
+function isWeb(url: string): boolean {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+function opensOf(notes: Entry[]): string[] {
+  return notes.flatMap((note) => {
+    const url = text(note["open"]);
+    return url === undefined || !isWeb(url) ? [] : [url];
+  });
+}
+
 function stateOf(entries: Entry[]): RunState | undefined {
   const latest = entries.findLast(
     (entry) => entry["call"] === "view.status" && entry["pending"] === true,
@@ -535,6 +554,7 @@ function place(file: RunFile): Placed | undefined {
       ...(state === undefined ? {} : { state }),
       input: inputOf(head),
       output: outputOf(file.entries),
+      opens: opensOf(notes),
       children: [],
     },
     parent: text(head["parent"]),

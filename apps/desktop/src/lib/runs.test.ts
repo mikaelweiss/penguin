@@ -26,6 +26,7 @@ function run(sketch: Sketch): Run {
     listening: false,
     input: [],
     output: [],
+    opens: [],
     children: (sketch.children ?? []).map(run),
   };
 }

@@ -201,6 +201,24 @@ if (heard !== undefined) {
       can tell its frontend the workflow is no longer listening.
     </p>
 
+    <h2>Showing a page</h2>
+
+    <pre><code>await view.open("http://localhost:5173");</code></pre>
+
+    <p>
+      <code>open</code> puts a url in front of whoever is watching, in whatever browser the frontend
+      has. The desktop app gives each run its own tabs, so three different urls are three tabs and a
+      url a tab already holds is selected rather than opened twice. A run nobody is watching hands
+      its urls over on the switch to it.
+    </p>
+
+    <p>
+      Most workflows never call it. An adapter opens what it produces, so a pull request the run
+      created, a pull request it is reviewing, and a ticket it was handed all arrive on their own.
+      Call <code>open</code> for a page the adapters do not know about, a dev server the run just
+      started being the usual one.
+    </p>
+
     <h2>Handle every adapter result</h2>
 
     <p>

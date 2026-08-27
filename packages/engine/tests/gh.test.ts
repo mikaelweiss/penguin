@@ -129,8 +129,13 @@ test("a poll the branch cannot be read on reports nothing and keeps watching", a
 });
 
 /** A gh that answers one canned result and keeps what it was asked. */
-function fakeGh(reply: CommandResult): { gh: ReturnType<typeof definition.build>; args: string[][] } {
+function fakeGh(reply: CommandResult): {
+  gh: ReturnType<typeof definition.build>;
+  args: string[][];
+  opened: string[];
+} {
   const args: string[][] = [];
+  const opened: string[] = [];
   const host: Host = {
     cwd: "/",
     home: "/tmp",
@@ -139,6 +144,7 @@ function fakeGh(reply: CommandResult): { gh: ReturnType<typeof definition.build>
     config: () => undefined,
     secret: async () => undefined,
     note: () => {},
+    open: (url) => opened.push(url),
     skill: () => {
       throw new Error("no skills installed");
     },
@@ -148,7 +154,7 @@ function fakeGh(reply: CommandResult): { gh: ReturnType<typeof definition.build>
       return reply;
     },
   };
-  return { gh: definition.build(host), args };
+  return { gh: definition.build(host), args, opened };
 }
 
 test("a branch with no pull request open on it comes back empty, not failed", async () => {
@@ -161,4 +167,14 @@ test("the base an open pull request lands on comes back with it", async () => {
   const { gh, args } = fakeGh({ code: 0, stdout: JSON.stringify(listed), stderr: "" });
   expect(await gh.pr.of("feature")).toEqual({ ok: true, prs: listed, reason: "" });
   expect(args[0]).toContain("feature");
+});
+
+test("creating a pull request puts it in front of the person watching", async () => {
+  const { gh, opened } = fakeGh({
+    code: 0,
+    stdout: "https://github.com/o/r/pull/9\n",
+    stderr: "",
+  });
+  await gh.pr.create({ title: "t", body: "b" });
+  expect(opened).toEqual(["https://github.com/o/r/pull/9"]);
 });

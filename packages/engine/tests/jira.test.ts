@@ -10,6 +10,7 @@ type Note = Record<string, unknown>;
 type Fake = {
   host: Host;
   notes: Note[];
+  opened: string[];
   save(creds: { site: string; email: string; token: string }): void;
   state: string;
 };
@@ -18,6 +19,7 @@ function fakeHost(): Fake {
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-jira-"));
   temps.push(state);
   const notes: Note[] = [];
+  const opened: string[] = [];
   let secret: string | undefined;
   const host: Host = {
     cwd: "/",
@@ -27,6 +29,7 @@ function fakeHost(): Fake {
     config: () => undefined,
     secret: async () => secret,
     note: (entry) => notes.push(entry),
+    open: (url) => opened.push(url),
     skill: () => {
       throw new Error("no skills installed");
     },
@@ -39,7 +42,7 @@ function fakeHost(): Fake {
     fs.mkdirSync(path.join(state, "auth"), { recursive: true });
     fs.writeFileSync(path.join(state, "auth", "jira"), savedAt);
   };
-  return { host, notes, save, state };
+  return { host, notes, opened, save, state };
 }
 
 type Jira = {
@@ -174,4 +177,14 @@ test("concurrent calls share one pause and one note pair", async () => {
   const found = await Promise.all(readings);
   expect(found.every((one) => one.ok)).toBe(true);
   expect(notes).toHaveLength(2);
+});
+
+test("reading a ticket puts it in front of the person watching", async () => {
+  const { host, opened, save } = fakeHost();
+  save(CREDS);
+  fakeFetch(() => issueReply());
+  const jira = definition.build(host) as Jira;
+
+  await jira.issue.get("PENG-1");
+  expect(opened).toEqual(["https://acme.atlassian.net/browse/PENG-1"]);
 });

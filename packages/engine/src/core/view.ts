@@ -36,6 +36,8 @@ export type View = {
   status(text: string, options?: StatusOptions): Promise<void>;
   /** Appends a tool call to the story, or updates it when the id was already sent. */
   act(action: Action): Promise<void>;
+  /** Puts a url in front of the person watching, in whatever browser the frontend has. */
+  open(url: string): Promise<void>;
   ask: Ask;
   listen(): AsyncIterable<Message>;
 };

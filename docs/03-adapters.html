@@ -93,7 +93,7 @@ export default adapter({
 
     <h2>The host</h2>
 
-    <p><code>host</code> is everything an adapter is allowed to touch. Four members, no way past them.</p>
+    <p><code>host</code> is everything an adapter is allowed to touch. No way past it.</p>
 
     <pre><code>export type Host = {
   cwd: string;
@@ -101,6 +101,9 @@ export default adapter({
   state: string;
   run: { id: string; dir: string };
   config(key: string): string | undefined;
+  secret(name: string): Promise&lt;string | undefined&gt;;
+  note(entry: Record&lt;string, unknown&gt;): void;
+  open(url: string): void;
   skill(name: string): Skill;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
   exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
@@ -118,6 +121,22 @@ export default adapter({
       description, folder, and SKILL.md body, which is how the agent adapter turns
       <code>{ skill: "commit" }</code> into a prompt. Without these, every adapter
       would invent its own hidden folder.
+    </p>
+
+    <p>
+      <code>secret(name)</code> reads one credential from the machine keystore.
+      <code>note(entry)</code> appends one stamped line to the run's file, which is how the jira
+      adapter says it is waiting on credentials.
+    </p>
+
+    <p>
+      <code>open(url)</code> puts a page in front of whoever is watching the run. An adapter opens
+      what it produces: <code>pr.create</code> opens the pull request it made, <code>pr.get</code>
+      the one it read, <code>issue.get</code> the ticket. That is the whole reason a workflow that
+      reviews a pull request never mentions a browser. A url this run already opened writes nothing
+      the second time, so a watch loop that reads the same pull request every thirty seconds does
+      not fight the person for their screen. Anything that is not an <code>http</code> or
+      <code>https</code> page is ignored, so an adapter that came up empty needs no guard of its own.
     </p>
 
     <div class="table-wrap">

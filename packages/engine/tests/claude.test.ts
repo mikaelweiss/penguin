@@ -25,6 +25,7 @@ function fakeHost(
     note: (entry) => {
       notes.push(entry);
     },
+    open: () => {},
     skill:
       skill ??
       (() => {

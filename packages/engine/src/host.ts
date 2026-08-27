@@ -13,6 +13,11 @@ export type SkillLookup = (name: string) => Skill;
 export function createHost(cwd: string, location: RunLocation, skill: SkillLookup): Host {
   const resolve = (relative: string | undefined): string => path.resolve(cwd, relative ?? ".");
   const settings = readConfig();
+  const opened = new Set<string>();
+  const note = (entry: Record<string, unknown>): void => {
+    const line = JSON.stringify({ at: new Date().toISOString(), ...entry });
+    fs.appendFileSync(path.join(location.dir, "run.jsonl"), `${line}\n`);
+  };
   return {
     cwd,
     home: home(),
@@ -20,9 +25,12 @@ export function createHost(cwd: string, location: RunLocation, skill: SkillLooku
     run: location,
     config: (key) => settings.get(key),
     secret: (name) => readSecret(name),
-    note: (entry) => {
-      const line = JSON.stringify({ at: new Date().toISOString(), ...entry });
-      fs.appendFileSync(path.join(location.dir, "run.jsonl"), `${line}\n`);
+    note,
+    // An adapter opens what it produces, and a watch loop asks it again on every poll.
+    open: (url) => {
+      if (!isWeb(url) || opened.has(url)) return;
+      opened.add(url);
+      note({ open: url });
     },
     skill,
     shell: (cmd, options) => run(cmd, undefined, resolve(options?.cwd), options),
@@ -32,6 +40,15 @@ export function createHost(cwd: string, location: RunLocation, skill: SkillLooku
       return run(cmd, args, resolve(options?.cwd), options);
     },
   };
+}
+
+/** A page a browser can show. An adapter that came up empty hands over "", not a url. */
+function isWeb(url: string): boolean {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
 }
 
 /** The keystore item store-secret.ts writes, read by the same binary that wrote it. */

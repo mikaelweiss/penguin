@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { GhosttyTerminalSurface } from "@workspace/terminal/surface";
 
@@ -29,17 +28,23 @@ export function TerminalPanel({
   runId,
   dir,
   full,
+  onOpenUrl,
   onToggleFull,
   onClose,
 }: {
   runId: string;
   dir: string;
   full: boolean;
+  /** Where a clicked link goes. Which browser that is belongs to the app, not the terminal. */
+  onOpenUrl: (url: string) => void;
   onToggleFull: () => void;
   onClose: () => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const wiresRef = useRef<Wires>({});
+  // The surface is built once per run, so the click reaches whatever the app wants today.
+  const link = useRef(onOpenUrl);
+  link.current = onOpenUrl;
   const dark = useDark();
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -119,7 +124,7 @@ export function TerminalPanel({
         onSelectionChange: () => {},
         beforeKey: keyIsForTerminal,
         onLinkActivate: (text) => {
-          if (/^https?:\/\//.test(text)) void openUrl(text);
+          if (/^https?:\/\//.test(text)) link.current(text);
         },
       });
       if (disposed) {

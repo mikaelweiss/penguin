@@ -277,7 +277,9 @@ export default adapter({
           const route = `/rest/api/3/issue/${encodeURIComponent(key)}?fields=${FIELDS.join(",")}`;
           const reply = await call("GET", route);
           if (!reply.ok) return { ok: false, issue: null, reason: reply.reason };
-          return { ok: true, issue: issueOf(reply.body, reply.base), reason: "" };
+          const found = issueOf(reply.body, reply.base);
+          host.open(found.url);
+          return { ok: true, issue: found, reason: "" };
         },
 
         async comments(
@@ -322,7 +324,9 @@ export default adapter({
           });
           if (!reply.ok) return { ok: false, key: "", url: "", reason: reply.reason };
           const key = String((reply.body as { key?: unknown } | null)?.key ?? "");
-          return { ok: true, key, url: `${reply.base}/browse/${key}`, reason: "" };
+          const url = `${reply.base}/browse/${key}`;
+          host.open(url);
+          return { ok: true, key, url, reason: "" };
         },
 
         async comment(key: string, body: string): Promise<{ ok: boolean; reason: string }> {

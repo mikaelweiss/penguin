@@ -48,6 +48,8 @@ export type Host = {
   secret(name: string): Promise<string | undefined>;
   /** Appends one stamped line to the run's file, for frontends to read. */
   note(entry: Record<string, unknown>): void;
+  /** Puts a url in front of the person watching. A url this run already opened writes nothing. */
+  open(url: string): void;
   /** One skill from the run's catalogs, project first. Throws when no catalog holds the name. */
   skill(name: string): Skill;
   /** Runs one string through a real shell. For constant strings and shell features, never interpolation. */

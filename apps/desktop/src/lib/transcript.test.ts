@@ -20,6 +20,7 @@ function run(output: TranscriptItem[], rest: Partial<Run> = {}): Run {
     listening: false,
     input: [],
     output,
+    opens: [],
     children: [],
     ...rest,
   };

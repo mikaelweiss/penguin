@@ -95,7 +95,7 @@
     <ul role="list">
       <li>Terminal: opens in the selected run's directory.</li>
       <li>The terminal follows the selection, and follows the run when the run changes directory.</li>
-      <li>Web view: a browser.</li>
+      <li>Web view: a browser, with tabs.</li>
       <li>Diff: file diffs for the run's directory, when it is a git directory.</li>
       <li>All three can be open at once.</li>
       <li>Web view and diff stack on the right; the output area keeps the left.</li>
@@ -104,6 +104,21 @@
       <li>Each panel has a full screen button that hides the others and animates it to fill the space.</li>
       <li>A full screen panel shows a button to leave full screen.</li>
       <li>Full screen never covers the sidebar.</li>
+    </ul>
+
+    <h2>Web view</h2>
+
+    <ul role="list">
+      <li>Tabs belong to the run. Switching runs switches the whole tab strip.</li>
+      <li>Back, forward, reload, an address bar, and a button that sends the page to the default browser.</li>
+      <li>Tabs outlive a quit. Reopening the app and selecting the run finds them where they were.</li>
+      <li>A run opens a url with <code>view.open</code>, and the adapters open what they produce: a PR made, a PR reviewed, a ticket handed in.</li>
+      <li>Each url is a tab. A url a tab already holds is selected, not opened twice.</li>
+      <li>A url opened while you watch another run waits. Switching to that run opens the panel on it.</li>
+      <li>The empty state lists the local servers answering with a page, by the process holding each port.</li>
+      <li>A link clicked in the terminal opens here.</li>
+      <li>The page is a native view above everything the app draws, so it hides itself while a dialog is up.</li>
+      <li>Only the selected run's tabs cost a page. A tab loads when first looked at and keeps its state until the tab closes or the run is left.</li>
     </ul>
 
     <h2>New workflow</h2>
@@ -143,6 +158,8 @@
       <li>A sheet with a sidebar of sections, rows of settings. Shift cmd comma opens it.</li>
       <li>Holds the global dreaming toggle.</li>
       <li>Light and dark, with a toggle.</li>
+      <li>Holds where links open: the web view, or the default browser.</li>
+      <li>Holds whether a url a run opens also shows the web view. On by default; off still makes the tab.</li>
       <li>Holds the worktrees directory. Default <code>~/.penguin/worktrees/&lt;project&gt;/&lt;run&gt;</code>.</li>
       <li>Holds the default agent adapter. Both write <code>~/.penguin/config</code>.</li>
       <li>App-only settings, the directory list and theme, live in Tauri's app config dir.</li>
