@@ -2,7 +2,7 @@
 //! by the panel's rect. Tauri draws these above the React tree, so the frontend hides them
 //! whenever something must draw on top.
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
-use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl};
+use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, Rect, Url, WebviewUrl};
 
 /// Every browser webview wears it, so a crash's leftovers are recognisable at startup.
 pub const PREFIX: &str = "browser:";
@@ -41,6 +41,19 @@ fn web(url: &str) -> Result<Url, String> {
 fn webview(app: &tauri::AppHandle, label: &str) -> Result<tauri::webview::Webview, String> {
     app.get_webview(label)
         .ok_or_else(|| format!("no browser tab named {label}"))
+}
+
+fn rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
+    Rect {
+        position: LogicalPosition::new(x, y).into(),
+        size: LogicalSize::new(width, height).into(),
+    }
+}
+
+/// Always both at once. macOS measures a subview's origin from the bottom, so the top a caller
+/// asked for is a function of the height, and setting either alone moves the page.
+fn place(view: &tauri::webview::Webview, at: Rect) -> Result<(), String> {
+    view.set_bounds(at).map_err(|cause| cause.to_string())
 }
 
 /// Closes every browser webview the window still holds. A reloaded frontend has forgotten the
@@ -105,14 +118,17 @@ pub fn browser_open(
             }
         });
 
-    window
+    let at = rect(x, y, width, height);
+    let made = window
         .add_child(
             builder,
             LogicalPosition::new(x, y),
             LogicalSize::new(width, height),
         )
-        .map(|_| ())
-        .map_err(|cause| cause.to_string())
+        .map_err(|cause| cause.to_string())?;
+    // The frame a child is born with does not go through set_bounds, and the panel only pushes a
+    // rect that changed, so a page placed wrong at birth would stay wrong. This settles it once.
+    place(&made, at)
 }
 
 #[tauri::command]
@@ -124,11 +140,7 @@ pub fn browser_bounds(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    let view = webview(&app, &label)?;
-    view.set_position(LogicalPosition::new(x, y))
-        .map_err(|cause| cause.to_string())?;
-    view.set_size(LogicalSize::new(width, height))
-        .map_err(|cause| cause.to_string())
+    place(&webview(&app, &label)?, rect(x, y, width, height))
 }
 
 #[tauri::command]
