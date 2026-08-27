@@ -155,8 +155,7 @@ export default workflow({
 
     async function fixing(prompt: string): Promise<{ retry: boolean; reason: string }> {
       if (fixer === "") fixer = await agent.open();
-      const fix = await narrated(
-        view,
+      const fix = await narrated(view, () =>
         agent.turn(fixer, { skill: "fix-push", prompt }, { result: Fix }),
       );
       if (!fix.fixed) return { retry: false, reason: fix.notes };
@@ -272,8 +271,7 @@ export default workflow({
     if (!(await delivered())) return nowhere;
 
     const writer = await agent.open();
-    const written = await narrated(
-      view,
+    const written = await narrated(view, () =>
       agent.turn(
         writer,
         { skill: "open-pr", prompt: `# Base branch\n\n${base}` },
@@ -322,11 +320,10 @@ export default workflow({
     };
 
     const assessed = async (who: string, prompt: string): Promise<Assessment> =>
-      narrated(view, agent.turn(who, { skill: "assess-feedback", prompt }, { result: Assessment }));
+      narrated(view, () => agent.turn(who, { skill: "assess-feedback", prompt }, { result: Assessment }));
 
     const applied = async (who: string, heading: string, what: string): Promise<void> => {
-      await narrated(
-        view,
+      await narrated(view, () =>
         agent.turn(who, {
           skill: "address-feedback",
           prompt: `# Pull request\n\n${pr.url}\n\n# ${heading}\n\n${what}`,

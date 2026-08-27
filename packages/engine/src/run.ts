@@ -6,7 +6,7 @@ import { installedIn, pick } from "./catalog/adapters.ts";
 import { builtinCatalog, checkoutOf, roots, type Catalog } from "./catalog/catalogs.ts";
 import { load } from "./catalog/loader.ts";
 import { skillLookup } from "./catalog/skills.ts";
-import { PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
+import { messageOf, PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
 import { RUN, type RunHooks } from "./core/workflow.ts";
 import { createHost } from "./host.ts";
 import { projectRoot, runDir } from "./paths.ts";
@@ -44,24 +44,26 @@ export async function run(
     { id, workflow: file, params: parsed, cwd, root: projectRoot(cwd), parent: options?.parent },
     journal,
   );
-  const host = createHost(cwd, { id, dir: trace.dir }, skillLookup(list));
-  const found = await installedIn(list);
-  const ctx: Record<PropertyKey, unknown> = { params: parsed };
-  for (const role of new Set(found.map((entry) => entry.role))) {
-    const picked = pick(found, role);
-    if ("missing" in picked) throw new PenguinError(picked.missing);
-    if ("conflict" in picked) throw new PenguinError(picked.conflict);
-    const built = picked.found.definition.build(host);
-    ctx[role] = trace.wrap(role, built);
-  }
-  ctx[RUN] = hooks(trace, id, cwd, list);
+  // Wiring the adapters is inside the try: a catalog that will not load is a failure of this run,
+  // and a caller reads what stopped it from the run file like any other.
   try {
+    const host = createHost(cwd, { id, dir: trace.dir }, skillLookup(list));
+    const found = await installedIn(list);
+    const ctx: Record<PropertyKey, unknown> = { params: parsed };
+    for (const role of new Set(found.map((entry) => entry.role))) {
+      const picked = pick(found, role);
+      if ("missing" in picked) throw new PenguinError(picked.missing);
+      if ("conflict" in picked) throw new PenguinError(picked.conflict);
+      const built = picked.found.definition.build(host);
+      ctx[role] = trace.wrap(role, built);
+    }
+    ctx[RUN] = hooks(trace, id, cwd, list);
     // The loader duck-typed the definition, so its schema's static type is gone here.
     const result = await definition.run(reached(ctx) as never);
     trace.note({ outcome: result ?? null });
     return result;
   } catch (error) {
-    trace.note({ threw: error instanceof Error ? error.message : String(error) });
+    trace.note({ threw: messageOf(error) });
     throw error;
   }
 }

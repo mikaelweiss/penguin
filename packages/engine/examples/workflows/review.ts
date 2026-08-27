@@ -49,8 +49,7 @@ export default workflow({
 
   async run({ params, agent, view }) {
     const session = await agent.open();
-    const review = await narrated(
-      view,
+    const review = await narrated(view, () =>
       agent.turn(session, { skill: "review", prompt: checklist(params) }, { result: Review }),
     );
     await view.show(`verdict: ${review.verdict}`);

@@ -15,7 +15,7 @@ export default workflow({
 
   async run({ agent, view }) {
     const session = await agent.open();
-    const read = await narrated(view, agent.turn(session, { skill: "baseline" }, { result: Gates }));
+    const read = await narrated(view, () => agent.turn(session, { skill: "baseline" }, { result: Gates }));
     await view.show(read.green ? "baseline: green" : "baseline: already red");
     return read;
   },

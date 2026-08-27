@@ -41,14 +41,12 @@ export default workflow({
     const dest = params.scope === "project" ? ".penguin in the current folder" : "~/.penguin";
 
     const author = await agent.open();
-    let design = await narrated(
-      view,
+    let design = await narrated(view, () =>
       agent.turn(author, { skill: "design-workflow", prompt: params.idea }, { result: Design }),
     );
     let answer = await view.ask(`${design.design}\n\nApprove the design?`, Approval);
     while (answer !== "approve") {
-      design = await narrated(
-        view,
+      design = await narrated(view, () =>
         agent.turn(
           author,
           { skill: "design-workflow", prompt: revision(params.idea, answer) },
@@ -63,22 +61,21 @@ export default workflow({
     let approved = false;
     for (let round = 1; round <= params.rounds && !approved; round++) {
       await view.show(`round ${round} of ${params.rounds}`);
-      written = await narrated(
-        view,
+      written = await narrated(view, () =>
         agent.turn(
           author,
           { skill: "write-workflow", prompt: brief(design.design, dest, findings) },
           { result: Written },
         ),
       );
+      const draft = written;
       const reviewer = await agent.open();
-      const review = await narrated(
-        view,
+      const review = await narrated(view, () =>
         agent.turn(
           reviewer,
           {
             skill: "review-workflow",
-            prompt: `# Design\n\n${design.design}\n\n# Workflow\n\n${written.file}`,
+            prompt: `# Design\n\n${design.design}\n\n# Workflow\n\n${draft.file}`,
           },
           { result: Review },
         ),

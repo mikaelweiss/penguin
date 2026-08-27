@@ -1,6 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
-import { narrate, narrated } from "../helpers/turns.ts";
+import { narrate, narrated, retried } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
 const Ack = z.enum(["ok"]);
@@ -92,8 +92,7 @@ export default workflow({
     const looked = await github.pr.diff(params.pr);
     if (!looked.ok) await view.show(`The PR diff did not read: ${looked.reason}`);
     const judge = await agent.open();
-    const triaged = await narrated(
-      view,
+    const triaged = await narrated(view, () =>
       agent.turn(
         judge,
         { skill: "triage-pr", prompt: `${briefing()}\n\n# Diff\n\n${cut(looked.diff)}` },
@@ -244,8 +243,20 @@ export default workflow({
         shown = narrate(view, turn.output);
       }
 
-      let findings = await turn.value;
-      await shown;
+      // A turn that will not finish is the person's to clear. The review does not end on it.
+      let findings: z.infer<typeof Findings>;
+      for (;;) {
+        try {
+          findings = await turn.value;
+          await shown;
+          break;
+        } catch (error) {
+          await shown;
+          await retried(view, error);
+          turn = agent.turn(reviewer, { skill: "review-pr", prompt: opening() }, { result: Findings });
+          shown = narrate(view, turn.output);
+        }
+      }
       previous = findings;
       while (findings.blockers.length > 0) {
         const answer = await view.ask(
@@ -258,8 +269,7 @@ export default workflow({
           await view.show(`Posted feedback on PR #${pr.number} without approving`);
           return "sent";
         }
-        findings = await narrated(
-          view,
+        findings = await narrated(view, () =>
           agent.turn(
             reviewer,
             {

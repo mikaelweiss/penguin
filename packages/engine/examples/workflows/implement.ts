@@ -38,15 +38,13 @@ export default workflow({
 
     for (let round = 1; round <= params.rounds && !approved; round++) {
       await view.show(`round ${round} of ${params.rounds}`);
-      await narrated(
-        view,
+      await narrated(view, () =>
         agent.turn(implementer, {
           skill: "implement",
           prompt: brief(params.task, blocking, params.baseline),
         }),
       );
-      const reviewed = await narrated(
-        view,
+      const reviewed = await narrated(view, () =>
         agent.turn(
           reviewer,
           {

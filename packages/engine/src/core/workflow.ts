@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { PenguinError } from "./errors.ts";
+import { messageOf, PenguinError, RunStopped } from "./errors.ts";
+import type { View } from "./view.ts";
 
 /** The roles the installed adapters put on ctx. penguin-env.d.ts merges them in. */
 export interface Adapters {}
@@ -87,5 +88,43 @@ export function call<Schema extends z.ZodObject, R>(
     }
     return child.run({ ...ctx, params: parsed });
   }
-  return hooks.spawn(child.file, parsed, options?.cwd) as Promise<R>;
+  return spawned(ctx, hooks, child.file, parsed, options?.cwd);
+}
+
+/** What a child that did not finish waits at. Nothing but a person ends the run that called it. */
+const Again = z.enum(["again", "stop"]);
+
+/** The view a run was wired with, when it has one. A run without it has nobody to ask. */
+function watching(ctx: Ctx<unknown>): View | undefined {
+  const view = (ctx as unknown as Record<string, unknown>)["view"];
+  if (view === null || typeof view !== "object") return undefined;
+  return typeof (view as Record<string, unknown>)["ask"] === "function" ? (view as View) : undefined;
+}
+
+/**
+ * A child that died takes nothing with it. The person reads what stopped it and says whether it
+ * runs again, so a run of many hours never ends on a fault somebody was there to clear.
+ */
+async function spawned<R>(
+  ctx: Ctx<unknown>,
+  hooks: RunHooks,
+  file: string,
+  params: unknown,
+  cwd: string | undefined,
+): Promise<R> {
+  const name = file.split("/").pop() ?? file;
+  for (;;) {
+    try {
+      return (await hooks.spawn(file, params, cwd)) as R;
+    } catch (error) {
+      const view = watching(ctx);
+      // A person who stopped the child meant to stop it, and a run with no view has nobody to ask.
+      if (view === undefined || error instanceof RunStopped) throw error;
+      const answer = await view.ask(
+        `${name} did not finish: ${messageOf(error)}\n\nClear what stopped it and type again to run it once more, or stop to end this run.`,
+        Again,
+      );
+      if (answer === "stop") throw error;
+    }
+  }
 }

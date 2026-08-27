@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   Channel,
   issuesOf,
+  messageOf,
   PenguinError,
   type Action,
   type Host,
@@ -247,12 +248,34 @@ export function narrate(view: View, output: AsyncIterable<Chunk>): Promise<void>
   })();
 }
 
-/** Runs one turn to its value, narrating the whole stream on the way. */
-export async function narrated<T>(view: View, turn: Turn<T>): Promise<T> {
-  const shown = narrate(view, turn.output);
-  try {
-    return await turn.value;
-  } finally {
-    await shown;
+/** What a turn that will not finish waits at. Nothing but a person ends a run over a failed turn. */
+const Again = z.enum(["again", "stop"]);
+
+/**
+ * The gate a failed turn waits at. It comes back when the turn is to run again, and throws when
+ * the person says the run ends here, so a failing CLI never decides that on its own.
+ */
+export async function retried(view: View, error: unknown): Promise<void> {
+  const answer = await view.ask(
+    `The turn did not finish: ${messageOf(error)}\n\nClear what stopped it and type again to run it once more, or stop to end this run.`,
+    Again,
+  );
+  if (answer === "stop") throw error;
+}
+
+/** Runs one turn to its value, narrating the whole stream on the way, and again when it fails. */
+export async function narrated<T>(view: View, start: () => Turn<T>): Promise<T> {
+  for (;;) {
+    const turn = start();
+    const shown = narrate(view, turn.output);
+    let failure: unknown;
+    try {
+      return await turn.value;
+    } catch (error) {
+      failure = error;
+    } finally {
+      await shown;
+    }
+    await retried(view, failure);
   }
 }

@@ -110,7 +110,8 @@ async function scan(dir: string, scope: catalogs.CatalogScope): Promise<AdapterF
   const names = fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((entry) => !entry.isDirectory())
-    .filter((entry) => entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts"))
+    .filter((entry) => entry.name.endsWith(".ts"))
+    .filter((entry) => !/\.(d|test)\.ts$/.test(entry.name))
     .map((entry) => entry.name)
     .sort();
   const found: AdapterFound[] = [];

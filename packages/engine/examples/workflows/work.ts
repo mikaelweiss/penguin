@@ -68,8 +68,7 @@ export default workflow({
     }
 
     const namer = await agent.open();
-    const named = await narrated(
-      view,
+    const named = await narrated(view, () =>
       agent.turn(
         namer,
         {

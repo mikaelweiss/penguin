@@ -43,8 +43,7 @@ export default workflow({
     const session = await agent.open();
     let input = ticket;
     for (;;) {
-      const out = await narrated(
-        view,
+      const out = await narrated(view, () =>
         agent.turn(session, { skill: "triage", prompt: input }, { result: Out }),
       );
       if (out.blocked !== undefined) {

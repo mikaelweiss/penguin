@@ -25,8 +25,7 @@ export default workflow({
     }
 
     const session = await agent.open();
-    const written = await narrated(
-      view,
+    const written = await narrated(view, () =>
       agent.turn(session, { skill: "commit" }, { result: Commit }),
     );
     if (written.files.length === 0) {

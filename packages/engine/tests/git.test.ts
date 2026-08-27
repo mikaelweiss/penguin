@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Host } from "../src/core/adapter.ts";
+import type { CommandResult, Host } from "../src/core/adapter.ts";
 import { roots } from "../src/catalog/catalogs.ts";
 import { skillLookup } from "../src/catalog/skills.ts";
 import { createHost } from "../src/host.ts";
@@ -367,4 +367,74 @@ test("a hook still stops a push carrying a commit the remote does not have", asy
   refuse(ours.dir);
   await commitFile(ours, "more.txt", "more");
   expect((await ours.vcs.push("feature")).ok).toBe(false);
+});
+
+const LOCKED =
+  "error: cannot lock ref 'refs/remotes/origin/main': is at 9a85720 but expected 9cac28b";
+
+/** A host whose git answers from a script, for the failures a real remote will not stage. */
+function scripted(answers: CommandResult[]): { host: Host; calls: string[][] } {
+  const calls: string[][] = [];
+  const host = {
+    exec: (argv: string[]): Promise<CommandResult> => {
+      calls.push(argv);
+      return Promise.resolve(answers[calls.length - 1] ?? { code: 0, stdout: "", stderr: "" });
+    },
+  } as unknown as Host;
+  return { host, calls };
+}
+
+test("a fetch a sibling worktree beat to the ref runs again", async () => {
+  const { host, calls } = scripted([
+    { code: 1, stdout: "", stderr: LOCKED },
+    { code: 0, stdout: "", stderr: "" },
+  ]);
+  expect((await definition.build(host).fetch("main")).ok).toBe(true);
+  expect(calls).toHaveLength(2);
+});
+
+test("a fetch that fails for another reason is not run again", async () => {
+  const { host, calls } = scripted([{ code: 128, stdout: "", stderr: "fatal: no such remote" }]);
+  const done = await definition.build(host).fetch("main");
+  expect(done.ok).toBe(false);
+  expect(done.reason).toBe("fatal: no such remote");
+  expect(calls).toHaveLength(1);
+});
+
+test("a ref that stays contended gives up with what git said", async () => {
+  const locked = { code: 1, stdout: "", stderr: LOCKED };
+  const { host, calls } = scripted([locked, locked, locked, locked, locked]);
+  const done = await definition.build(host).fetch("main");
+  expect(done.ok).toBe(false);
+  expect(done.reason).toBe(LOCKED);
+  expect(calls).toHaveLength(5);
+});
+
+async function conflicting(): Promise<{ ours: Awaited<ReturnType<typeof repo>>; base: string }> {
+  const ours = await repo();
+  await commitFile(ours, "base.txt", "base");
+  const base = (await ours.vcs.head()).branch;
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  fs.writeFileSync(path.join(ours.dir, "same.txt"), "theirs\n");
+  await git(ours.host, ["add", "same.txt"]);
+  await git(ours.host, ["commit", "-q", "-m", "feature"]);
+  await git(ours.host, ["checkout", "-q", base]);
+  fs.writeFileSync(path.join(ours.dir, "same.txt"), "ours\n");
+  await git(ours.host, ["add", "same.txt"]);
+  await git(ours.host, ["commit", "-q", "-m", "base moves"]);
+  await git(ours.host, ["checkout", "-q", "feature"]);
+  return { ours, base };
+}
+
+test("pending reads the rebase a stopped run left open, and abort clears it", async () => {
+  const { ours, base } = await conflicting();
+  expect(await ours.vcs.rebase.pending()).toBe(false);
+
+  const onto = await ours.vcs.rebase.onto(base);
+  expect(onto.conflicted).toBe(true);
+  expect(await ours.vcs.rebase.pending()).toBe(true);
+
+  expect((await ours.vcs.rebase.abort()).ok).toBe(true);
+  expect(await ours.vcs.rebase.pending()).toBe(false);
+  expect((await ours.vcs.head()).branch).toBe("feature");
 });

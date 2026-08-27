@@ -43,8 +43,7 @@ export default workflow({
     let input =
       params.context === "" ? ticket : `${ticket}\n\n# What triage already read\n\n${params.context}`;
     for (;;) {
-      const out = await narrated(
-        view,
+      const out = await narrated(view, () =>
         agent.turn(session, { skill: "plan", prompt: input }, { result: Out }),
       );
       if (out.blocked !== undefined) {

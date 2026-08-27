@@ -26,6 +26,17 @@ function written(dir: string): string {
   return fs.readFileSync(path.join(dir, "run.jsonl"), "utf8");
 }
 
+/** The view polls the inbox, so a run file is read for what it will hold, never after a fixed wait. */
+async function writes(dir: string, text: string): Promise<string> {
+  const deadline = Date.now() + 5000;
+  let held = written(dir);
+  while (!held.includes(text) && Date.now() < deadline) {
+    await Bun.sleep(25);
+    held = written(dir);
+  }
+  return held;
+}
+
 afterEach(() => {
   for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true });
   temps = [];
@@ -42,8 +53,7 @@ test("a typed answer that does not fit is rejected in the run file, the ask stay
   const { view, dir, sent } = filesView();
   const answer = view.ask("pick", z.enum(["a", "b"]));
   sent({ answer: "zzz" });
-  await Bun.sleep(300);
-  expect(written(dir)).toContain('"rejected":"zzz"');
+  expect(await writes(dir, '"rejected":"zzz"')).toContain('"rejected":"zzz"');
   sent({ answer: "a" });
   expect(await answer).toBe("a");
 });

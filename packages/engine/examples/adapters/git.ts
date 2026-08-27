@@ -34,6 +34,24 @@ export default adapter({
       };
     }
 
+    /** Every worktree of a clone shares one ref store, so a sibling's fetch can win the write. */
+    function contended(said: string): boolean {
+      return /cannot lock ref|unable to update local ref/i.test(said);
+    }
+
+    const pause = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
+    /** A contended write leaves the ref at the winner's value, which the retry reads before it writes. */
+    async function fetching(ref: string, cwd: string | undefined): Promise<Done> {
+      for (let attempt = 1; ; attempt++) {
+        const done = await git(["fetch", "origin", ref], cwd);
+        const said = done.stderr.trim();
+        if (done.code === 0) return { ok: true, reason: said };
+        if (attempt === 5 || !contended(said)) return { ok: false, reason: said };
+        await pause(attempt * 100);
+      }
+    }
+
     /** Where the repository has branch checked out, empty when no worktree holds it. */
     async function checkedOut(branch: string): Promise<string> {
       const listed = await git(["worktree", "list", "--porcelain"]);
@@ -92,13 +110,12 @@ export default adapter({
         return { ok: done.code === 0 && branch !== "", branch, reason: done.stderr.trim() };
       },
       async fetch(ref: string, options?: { cwd?: string }): Promise<Done> {
-        const done = await git(["fetch", "origin", ref], options?.cwd);
-        return { ok: done.code === 0, reason: done.stderr.trim() };
+        return fetching(ref, options?.cwd);
       },
       /** Fast-forwards onto the fetched ref. Diverged histories answer not ok, nothing is discarded. */
       async pull(ref: string, options?: { cwd?: string }): Promise<Done> {
-        const fetched = await git(["fetch", "origin", ref], options?.cwd);
-        if (fetched.code !== 0) return { ok: false, reason: fetched.stderr.trim() };
+        const fetched = await fetching(ref, options?.cwd);
+        if (!fetched.ok) return fetched;
         const merged = await git(["merge", "--ff-only", "FETCH_HEAD"], options?.cwd);
         return { ok: merged.code === 0, reason: (merged.stdout + merged.stderr).trim() };
       },
@@ -152,6 +169,16 @@ export default adapter({
           const done = await git(["rebase", "--abort"], options?.cwd);
           return { ok: done.code === 0, reason: done.stderr.trim() };
         },
+        /** Whether a rebase is open in the worktree, read off the state folder git keeps for one. */
+        async pending(options?: { cwd?: string }): Promise<boolean> {
+          for (const name of ["rebase-merge", "rebase-apply"]) {
+            const done = await git(["rev-parse", "--git-path", name], options?.cwd);
+            const where = done.stdout.trim();
+            if (done.code !== 0 || where === "") continue;
+            if (fs.existsSync(path.resolve(host.cwd, options?.cwd ?? ".", where))) return true;
+          }
+          return false;
+        },
       },
       worktree: {
         async add(
@@ -181,9 +208,8 @@ export default adapter({
             return { ok: false, path: target, exists: true, reason: `${target} already exists` };
           fs.mkdirSync(path.dirname(target), { recursive: true });
           if (options?.ref !== undefined) {
-            const fetched = await git(["fetch", "origin", options.ref]);
-            if (fetched.code !== 0)
-              return { ok: false, path: target, exists: false, reason: fetched.stderr.trim() };
+            const fetched = await fetching(options.ref, undefined);
+            if (!fetched.ok) return { ok: false, path: target, exists: false, reason: fetched.reason };
             const done = await git(["worktree", "add", "--detach", target, "FETCH_HEAD"]);
             if (done.code === 0) moved(target);
             return {
