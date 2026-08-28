@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
+import { modelFor } from "../helpers/models.ts";
 import { clip, said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
@@ -132,7 +133,8 @@ export default adapter({
       const argv = ["opencode", "run", "--auto", "--format", "json"];
       const id = opened.get(session);
       if (id !== undefined) argv.push("--session", id);
-      if (options.model !== undefined) argv.push("--model", options.model);
+      const model = modelFor(options.model, "opencode", {}, host.config);
+      if (model !== undefined) argv.push("--model", model);
       if (options.agent !== undefined) argv.push("--agent", options.agent);
 
       let buffer = "";

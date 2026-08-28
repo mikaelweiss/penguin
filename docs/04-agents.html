@@ -51,6 +51,39 @@ const commit = await turn.value;</code></pre>
       person.
     </p>
 
+    <h2>Choosing model capacity</h2>
+
+    <p>
+      A workflow can open a session with <code>{ model: "best" }</code>,
+      <code>{ model: "big" }</code>, or <code>{ model: "small" }</code>. These names state how much
+      model the work needs without naming a provider. The adapter translates the choice:
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Choice</th>
+            <th>claude</th>
+            <th>codex</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>best</code></td><td><code>fable</code></td><td><code>gpt-5.6-sol</code></td></tr>
+          <tr><td><code>big</code></td><td><code>opus</code></td><td><code>gpt-5.6-sol</code></td></tr>
+          <tr><td><code>small</code></td><td><code>sonnet</code></td><td><code>gpt-5.6-terra</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Exact model names still pass through unchanged. A direct-provider adapter has the defaults
+      above. A multi-provider adapter needs one config line per neutral choice it uses, such as
+      <code>opencode-big-model openai/gpt-5.6-sol</code>. The key is always
+      <code>&lt;adapter&gt;-&lt;choice&gt;-model</code>. The same key overrides a direct-provider default,
+      so a model update does not require editing a workflow.
+    </p>
+
     <h2>Skills</h2>
 
     <p>

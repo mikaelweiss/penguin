@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
+import { modelFor } from "../helpers/models.ts";
 import { flatten, said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
@@ -113,7 +114,7 @@ export default adapter({
       const argv = ["cursor-agent", "-p", "--force", "--output-format", "stream-json", "--trust"];
       const chat = chats.get(session);
       if (chat !== undefined) argv.push("--resume", chat);
-      argv.push("--model", options.model ?? "grok-4.6");
+      argv.push("--model", modelFor(options.model, "cursor", {}, host.config) ?? "grok-4.6");
       const prompt =
         schema === undefined
           ? invocation.prompt

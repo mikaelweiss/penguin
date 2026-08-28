@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
+import { modelFor, type ModelMap } from "../helpers/models.ts";
 import { clip, flatten, said, sessions, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
@@ -10,6 +11,12 @@ type OpenOptions = {
   model?: string;
   sandbox?: string;
 };
+
+const MODELS = {
+  best: "gpt-5.6-sol",
+  big: "gpt-5.6-sol",
+  small: "gpt-5.6-terra",
+} satisfies ModelMap;
 
 type Item = {
   id?: string;
@@ -217,7 +224,8 @@ export default adapter({
       const argv = ["codex", "exec"];
       if (thread !== undefined) argv.push("resume", thread);
       argv.push("--json", "--skip-git-repo-check");
-      if (options.model !== undefined) argv.push("-c", `model="${options.model}"`);
+      const model = modelFor(options.model, "codex", MODELS, host.config);
+      if (model !== undefined) argv.push("-c", `model="${model}"`);
       // A run has no one to ask, and workspace-write blocks .git writes and the network.
       argv.push("-c", `sandbox_mode="${options.sandbox ?? "danger-full-access"}"`);
       const dir =

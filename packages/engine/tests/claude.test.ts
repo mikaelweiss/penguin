@@ -60,6 +60,20 @@ function limit(call: Call, kind: string, text: string): void {
 
 const RESETS = "You've hit your session limit \u00b7 resets 3pm";
 
+test("maps neutral model choices to claude models", async () => {
+  for (const [model, expected] of [
+    ["best", "fable"],
+    ["big", "opus"],
+    ["small", "sonnet"],
+  ]) {
+    const { host, calls } = fakeHost(async () => OK);
+    const agent = definition.build(host);
+    const session = await agent.open({ model });
+    await agent.turn(session, "go").value;
+    expect(calls[0]?.argv).toContain(expected);
+  }
+});
+
 test("streams chunks and returns the schema-checked value", async () => {
   const { host } = fakeHost(async (call) => {
     emit(call, {

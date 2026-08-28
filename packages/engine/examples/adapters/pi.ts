@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { adapter, type ActionKind } from "penguin";
+import { modelFor } from "../helpers/models.ts";
 import { sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
@@ -80,7 +81,8 @@ export default adapter({
     ): Promise<Attempt> {
       const { session, options, prompt, schema, signal } = invocation;
       const argv = ["pi", "--mode", "json", "--session-id", session];
-      if (options.model !== undefined) argv.push("--model", options.model);
+      const model = modelFor(options.model, "pi", {}, host.config);
+      if (model !== undefined) argv.push("--model", model);
       let temporary: string | undefined;
       if (schema !== undefined) {
         temporary = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-pi-"));

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
+import { modelFor, type ModelMap } from "../helpers/models.ts";
 import { clip, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
 type OpenOptions = {
@@ -8,6 +9,8 @@ type OpenOptions = {
   model?: string;
   permission?: string;
 };
+
+const MODELS = { best: "fable", big: "opus", small: "sonnet" } satisfies ModelMap;
 
 type ContentBlock = {
   type?: string;
@@ -95,7 +98,8 @@ export default adapter({
       const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
       if (schema !== undefined) argv.push("--json-schema", JSON.stringify(schema));
       argv.push(first ? "--session-id" : "--resume", session);
-      if (options.model !== undefined) argv.push("--model", options.model);
+      const model = modelFor(options.model, "claude", MODELS, host.config);
+      if (model !== undefined) argv.push("--model", model);
       // A run has no one to ask, so any prompt is a denial. `permission` overrides it.
       argv.push("--permission-mode", options.permission ?? "bypassPermissions");
 
