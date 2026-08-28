@@ -66,12 +66,13 @@ const commit = await turn.value;</code></pre>
             <th>Choice</th>
             <th>claude</th>
             <th>codex</th>
+            <th>copilot</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td><code>best</code></td><td><code>fable</code></td><td><code>gpt-5.6-sol</code></td></tr>
-          <tr><td><code>big</code></td><td><code>opus</code></td><td><code>gpt-5.6-sol</code></td></tr>
-          <tr><td><code>small</code></td><td><code>sonnet</code></td><td><code>gpt-5.6-terra</code></td></tr>
+          <tr><td><code>best</code></td><td><code>fable</code></td><td><code>gpt-5.6-sol</code></td><td><code>gpt-5.3-codex</code></td></tr>
+          <tr><td><code>big</code></td><td><code>opus</code></td><td><code>gpt-5.6-sol</code></td><td><code>claude-sonnet-4.6</code></td></tr>
+          <tr><td><code>small</code></td><td><code>sonnet</code></td><td><code>gpt-5.6-terra</code></td><td><code>claude-haiku-4.5</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -240,8 +241,8 @@ const commit = await turn.value;</code></pre>
     <h2>Swapping the agent</h2>
 
     <p>
-      The starter catalog ships five: <code>claude</code>, <code>codex</code>, <code>cursor</code>,
-      <code>opencode</code>, and <code>pi</code>, all role <code>agent</code>. Each one is a
+      The starter catalog ships six: <code>claude</code>, <code>copilot</code>, <code>codex</code>,
+      <code>cursor</code>, <code>opencode</code>, and <code>pi</code>, all role <code>agent</code>. Each one is a
       <code>runOnce</code>, one CLI invocation that streams chunks and reports how it ended, handed
       to the shared <code>sessions()</code> in <code>examples/helpers/turns.ts</code>, which owns
       opening, retry, schema checks, and stop. Write <code>agent &lt;name&gt;</code> to
