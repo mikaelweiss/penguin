@@ -78,10 +78,10 @@ const commit = await turn.value;</code></pre>
 
     <p>
       Exact model names still pass through unchanged. A direct-provider adapter has the defaults
-      above. A multi-provider adapter needs one config line per neutral choice it uses, such as
-      <code>opencode-big-model openai/gpt-5.6-sol</code>. The key is always
-      <code>&lt;adapter&gt;-&lt;choice&gt;-model</code>. The same key overrides a direct-provider default,
-      so a model update does not require editing a workflow.
+      above. A multi-provider adapter falls back to its own default model unless a config line
+      maps the choice, such as <code>opencode-big-model openai/gpt-5.6-sol</code>. The key is
+      always <code>&lt;adapter&gt;-&lt;choice&gt;-model</code>. The same key overrides a
+      direct-provider default, so a model update does not require editing a workflow.
     </p>
 
     <h2>Skills</h2>

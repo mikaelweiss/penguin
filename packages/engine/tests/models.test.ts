@@ -28,8 +28,6 @@ test("an exact provider model passes through unchanged", () => {
   expect(modelFor(undefined, "test", models, () => undefined)).toBeUndefined();
 });
 
-test("an unmapped neutral choice names the adapter config that fixes it", () => {
-  expect(() => modelFor("small", "test", {}, () => undefined)).toThrow(
-    "test-small-model",
-  );
+test("an unmapped neutral choice falls back to the adapter's default model", () => {
+  expect(modelFor("small", "test", {}, () => undefined)).toBeUndefined();
 });
