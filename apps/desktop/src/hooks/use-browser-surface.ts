@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 import type { Tab } from "@/lib/browser";
+import { surfacePass } from "@/lib/browser-surface";
 import {
   browserBounds,
   browserClose,
@@ -44,7 +45,14 @@ type Surface = {
 export function useBrowserSurface({ mount, runId, tabs, active, showing }: Surface): string | undefined {
   const live = useRef<Set<string>>(new Set());
   const at = useRef<Rect | undefined>(undefined);
+  const tabsRef = useRef(tabs);
+  const activeRef = useRef(active);
+  const showingRef = useRef(showing);
+  tabsRef.current = tabs;
+  activeRef.current = active;
+  showingRef.current = showing;
   const [error, setError] = useState<string | undefined>(undefined);
+  const ids = tabs.map((tab) => tab.id).join("\0");
 
   // Leaving a run closes its pages. Only what you are looking at costs a webview.
   useEffect(
@@ -56,40 +64,67 @@ export function useBrowserSurface({ mount, runId, tabs, active, showing }: Surfa
     [runId],
   );
 
+  // Close pages whose tabs left. Ids, not the tabs array: a title or url rewrite is not a close.
   useEffect(() => {
-    const known = new Set(tabs.map((tab) => tab.id));
-    for (const id of live.current) {
-      if (known.has(id)) continue;
+    const { close } = surfacePass({
+      live: live.current,
+      tabs: tabsRef.current,
+      active: activeRef.current,
+      showing: showingRef.current,
+    });
+    for (const id of close) {
+      browserClose(id).catch(() => {});
+      live.current.delete(id);
+    }
+  }, [ids, runId]);
+
+  // Open, show, hide, bounds. `tabs` stays in the ref so a title or url event cannot re-enter here.
+  useEffect(() => {
+    const showable = mount.current;
+    const pass = surfacePass({
+      live: live.current,
+      tabs: tabsRef.current,
+      active,
+      showing: showing && showable !== null,
+    });
+    for (const id of pass.close) {
       browserClose(id).catch(() => {});
       live.current.delete(id);
     }
 
-    const showable = mount.current;
-    const tab = tabs.find((one) => one.id === active);
-    if (!showing || showable === null || tab === undefined) {
-      for (const id of live.current) browserHide(id).catch(() => {});
-      return;
-    }
-
-    const rect = rectOf(showable);
-    at.current = rect;
-    if (live.current.has(tab.id)) {
-      browserBounds(tab.id, rect).catch(() => {});
-      browserShow(tab.id).catch(() => {});
-    } else {
-      live.current.add(tab.id);
-      browserOpen(tab.id, tab.url, rect).then(
-        () => setError(undefined),
+    if (pass.open !== undefined && showable !== null) {
+      const rect = rectOf(showable);
+      at.current = rect;
+      const { id, url } = pass.open;
+      live.current.add(id);
+      browserOpen(id, url, rect).then(
+        () => {
+          setError(undefined);
+          if (!live.current.has(id)) {
+            browserClose(id).catch(() => {});
+            return;
+          }
+          if (activeRef.current !== id || !showingRef.current) {
+            browserHide(id).catch(() => {});
+          }
+        },
         (cause: unknown) => {
-          live.current.delete(tab.id);
+          live.current.delete(id);
           setError(cause instanceof Error ? cause.message : String(cause));
         },
       );
+    } else if (pass.show !== undefined && showable !== null) {
+      const rect = rectOf(showable);
+      at.current = rect;
+      const shown = pass.show;
+      browserBounds(shown, rect).catch(() => live.current.delete(shown));
+      browserShow(shown).catch(() => live.current.delete(shown));
     }
-    for (const id of live.current) {
-      if (id !== tab.id) browserHide(id).catch(() => {});
+
+    for (const id of pass.hide) {
+      browserHide(id).catch(() => live.current.delete(id));
     }
-  }, [mount, runId, tabs, active, showing]);
+  }, [mount, runId, active, showing]);
 
   // The page has no layout of its own, so it follows the placeholder frame by frame: a panel drag,
   // a sidebar toggle, and a window resize all move the rect without changing anything React renders.
@@ -103,7 +138,7 @@ export function useBrowserSurface({ mount, runId, tabs, active, showing }: Surfa
       const rect = rectOf(showable);
       if (sameRect(at.current, rect)) return;
       at.current = rect;
-      browserBounds(active, rect).catch(() => {});
+      browserBounds(active, rect).catch(() => live.current.delete(active));
     };
     frame = requestAnimationFrame(follow);
     return () => cancelAnimationFrame(frame);

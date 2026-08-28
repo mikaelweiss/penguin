@@ -108,10 +108,12 @@ pub fn browser_open(
     if !label.starts_with(PREFIX) {
         return Err(format!("{label} is not a browser tab"));
     }
-    if let Some(known) = app.get_webview(&label) {
-        return known.navigate(web(&url)?).map_err(|cause| cause.to_string());
-    }
     let window = app.get_window("main").ok_or("no main window")?;
+    // Already a child: put it where the panel is. Loading the url again would throw away the page.
+    if let Some(known) = app.get_webview(&label) {
+        place(&known, rect(&window, at))?;
+        return known.show().map_err(|cause| cause.to_string());
+    }
     let target = web(&url)?;
 
     let moved = (app.clone(), label.clone());
