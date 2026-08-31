@@ -18,10 +18,23 @@ type Wires = {
   size?: { cols: number; rows: number };
 };
 
+const KILL_LINE = "\u0015";
+
 /** Keys the app owns even while the terminal is focused. */
 function keyIsForTerminal(event: KeyboardEvent): boolean {
   if (event.ctrlKey && !event.metaKey && event.key === "/") return false;
   return !(event.metaKey && (event.key.toLowerCase() === "k" || event.key === ","));
+}
+
+/** Cmd+Delete clears the line in a native text field, so it does here too. */
+function isKillLineShortcut(event: KeyboardEvent): boolean {
+  return (
+    event.key === "Backspace" &&
+    event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey
+  );
 }
 
 export function TerminalPanel({
@@ -122,7 +135,13 @@ export function TerminalPanel({
           send({ type: "resize", cols, rows });
         },
         onSelectionChange: () => {},
-        beforeKey: keyIsForTerminal,
+        beforeKey: (event) => {
+          if (!keyIsForTerminal(event)) return false;
+          if (!isKillLineShortcut(event)) return true;
+          event.preventDefault();
+          send({ type: "input", data: KILL_LINE });
+          return false;
+        },
         onLinkActivate: (text) => {
           if (/^https?:\/\//.test(text)) link.current(text);
         },
