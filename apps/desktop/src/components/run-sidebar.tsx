@@ -48,8 +48,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@workspace/ui/component
 import { cn } from "@workspace/ui/lib/utils";
 
 import { RenameRunDialog } from "@/components/rename-run-dialog";
+import { SidebarHandle } from "@/components/sidebar-handle";
 import type { RunActions } from "@/hooks/use-run-actions";
 import type { RunTree } from "@/hooks/use-run-tree";
+import type { SidebarResize } from "@/hooks/use-sidebar-width";
 import { findBlocked, isIdle, isLive, needsYou, visibleRuns } from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
 
@@ -276,6 +278,7 @@ type RunSidebarProps = {
   onProjectSettings: (project: Project) => void;
   onAppSettings: () => void;
   onPalette: () => void;
+  resize: SidebarResize;
   error: string | undefined;
 };
 
@@ -291,6 +294,7 @@ export function RunSidebar({
   onProjectSettings,
   onAppSettings,
   onPalette,
+  resize,
   error,
 }: RunSidebarProps) {
   const [renaming, setRenaming] = useState<Run | undefined>(undefined);
@@ -404,6 +408,7 @@ export function RunSidebar({
         onClose={() => setRenaming(undefined)}
         onRename={actions.rename}
       />
+      <SidebarHandle resize={resize} />
     </Sidebar>
   );
 }

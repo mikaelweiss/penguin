@@ -13,6 +13,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@workspace/ui/components/tooltip";
+import { cn } from "@workspace/ui/lib/utils";
 
 import { AppSettingsDialog } from "@/components/app-settings-dialog";
 import { BrowserPanel } from "@/components/browser-panel";
@@ -44,6 +45,7 @@ import { useRemoveProject } from "@/hooks/use-remove-project";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
 import { useRunTree } from "@/hooks/use-run-tree";
+import { useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { useWindowBackground } from "@/hooks/use-window-background";
 import { useWorkflowIndex } from "@/hooks/use-workflow-index";
 import { autoShows, notificationSound, openIn } from "@/lib/settings";
@@ -76,6 +78,7 @@ export function App() {
   const selected = findRun(projects, selectedId);
   const run = selected?.run;
   const panels = usePanels(run?.id);
+  const sidebar = useSidebarWidth();
   const diffView = useDiffView();
   const browser = useBrowser();
   const overlay = useOverlay();
@@ -160,8 +163,17 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={2000} skipDelayDuration={0}>
-      <SidebarProvider className="isolate h-svh">
+      <SidebarProvider
+        className={cn(
+          "isolate h-svh",
+          // The primitive eases the width open and shut. A drag has to track the pointer instead.
+          sidebar.resizing &&
+            "[&_[data-slot=sidebar-container]]:transition-none [&_[data-slot=sidebar-gap]]:transition-none",
+        )}
+        style={sidebar.style}
+      >
         <RunSidebar
+          resize={sidebar}
           projects={projects}
           selectedId={selectedId}
           tree={tree}
