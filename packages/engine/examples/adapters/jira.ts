@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { adapter } from "penguin";
+import { adapter, Fault } from "penguin";
 
 const TOKENS = "https://id.atlassian.com/manage-profile/security/api-tokens";
 const FIELDS = ["summary", "description", "status", "issuetype", "assignee"];
@@ -273,38 +273,32 @@ export default adapter({
 
     return {
       issue: {
-        async get(key: string): Promise<{ ok: boolean; issue: Issue | null; reason: string }> {
+        async get(key: string): Promise<Issue> {
           const route = `/rest/api/3/issue/${encodeURIComponent(key)}?fields=${FIELDS.join(",")}`;
           const reply = await call("GET", route);
-          if (!reply.ok) return { ok: false, issue: null, reason: reply.reason };
+          if (!reply.ok) throw new Fault(reply.reason);
           const found = issueOf(reply.body, reply.base);
           host.open(found.url);
-          return { ok: true, issue: found, reason: "" };
+          return found;
         },
 
-        async comments(
-          key: string,
-          options?: { max?: number },
-        ): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
+        async comments(key: string, options?: { max?: number }): Promise<Comment[]> {
           const max = options?.max ?? 50;
           const route = `/rest/api/3/issue/${encodeURIComponent(key)}/comment?maxResults=${max}&orderBy=created`;
           const reply = await call("GET", route);
-          if (!reply.ok) return { ok: false, comments: [], reason: reply.reason };
-          return { ok: true, comments: commentsOf(reply.body), reason: "" };
+          if (!reply.ok) throw new Fault(reply.reason);
+          return commentsOf(reply.body);
         },
 
-        async search(
-          jql: string,
-          options?: { max?: number },
-        ): Promise<{ ok: boolean; issues: Issue[]; reason: string }> {
+        async search(jql: string, options?: { max?: number }): Promise<Issue[]> {
           const reply = await call("POST", "/rest/api/3/search/jql", {
             jql,
             fields: FIELDS,
             maxResults: options?.max ?? 25,
           });
-          if (!reply.ok) return { ok: false, issues: [], reason: reply.reason };
+          if (!reply.ok) throw new Fault(reply.reason);
           const found = (reply.body as { issues?: unknown[] } | null)?.issues ?? [];
-          return { ok: true, issues: found.map((one) => issueOf(one, reply.base)), reason: "" };
+          return found.map((one) => issueOf(one, reply.base));
         },
 
         async create(fields: {
@@ -312,7 +306,7 @@ export default adapter({
           type: string;
           summary: string;
           description?: string;
-        }): Promise<{ ok: boolean; key: string; url: string; reason: string }> {
+        }): Promise<{ key: string; url: string }> {
           const description = fields.description ?? "";
           const reply = await call("POST", "/rest/api/3/issue", {
             fields: {
@@ -322,38 +316,38 @@ export default adapter({
               ...(description === "" ? {} : { description: document(description) }),
             },
           });
-          if (!reply.ok) return { ok: false, key: "", url: "", reason: reply.reason };
+          if (!reply.ok) throw new Fault(reply.reason);
           const key = String((reply.body as { key?: unknown } | null)?.key ?? "");
           const url = `${reply.base}/browse/${key}`;
           host.open(url);
-          return { ok: true, key, url, reason: "" };
+          return { key, url };
         },
 
-        async comment(key: string, body: string): Promise<{ ok: boolean; reason: string }> {
+        async comment(key: string, body: string): Promise<void> {
           const route = `/rest/api/3/issue/${encodeURIComponent(key)}/comment`;
           const reply = await call("POST", route, { body: document(body) });
-          return { ok: reply.ok, reason: reply.reason };
+          if (!reply.ok) throw new Fault(reply.reason);
         },
 
-        async transitions(key: string): Promise<{ ok: boolean; names: string[]; reason: string }> {
+        async transitions(key: string): Promise<string[]> {
           const route = `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`;
           const reply = await call("GET", route);
-          if (!reply.ok) return { ok: false, names: [], reason: reply.reason };
-          return { ok: true, names: transitionsOf(reply.body).map((step) => step.name), reason: "" };
+          if (!reply.ok) throw new Fault(reply.reason);
+          return transitionsOf(reply.body).map((step) => step.name);
         },
 
-        async transition(key: string, to: string): Promise<{ ok: boolean; reason: string }> {
+        async transition(key: string, to: string): Promise<void> {
           const route = `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`;
           const offered = await call("GET", route);
-          if (!offered.ok) return { ok: false, reason: offered.reason };
+          if (!offered.ok) throw new Fault(offered.reason);
           const steps = transitionsOf(offered.body);
           const found = steps.find((step) => step.name.toLowerCase() === to.toLowerCase());
           if (found === undefined) {
             const names = steps.map((step) => step.name).join(", ");
-            return { ok: false, reason: `${key} has no transition named ${to}. It offers ${names}` };
+            throw new Fault(`${key} has no transition named ${to}. It offers ${names}`);
           }
           const done = await call("POST", route, { transition: { id: found.id } });
-          return { ok: done.ok, reason: done.reason };
+          if (!done.ok) throw new Fault(done.reason);
         },
       },
     };

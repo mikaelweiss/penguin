@@ -2,6 +2,7 @@ import { call, workflow } from "penguin";
 import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
 import { narrated } from "../helpers/turns.ts";
+import { openWorktree } from "../helpers/worktree.ts";
 import baseline from "./baseline.ts";
 import commit from "./commit.ts";
 import implement from "./implement.ts";
@@ -55,11 +56,7 @@ export default workflow({
     // The base settles before any agent runs, so a branch nothing can start from costs no turn.
     const base = await resolveBase(ctx, params.base);
     if (base === "") return nothing;
-    const fetched = await vcs.fetch(base);
-    if (!fetched.ok) {
-      await view.ask(`The fetch of ${base} failed: ${fetched.reason}`, Ack);
-      return nothing;
-    }
+    await vcs.fetch(base);
 
     const triaged = await call(ctx, triage, { ticket: ctx.params.ticket });
     if (!triaged.actionable) {
@@ -79,15 +76,12 @@ export default workflow({
       ),
     );
     const branch = slug(named.branch);
-    const ws = await vcs.worktree.add(branch, { from: `origin/${base}` });
-    if (!ws.ok) {
-      await view.ask(`No worktree: ${ws.reason}`, Ack);
-      return nothing;
-    }
+    const dir = await openWorktree(ctx, branch, { from: `origin/${base}` });
+    if (dir === "") return nothing;
 
     // The fresh worktree is the base, so what the gates say here is what every review compares against.
-    const head = await vcs.head({ cwd: ws.path });
-    const before = await call(ctx, baseline, {}, { cwd: ws.path });
+    const head = await vcs.head({ cwd: dir });
+    const before = await call(ctx, baseline, {}, { cwd: dir });
 
     const checks: string[] = [];
     const total = triaged.tasks.length;
@@ -97,7 +91,7 @@ export default workflow({
         ctx,
         plan,
         { ticket: task, context: triaged.context },
-        { cwd: ws.path },
+        { cwd: dir },
       );
       checks.push(planned.acceptance);
       const built = await call(
@@ -110,18 +104,18 @@ export default workflow({
           base: head.sha,
           rounds: params.rounds,
         },
-        { cwd: ws.path },
+        { cwd: dir },
       );
       if (!built.approved)
         await view.ask(
           `The review did not approve the change:\n\n${built.blocking}\n\nTake a look.`,
           Ack,
         );
-      await call(ctx, commit, {}, { cwd: ws.path });
+      await call(ctx, commit, {}, { cwd: dir });
 
       for (;;) {
         const answer = await view.ask(
-          `Task ${index + 1} of ${total} is in ${ws.path}. Try it.\n\n${planned.acceptance}\n\nReply done, or say what to change.`,
+          `Task ${index + 1} of ${total} is in ${dir}. Try it.\n\n${planned.acceptance}\n\nReply done, or say what to change.`,
           Tried,
         );
         if (answer === "done") break;
@@ -135,15 +129,15 @@ export default workflow({
             base: head.sha,
             rounds: params.rounds,
           },
-          { cwd: ws.path },
+          { cwd: dir },
         );
-        await call(ctx, commit, {}, { cwd: ws.path });
+        await call(ctx, commit, {}, { cwd: dir });
       }
     }
 
     return {
       done: true,
-      path: ws.path,
+      path: dir,
       branch,
       acceptance: checks.join("\n\n"),
       gates: before.gates,

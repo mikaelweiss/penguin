@@ -2,15 +2,11 @@ import { expect, test } from "bun:test";
 import type { Ctx } from "penguin";
 import rebase from "../examples/workflows/rebase.ts";
 
-const LOCK = "error: cannot lock ref 'refs/remotes/origin/main': is at 9a85720 but expected 9cac28b";
-
 type Options = {
-  /** Whether each fetch in turn succeeds. A fetch past the end succeeds. */
-  fetches?: boolean[];
+  /** How many rebase passes stop on a conflict before one runs clean. */
+  conflicts?: number;
   /** What the person types at each gate. A gate past the end is answered with abort. */
   answers?: string[];
-  /** The worktree starts with no branch, and the first gate is what puts one back. */
-  detached?: boolean;
   /** The worktree starts holding the rebase of a run that died. */
   pending?: boolean;
 };
@@ -20,27 +16,31 @@ function harness(options: Options) {
   const shown: string[] = [];
   let fetches = 0;
   let aborts = 0;
-  let detached = options.detached ?? false;
+  let turns = 0;
+  let conflicts = options.conflicts ?? 0;
   let pending = options.pending ?? false;
 
-  const rebasing = { ok: true, conflicted: false, files: [], reason: "" };
+  const rebasing = () => {
+    if (conflicts === 0) return Promise.resolve({ conflicted: false, files: [] });
+    conflicts -= 1;
+    return Promise.resolve({ conflicted: true, files: ["same.txt"] });
+  };
   const vcs = {
-    head: () => Promise.resolve({ ok: true, branch: "feature", sha: "f00d", detached }),
-    dirty: () => Promise.resolve({ ok: true, dirty: false, reason: "" }),
-    sha: () => Promise.resolve({ ok: true, sha: "ba5e", reason: "" }),
+    head: () => Promise.resolve({ branch: "feature", sha: "f00d", detached: false }),
+    dirty: () => Promise.resolve({ dirty: false }),
+    sha: () => Promise.resolve({ sha: "ba5e" }),
     fetch: () => {
-      const ok = options.fetches?.[fetches] ?? true;
       fetches += 1;
-      return Promise.resolve({ ok, reason: ok ? "" : LOCK });
+      return Promise.resolve();
     },
     rebase: {
-      onto: () => Promise.resolve(rebasing),
-      continue: () => Promise.resolve(rebasing),
+      onto: rebasing,
+      continue: () => Promise.resolve({ conflicted: false, files: [] }),
       pending: () => Promise.resolve(pending),
       abort: () => {
         aborts += 1;
         pending = false;
-        return Promise.resolve({ ok: true, reason: "" });
+        return Promise.resolve();
       },
     },
   };
@@ -48,7 +48,11 @@ function harness(options: Options) {
   const agent = {
     open: () => Promise.resolve("session"),
     turn: () => {
-      throw new Error("the rebase asked an agent for something that is not a conflict");
+      turns += 1;
+      return {
+        output: (async function* () {})(),
+        value: Promise.resolve({ resolved: true, notes: "" }),
+      };
     },
   };
 
@@ -60,8 +64,6 @@ function harness(options: Options) {
     act: () => Promise.resolve(),
     ask: (text: string) => {
       asked.push(text);
-      // The person is the one who can put the worktree back on a branch.
-      detached = false;
       return Promise.resolve(options.answers?.[asked.length - 1] ?? "abort");
     },
   };
@@ -72,39 +74,32 @@ function harness(options: Options) {
     shown,
     fetches: () => fetches,
     aborts: () => aborts,
+    turns: () => turns,
     run: () => rebase.run({ params, vcs, agent, view } as unknown as Ctx<typeof params>),
   };
 }
 
-test("a fetch that fails waits for the person, then runs again", async () => {
-  const run = harness({ fetches: [false, true], answers: ["continue"] });
+test("a clean pass rebases without asking anyone", async () => {
+  const run = harness({});
 
   const done = await run.run();
 
   expect(done.rebased).toBe(true);
-  expect(run.fetches()).toBe(2);
-  expect(run.asked).toHaveLength(1);
-  expect(run.asked[0]).toContain(LOCK);
-});
-
-test("only the person saying abort ends the rebase", async () => {
-  const run = harness({ fetches: [false, false, false], answers: ["abort"] });
-
-  const done = await run.run();
-
-  expect(done.rebased).toBe(false);
-  expect(done.reason).toBe("the user dropped the rebase");
+  expect(done.sha).toBe("f00d");
+  expect(run.asked).toHaveLength(0);
   expect(run.fetches()).toBe(1);
 });
 
-test("a worktree with no branch waits for the person instead of ending the run", async () => {
-  const run = harness({ detached: true, answers: ["continue"] });
+test("a conflicted pass goes to the resolver, then a fresh pass confirms the base held still", async () => {
+  const run = harness({ conflicts: 1 });
 
   const done = await run.run();
 
   expect(done.rebased).toBe(true);
-  expect(run.asked).toHaveLength(1);
-  expect(run.asked[0]).toContain("detached");
+  expect(run.turns()).toBe(1);
+  // The conflicted pass and the clean pass that follows it.
+  expect(run.fetches()).toBe(2);
+  expect(run.asked).toHaveLength(0);
 });
 
 test("the rebase a dead run left open is dropped without asking anyone", async () => {

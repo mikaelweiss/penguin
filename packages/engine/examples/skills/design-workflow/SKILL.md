@@ -38,6 +38,10 @@ What fails a test is a literal in the file, a default, a turn, or an ask. A loop
 ## The penguin model
 
 - Params are the data the engine needs before code runs. Everything after that is code over ctx, or an ask.
+- Design the happy path only. An adapter call that the world refuses throws a fault, and the engine holds the run at a gate: a fixer agent tries, then the person decides retry or stop. Design failure handling only where this workflow wants something different, and say why.
+- An adapter's semantic negatives are data, never failures: `dirty: false`, a null pull request, a conflicted rebase. Branch on those; leave faults to the engine.
+- Prefer the goal-shaped calls: `vcs.sync` puts a branch on its base and on origin, `github.pr.ensure` finds, reuses, or opens the pull request and answers `landed` when the work already merged. They converge on a moving world so the design does not have to.
+- Keep no state the workflow can re-read. The world moves while a run blocks on an ask or a watch, so read it again before acting, and give a long-lived ask a premise (`view.ask(question, shape, { until })`) so a question about a dead world withdraws itself.
 - Control flow lives in the workflow. Craft lives in skills. A long inline prompt is a missing skill.
 - Compose installed workflows before you design new turns, and reuse installed skills before you name new ones. More than one new skill needs a reason in the design.
 - A workflow has no shell. Every side effect is an adapter method on ctx or an agent turn, so every step in the design names the one it uses.

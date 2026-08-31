@@ -158,6 +158,10 @@ function asked(prompt: string, schema: Record<string, unknown> | undefined): str
 export default adapter({
   role: "agent",
   name: "opencode",
+  async check(host) {
+    const there = await host.shell("command -v opencode");
+    return there.code === 0 ? [] : ["opencode is not installed or not on PATH."];
+  },
   description:
     "runs prompts on the opencode CLI. A session is one conversation: the first turn opens it, later turns resume it over --session. The CLI takes no schema, so a typed result is asked for in the prompt and read back out of the reply.",
   build: (host) => {

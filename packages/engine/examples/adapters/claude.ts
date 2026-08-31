@@ -190,6 +190,10 @@ function exitFailure(done: CommandResult): string {
 export default adapter({
   role: "agent",
   name: "claude",
+  async check(host) {
+    const there = await host.shell("command -v claude");
+    return there.code === 0 ? [] : ["claude is not installed or not on PATH."];
+  },
   description:
     "runs prompts on the claude CLI. A session is one conversation held by one CLI process: every turn goes down its stdin, and a process that ended is resumed by session id.",
   build: (host) => {

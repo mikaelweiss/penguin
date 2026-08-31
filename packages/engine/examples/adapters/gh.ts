@@ -1,4 +1,4 @@
-import { adapter, messageOf, type CommandResult } from "penguin";
+import { adapter, Fault, messageOf, type CommandResult } from "penguin";
 
 const ISSUE_FIELDS = "number,title,body,state,url";
 const PR_FIELDS = "number,title,body,state,isDraft,headRefOid,baseRefName,url";
@@ -193,6 +193,17 @@ export default adapter({
   name: "gh",
   description:
     "GitHub issues, pull requests, and branch heads through the gh CLI, under your own login",
+  async check(host) {
+    const there = await host.shell("command -v gh");
+    if (there.code !== 0) {
+      return ["gh is not installed. Install it from https://cli.github.com."];
+    }
+    const token = await host.exec(["gh", "auth", "token"]);
+    if (token.code !== 0 || token.stdout.trim() === "") {
+      return ["gh is signed out. Run `gh auth login`."];
+    }
+    return [];
+  },
   build: (host) => {
     async function gh(
       args: string[],
@@ -203,6 +214,23 @@ export default adapter({
       } catch (error) {
         return { code: 127, stdout: "", stderr: messageOf(error) };
       }
+    }
+
+    /** The whole pull request, or null when the ref names none. Anything else is a fault. */
+    async function prOf(ref: string): Promise<Pr | null> {
+      const done = await gh(["pr", "view", ref, "--json", PR_FIELDS]);
+      if (done.code !== 0) {
+        if (/no pull requests found|could not resolve|not found/i.test(done.stderr)) return null;
+        throw new Fault(reasonOf(done));
+      }
+      const found = JSON.parse(done.stdout) as Pr;
+      const place = placeOf(found.url);
+      if (place === undefined) throw new Fault(`the PR url did not read: ${found.url}`);
+      const asked = await gh(queueRead(place));
+      if (asked.code !== 0) throw new Fault(reasonOf(asked));
+      found.isInMergeQueue = asked.stdout.trim() === "true";
+      host.open(found.url);
+      return found;
     }
 
     return {
@@ -228,40 +256,31 @@ export default adapter({
         },
       },
       issue: {
-        async get(ref: string): Promise<{ ok: boolean; issue: Issue | null; reason: string }> {
+        async get(ref: string): Promise<Issue> {
           const done = await gh(["issue", "view", ref, "--json", ISSUE_FIELDS]);
-          if (done.code !== 0) return { ok: false, issue: null, reason: reasonOf(done) };
+          if (done.code !== 0) throw new Fault(reasonOf(done));
           const found = JSON.parse(done.stdout) as Issue;
           host.open(found.url);
-          return { ok: true, issue: found, reason: "" };
+          return found;
         },
-        async comments(ref: string): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
+        async comments(ref: string): Promise<Comment[]> {
           const done = await gh(["issue", "view", ref, "--json", "comments"]);
-          if (done.code !== 0) return { ok: false, comments: [], reason: reasonOf(done) };
-          return { ok: true, comments: commentsOf(done.stdout), reason: "" };
+          if (done.code !== 0) throw new Fault(reasonOf(done));
+          return commentsOf(done.stdout);
         },
       },
       pr: {
-        async get(pr: string): Promise<{ ok: boolean; pr: Pr | null; reason: string }> {
-          const done = await gh(["pr", "view", pr, "--json", PR_FIELDS]);
-          if (done.code !== 0) return { ok: false, pr: null, reason: reasonOf(done) };
-          const found = JSON.parse(done.stdout) as Pr;
-          const place = placeOf(found.url);
-          if (place === undefined)
-            return { ok: false, pr: null, reason: `the PR url did not read: ${found.url}` };
-          const asked = await gh(queueRead(place));
-          if (asked.code !== 0) return { ok: false, pr: null, reason: reasonOf(asked) };
-          found.isInMergeQueue = asked.stdout.trim() === "true";
-          host.open(found.url);
-          return { ok: true, pr: found, reason: "" };
+        /** The whole pull request, or null when the ref names none. */
+        async get(pr: string): Promise<Pr | null> {
+          return prOf(pr);
         },
-        async comments(pr: string): Promise<{ ok: boolean; comments: Comment[]; reason: string }> {
+        async comments(pr: string): Promise<Comment[]> {
           const done = await gh(["pr", "view", pr, "--json", "comments"]);
-          if (done.code !== 0) return { ok: false, comments: [], reason: reasonOf(done) };
-          return { ok: true, comments: commentsOf(done.stdout), reason: "" };
+          if (done.code !== 0) throw new Fault(reasonOf(done));
+          return commentsOf(done.stdout);
         },
         /** What the branch already has open, with the base each one lands on. None is an answer. */
-        async of(branch: string): Promise<{ ok: boolean; prs: Opened[]; reason: string }> {
+        async of(branch: string): Promise<Opened[]> {
           const done = await gh([
             "pr",
             "list",
@@ -272,62 +291,95 @@ export default adapter({
             "--json",
             OPENED_FIELDS,
           ]);
-          if (done.code !== 0) return { ok: false, prs: [], reason: reasonOf(done) };
-          return { ok: true, prs: JSON.parse(done.stdout) as Opened[], reason: "" };
+          if (done.code !== 0) throw new Fault(reasonOf(done));
+          return JSON.parse(done.stdout) as Opened[];
         },
-        /** The branch's pull request. One that is open already is the answer, not a failure. */
-        async create(options?: {
+        /**
+         * A pull request for the branch, whatever the world already holds: the
+         * open one comes back as it stands (its base may not be the one asked
+         * for; the caller reads pr.baseRefName), a branch whose work already
+         * landed answers `landed`, and only when neither is true does one open.
+         */
+        async ensure(options: {
+          head: string;
+          base: string;
+          title: string;
+          body: string;
           cwd?: string;
-          head?: string;
-          base?: string;
-          title?: string;
-          body?: string;
-        }): Promise<{ ok: boolean; url: string; existed: boolean; reason: string }> {
-          // A stack names its own head: the tree sits on the top branch while every PR below it opens.
-          const where: string[] = [];
-          if (options?.head !== undefined) where.push("--head", options.head);
-          if (options?.base !== undefined) where.push("--base", options.base);
-          const done =
-            options?.title === undefined
-              ? await gh(["pr", "create", "--fill", ...where], { cwd: options?.cwd })
-              : await gh(["pr", "create", "--title", options.title, "--body-file", "-", ...where], {
-                  cwd: options?.cwd,
-                  stdin: options.body ?? "",
-                });
-          if (done.code === 0) {
-            const made = done.stdout.trim();
-            host.open(made);
-            return { ok: true, url: made, existed: false, reason: "" };
+        }): Promise<{ landed: boolean; pr: Pr | null; created: boolean }> {
+          const listed = await gh([
+            "pr",
+            "list",
+            "--head",
+            options.head,
+            "--state",
+            "open",
+            "--json",
+            OPENED_FIELDS,
+          ]);
+          if (listed.code !== 0) throw new Fault(reasonOf(listed));
+          const open = (JSON.parse(listed.stdout) as Opened[])[0];
+          if (open !== undefined) {
+            return { landed: false, pr: await prOf(open.url), created: false };
           }
-          const reason = reasonOf(done);
-          if (!/already exists/.test(done.stderr)) {
-            return { ok: false, url: "", existed: false, reason };
+          const merged = await gh([
+            "pr",
+            "list",
+            "--head",
+            options.head,
+            "--state",
+            "merged",
+            "--json",
+            OPENED_FIELDS,
+          ]);
+          if (merged.code !== 0) throw new Fault(reasonOf(merged));
+          const done = (JSON.parse(merged.stdout) as Opened[])[0];
+          if (done !== undefined) {
+            return { landed: true, pr: await prOf(done.url), created: false };
           }
-          const which = options?.head === undefined ? [] : [options.head];
-          const open = await gh(["pr", "view", ...which, "--json", "url"], { cwd: options?.cwd });
-          if (open.code !== 0) return { ok: false, url: "", existed: false, reason };
-          const url = String((JSON.parse(open.stdout) as { url?: unknown }).url ?? "");
-          if (url === "") return { ok: false, url: "", existed: false, reason };
-          host.open(url);
-          return { ok: true, url, existed: true, reason: "" };
+          const made = await gh(
+            [
+              "pr",
+              "create",
+              "--head",
+              options.head,
+              "--base",
+              options.base,
+              "--title",
+              options.title,
+              "--body-file",
+              "-",
+            ],
+            { cwd: options.cwd, stdin: options.body },
+          );
+          if (made.code === 0) {
+            return { landed: false, pr: await prOf(made.stdout.trim()), created: true };
+          }
+          // The branch holds nothing the base does not: its work already landed, PR or no PR.
+          if (/no commits between/i.test(made.stderr)) {
+            return { landed: true, pr: null, created: false };
+          }
+          // Another writer opened one between the list and the create.
+          if (/already exists/.test(made.stderr)) {
+            return { landed: false, pr: await prOf(options.head), created: false };
+          }
+          throw new Fault(reasonOf(made));
         },
-        async diff(pr: string): Promise<{ ok: boolean; diff: string; reason: string }> {
+        async diff(pr: string): Promise<string> {
           const done = await gh(["pr", "diff", pr]);
-          return { ok: done.code === 0, diff: done.stdout, reason: done.code === 0 ? "" : reasonOf(done) };
+          if (done.code !== 0) throw new Fault(reasonOf(done));
+          return done.stdout;
         },
-        async comment(
-          pr: string,
-          options: { body: string } | { bodyFile: string },
-        ): Promise<{ ok: boolean; reason: string }> {
+        async comment(pr: string, options: { body: string } | { bodyFile: string }): Promise<void> {
           const done =
             "body" in options
               ? await gh(["pr", "comment", pr, "--body-file", "-"], { stdin: options.body })
               : await gh(["pr", "comment", pr, "--body-file", options.bodyFile]);
-          return { ok: done.code === 0, reason: done.code === 0 ? "" : reasonOf(done) };
+          if (done.code !== 0) throw new Fault(reasonOf(done));
         },
-        async approve(pr: string): Promise<{ ok: boolean; reason: string }> {
+        async approve(pr: string): Promise<void> {
           const done = await gh(["pr", "review", pr, "--approve"]);
-          return { ok: done.code === 0, reason: done.code === 0 ? "" : reasonOf(done) };
+          if (done.code !== 0) throw new Fault(reasonOf(done));
         },
         /** A handle, not a snapshot, so the trace never replays a poll. A failed poll retries quietly. */
         changes(pr: string): { next(): Promise<Change> } {

@@ -123,6 +123,10 @@ function resultText(result: unknown): string {
 export default adapter({
   role: "agent",
   name: "copilot",
+  async check(host) {
+    const there = await host.shell("command -v copilot");
+    return there.code === 0 ? [] : ["copilot is not installed or not on PATH."];
+  },
   description:
     "runs prompts on the copilot CLI. A session is one conversation: every turn names the same session id, and copilot creates it on the first turn. The CLI takes no schema, so a typed result is asked for in the prompt and read back out of the reply. Its event stream reports no token usage, so a copilot turn writes no usage note.",
   build: (host) => {

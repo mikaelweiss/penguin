@@ -133,6 +133,10 @@ const KINDS: Record<string, ActionKind> = {
 export default adapter({
   role: "agent",
   name: "cursor",
+  async check(host) {
+    const there = await host.shell("command -v cursor-agent");
+    return there.code === 0 ? [] : ["cursor-agent is not installed or not on PATH."];
+  },
   description:
     "runs prompts on the cursor-agent CLI. A session is one cursor chat: the first turn opens the chat, later turns resume it. The CLI takes no schema, so a typed result is asked for in the prompt and read back out of the reply.",
   build: (host) => {

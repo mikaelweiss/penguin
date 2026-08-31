@@ -8,10 +8,7 @@ export async function resolveBase(ctx: Ctx<unknown>, given: string): Promise<str
   const named = given.trim();
   if (named !== "") return named;
   const found = await ctx.vcs.defaultBranch();
-  if (found.ok) return found.branch;
-  const answer = await ctx.view.ask(
-    `origin names no default branch: ${found.reason}\n\nName the base branch, or stop.`,
-    Branch,
-  );
+  if (found.branch !== "") return found.branch;
+  const answer = await ctx.view.ask("origin names no default branch. Name the base branch, or stop.", Branch);
   return answer === "stop" ? "" : answer.trim();
 }

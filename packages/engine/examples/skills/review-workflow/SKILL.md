@@ -21,4 +21,6 @@ The input carries the design and names the workflow file. Review with fresh eyes
    - Craft lives in skills, not in long inline prompt strings.
    - Every skill name the file uses resolves to a folder in a catalog's `skills/` directory.
    - A worktree the workflow adds has an explicit removal, or the design says why it stays.
+   - The file is the happy path: no retry, fix, or gate loop the engine's fault handling already runs, and any `try` around an adapter call handles that one failure differently for a stated reason.
+   - Nothing acts on world state read before a block. A gate the world can outlive carries `{ until }` and handles the withdrawn answer.
 4. Verdict `approved` only when every check passes. Put each failed check in `findings`, with its file and line.

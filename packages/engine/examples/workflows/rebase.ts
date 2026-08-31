@@ -10,8 +10,6 @@ const Resolved = z.object({
   notes: z.string().describe("what the conflict was, and what is left when it is not resolved"),
 });
 
-type Done = { ok: boolean; reason: string };
-
 function listed(files: string[]): string {
   return files.map((file) => `- ${file}`).join("\n");
 }
@@ -35,10 +33,8 @@ export default workflow({
     const { params, agent, vcs, view } = ctx;
     const cwd = params.dir;
     const folder = cwd ?? "The checkout";
-    const nowhere = (reason: string) => ({ rebased: false, sha: "", base: "", reason });
-    const dropped = "the user dropped the rebase";
+    const dropped = { rebased: false, sha: "", base: "", reason: "the user dropped the rebase" };
     let turns = 0;
-    let clean = false;
     let fixer = "";
 
     // One session across the passes, so the resolver keeps what it already learned about the tree.
@@ -81,54 +77,21 @@ export default workflow({
       return fixed.resolved ? true : directed(fixed.notes);
     };
 
-    /** What only a person can settle. The rebase waits here rather than ending on it. */
-    const settled = async (said: string): Promise<boolean> => {
-      const answer = await view.ask(`${said}\n\nSettle it and type continue, or abort to drop the rebase.`, Answer);
-      return answer === "continue";
-    };
-
-    /** A step the rebase cannot go on without. It runs again until it passes or the person drops it. */
-    const insisted = async (what: string, step: () => Promise<Done>): Promise<boolean> => {
-      for (;;) {
-        const done = await step();
-        if (done.ok) return true;
-        if (!(await settled(`${what}\n\n${done.reason}`))) return false;
-      }
-    };
-
-    /** A rebase a run died inside. Dropping it puts the branch back where that run found it. */
-    const cleared = async (): Promise<void> => {
-      if (!(await vcs.rebase.pending({ cwd }))) return;
+    // A rebase a run died inside is dropped, which puts the branch back where that run found it.
+    if (await vcs.rebase.pending({ cwd })) {
       await view.show(`${folder} held an unfinished rebase, so it is dropped and replayed here.`);
       await vcs.rebase.abort({ cwd });
-    };
-
-    /** What stops the rebase before it starts, empty when nothing does. */
-    const amiss = async (): Promise<string> => {
-      const head = await vcs.head({ cwd });
-      if (!head.ok) return `${folder} did not read: ${head.reason}`;
-      if (head.detached) return `${folder} is detached, so there is no branch to rebase.`;
-      const tree = await vcs.dirty({ cwd });
-      if (tree.dirty) return `${folder} has uncommitted changes. Commit or drop them first.`;
-      return "";
-    };
-
-    await cleared();
-    for (let wrong = await amiss(); wrong !== ""; wrong = await amiss()) {
-      if (!(await settled(wrong))) return nowhere(dropped);
     }
 
     const base = await resolveBase(ctx, params.base);
-    if (base === "") return nowhere("no base branch");
+    if (base === "") return { ...dropped, reason: "no base branch" };
     const onto = params.local ? base : `origin/${base}`;
 
+    let clean = false;
     while (!clean) {
       for (let pass = 1; pass <= params.passes && !clean; pass++) {
         await view.show(`pass ${pass} of ${params.passes}`);
-        if (!(await insisted(`The fetch of ${base} failed.`, () => vcs.fetch(base, { cwd })))) {
-          return nowhere(dropped);
-        }
-        await cleared();
+        if (!params.local) await vcs.fetch(base, { cwd });
 
         let state = await vcs.rebase.onto(onto, { cwd });
         const conflicted = state.conflicted;
@@ -136,16 +99,9 @@ export default workflow({
           const stopped = `The rebase onto ${onto} stopped on these files:\n\n${listed(state.files)}`;
           if (!(await mended(stopped))) {
             await vcs.rebase.abort({ cwd });
-            return nowhere(dropped);
+            return dropped;
           }
           state = await vcs.rebase.continue({ cwd });
-        }
-
-        if (!state.ok) {
-          if (!(await settled(`The rebase onto ${onto} failed:\n\n${state.reason}`))) {
-            return nowhere(dropped);
-          }
-          continue;
         }
         // Conflicts take time, and the base can move while they are resolved, so a pass that hit
         // any of them runs again to see what arrived.
@@ -153,9 +109,11 @@ export default workflow({
       }
 
       if (clean) break;
-      if (!(await settled(`${params.passes} rebase passes, and ${base} keeps moving.`))) {
-        return nowhere(dropped);
-      }
+      const answer = await view.ask(
+        `${params.passes} rebase passes, and ${base} keeps moving.\n\nType continue to keep going, or abort to drop the rebase.`,
+        Answer,
+      );
+      if (answer === "abort") return dropped;
     }
 
     // The caller reviews the branch against what it now sits on, so the ref it landed under is pinned here.

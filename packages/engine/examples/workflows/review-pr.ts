@@ -1,9 +1,7 @@
-import { workflow } from "penguin";
+import { messageOf, workflow } from "penguin";
 import { z } from "zod";
 import { narrate, narrated, retried } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
-
-const Ack = z.enum(["ok"]);
 
 const DIFF_LINES = 500;
 
@@ -71,32 +69,29 @@ export default workflow({
   async run(ctx) {
     const { params, agent, vcs, github, view } = ctx;
     const found = await github.pr.get(params.pr);
-    if (!found.ok || found.pr === null) {
-      await view.ask(`gh pr view ${params.pr} failed: ${found.reason}`, Ack);
+    if (found === null) {
+      await view.show(`${params.pr} names no pull request`);
       return { rounds: 0, posted: 0 };
     }
-    let pr = found.pr;
+    let pr = found;
     if (pr.state !== "OPEN") {
       await view.show(`PR #${pr.number} is ${pr.state}, nothing to review`);
       return { rounds: 0, posted: 0 };
     }
 
-    const said = await github.pr.comments(params.pr);
-    if (!said.ok) await view.show(`The PR comments did not read: ${said.reason}`);
     let description = pr.body;
-    let notes: Note[] = said.comments;
+    let notes: Note[] = await github.pr.comments(params.pr);
 
     /** The PR as it stands now, not as a gate's answer left it. False means it is no longer reviewable. */
     const reread = async (): Promise<boolean> => {
       const again = await github.pr.get(params.pr);
-      if (!again.ok || again.pr === null) {
-        await view.ask(`gh pr view ${params.pr} failed: ${again.reason}`, Ack);
+      if (again === null) {
+        await view.show(`PR #${pr.number} no longer reads, nothing to review`);
         return false;
       }
-      pr = again.pr;
+      pr = again;
       description = pr.body;
-      const now = await github.pr.comments(params.pr);
-      if (now.ok) notes = now.comments;
+      notes = await github.pr.comments(params.pr);
       if (pr.state === "OPEN") return true;
       await view.show(`PR #${pr.number} is ${pr.state}, nothing to review`);
       return false;
@@ -108,14 +103,12 @@ export default workflow({
     };
 
     // The triage reads the diff over the wire, so a PR the user takes costs no worktree.
-    const looked = await github.pr.diff(params.pr);
-    if (!looked.ok) await view.show(`The PR diff did not read: ${looked.reason}`);
-    let diff = looked.ok ? looked.diff : "";
+    let diff = await github.pr.diff(params.pr);
     const judge = await agent.open();
     const triaged = await narrated(view, () =>
       agent.turn(
         judge,
-        { skill: "triage-pr", prompt: `${briefing()}\n\n# Diff\n\n${cut(looked.diff)}` },
+        { skill: "triage-pr", prompt: `${briefing()}\n\n# Diff\n\n${cut(diff)}` },
         { result: Triage },
       ),
     );
@@ -154,28 +147,24 @@ export default workflow({
 
     // The worktree only mirrors the PR head, so a force-push is a reset, not a merge.
     const synced = async (): Promise<void> => {
-      const fetched = await vcs.fetch(ref, { cwd: dir });
-      const done = fetched.ok ? await vcs.resetHard("FETCH_HEAD", { cwd: dir }) : fetched;
-      if (!done.ok)
-        await view.ask(
-          `The sync failed: ${done.reason} The review goes on with the last fetched code.`,
-          Ack,
-        );
-      const at = await vcs.sha("HEAD", { cwd: dir });
-      head = at.ok ? at.sha : "";
+      await vcs.fetch(ref, { cwd: dir });
+      await vcs.resetHard("FETCH_HEAD", { cwd: dir });
+      head = (await vcs.sha("HEAD", { cwd: dir })).sha;
       // The diff the reviewer reads must be the code the tree now holds.
-      const again = await github.pr.diff(params.pr);
-      if (again.ok) diff = again.diff;
+      diff = await github.pr.diff(params.pr);
     };
 
     /** The commit the findings judge, against the commit the PR carries now. */
     const since = async (): Promise<"same" | "moved" | "unread"> => {
       if (head === "") return "unread";
-      const fetched = await vcs.fetch(ref, { cwd: dir });
-      if (!fetched.ok) return "unread";
-      const now = await vcs.sha("FETCH_HEAD", { cwd: dir });
-      if (!now.ok) return "unread";
-      return now.sha === head ? "same" : "moved";
+      // A freshness read stays best-effort: a fault here must not hold the review at a gate.
+      try {
+        await vcs.fetch(ref, { cwd: dir });
+        const now = await vcs.sha("FETCH_HEAD", { cwd: dir });
+        return now.sha === head ? "same" : "moved";
+      } catch {
+        return "unread";
+      }
     };
 
     /** A gate the user answers late must not post a verdict on code the review never read. */
@@ -193,11 +182,7 @@ export default workflow({
     };
 
     const post = async (findings: Findings): Promise<void> => {
-      const sent = await github.pr.comment(params.pr, { body: report(findings) });
-      if (!sent.ok) {
-        await view.ask(`The comment failed: ${sent.reason}`, Ack);
-        return;
-      }
+      await github.pr.comment(params.pr, { body: report(findings) });
       posted += 1;
     };
 
@@ -305,9 +290,13 @@ export default workflow({
       }
       if (await overtaken()) return "stale";
       await post(findings);
-      const approved = await github.pr.approve(params.pr);
-      if (!approved.ok) await view.ask(`The approve failed: ${approved.reason}`, Ack);
-      else await view.show(`Approved PR #${pr.number}`);
+      try {
+        await github.pr.approve(params.pr);
+        await view.show(`Approved PR #${pr.number}`);
+      } catch (error) {
+        // Some approvals are refused outright, e.g. your own PR. The review still counts.
+        await view.show(`The approve failed: ${messageOf(error)}`);
+      }
       return "approved";
     };
 
@@ -357,7 +346,11 @@ export default workflow({
         if (change.kind === "comments") notes = notes.concat(change.comments);
       }
     } finally {
-      await vcs.worktree.remove(dir);
+      try {
+        await vcs.worktree.remove(dir);
+      } catch (error) {
+        await view.show(`the worktree stayed: ${messageOf(error)}`);
+      }
     }
     return { rounds, posted };
   },

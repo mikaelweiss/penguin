@@ -17,7 +17,6 @@ export default workflow({
 
   async run(ctx) {
     const { params, vcs, view } = ctx;
-    const cwd = params.dir;
     const nowhere = (reason: string) => ({ landed: false, sha: "", reason });
 
     const checkout = await vcs.head();
@@ -29,12 +28,12 @@ export default workflow({
     // The branch lands on the local target, which a run that never pushed has already moved ahead
     // of origin, so the target takes what origin sent and then the branch rebases onto the target.
     const advanced = await vcs.pull(params.onto);
-    if (!advanced.ok) {
+    if (!advanced.fastForwarded) {
       await view.ask(
-        `${params.onto} and origin/${params.onto} have diverged: ${advanced.reason}\n\nReconcile them.`,
+        `${params.onto} and origin/${params.onto} have diverged. Reconcile them.`,
         Ack,
       );
-      return nowhere(advanced.reason);
+      return nowhere(`${params.onto} has diverged from origin`);
     }
 
     const rebased = await call(ctx, rebase, {
@@ -46,24 +45,11 @@ export default workflow({
     });
     if (!rebased.rebased) return nowhere(rebased.reason);
 
-    const merged = await vcs.merge(params.branch, { ffOnly: true });
-    if (!merged.ok) {
-      await view.ask(`${params.onto} did not fast-forward to ${params.branch}: ${merged.reason}`, Ack);
-      return nowhere(merged.reason);
-    }
-
+    await vcs.merge(params.branch, { ffOnly: true });
     const landed = await vcs.head();
     await view.show(`${params.branch} is on ${params.onto} at ${landed.sha}`);
 
-    if (cwd !== undefined) {
-      const removed = await vcs.worktree.remove(cwd);
-      if (!removed.ok) {
-        await view.ask(
-          `${params.branch} is on ${params.onto}, but the worktree at ${cwd} stayed: ${removed.reason}\n\nRemove it yourself.`,
-          Ack,
-        );
-      }
-    }
+    if (params.dir !== undefined) await vcs.worktree.remove(params.dir);
 
     return { landed: true, sha: landed.sha, reason: "" };
   },

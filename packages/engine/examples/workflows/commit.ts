@@ -14,14 +14,9 @@ export default workflow({
   params: z.object({}),
 
   async run({ agent, vcs, view }) {
-    const state = await vcs.dirty();
-    if (!state.ok) {
-      await view.show(`commit failed: ${state.reason}`);
-      return { ok: false, committed: false, message: "", reason: state.reason };
-    }
-    if (!state.dirty) {
+    if (!(await vcs.dirty()).dirty) {
       await view.show("nothing to commit");
-      return { ok: true, committed: false, message: "", reason: "" };
+      return { committed: false, message: "" };
     }
 
     const session = await agent.open();
@@ -30,22 +25,12 @@ export default workflow({
     );
     if (written.files.length === 0) {
       await view.show("nothing worth committing");
-      return {
-        ok: true,
-        committed: false,
-        message: written.message,
-        reason: "the agent picked no files",
-      };
+      return { committed: false, message: written.message };
     }
 
-    const staged = await vcs.stage(written.files);
-    if (!staged.ok) {
-      await view.show(`staging failed: ${staged.reason}`);
-      return { ok: false, committed: false, message: written.message, reason: staged.reason };
-    }
-
-    const done = await vcs.commit(written.message);
-    await view.show(done.ok ? `committed: ${written.message.split("\n")[0]}` : `commit failed: ${done.reason}`);
-    return { ok: done.ok, committed: done.ok, message: written.message, reason: done.reason };
+    await vcs.stage(written.files);
+    await vcs.commit(written.message);
+    await view.show(`committed: ${written.message.split("\n")[0]}`);
+    return { committed: true, message: written.message };
   },
 });

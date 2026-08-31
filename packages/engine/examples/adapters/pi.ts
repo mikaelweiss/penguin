@@ -114,6 +114,10 @@ export default function (pi) {
 export default adapter({
   role: "agent",
   name: "pi",
+  async check(host) {
+    const there = await host.shell("command -v pi");
+    return there.code === 0 ? [] : ["pi is not installed or not on PATH."];
+  },
   description:
     "runs prompts on the pi CLI. A session is one conversation: every turn names the same session id, and pi creates it on the first turn.",
   build: (host) => {

@@ -244,6 +244,10 @@ function structured(text: string): unknown {
 export default adapter({
   role: "agent",
   name: "codex",
+  async check(host) {
+    const there = await host.shell("command -v codex");
+    return there.code === 0 ? [] : ["codex is not installed or not on PATH."];
+  },
   description:
     "runs prompts on the codex CLI. A session is one conversation: the first turn starts a codex thread, later turns resume it.",
   build: (host) => {

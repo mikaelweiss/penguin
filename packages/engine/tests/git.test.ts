@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { CommandResult, Host } from "../src/core/adapter.ts";
+import { Fault } from "../src/core/errors.ts";
 import { roots } from "../src/catalog/catalogs.ts";
 import { skillLookup } from "../src/catalog/skills.ts";
 import { createHost } from "../src/host.ts";
@@ -54,12 +55,10 @@ test("stage, commit, dirty, and head walk the happy path", async () => {
   const { dir, vcs } = await repo();
   fs.writeFileSync(path.join(dir, "a.txt"), "one\n");
   expect((await vcs.dirty()).dirty).toBe(true);
-  expect((await vcs.stage(["a.txt"])).ok).toBe(true);
-  const committed = await vcs.commit("test: first");
-  expect(committed.ok).toBe(true);
+  await vcs.stage(["a.txt"]);
+  await vcs.commit("test: first");
   expect((await vcs.dirty()).dirty).toBe(false);
   const head = await vcs.head();
-  expect(head.ok).toBe(true);
   expect(head.detached).toBe(false);
   expect(head.sha).not.toBe("");
 });
@@ -69,8 +68,15 @@ test("a commit message with quotes survives intact", async () => {
   fs.writeFileSync(path.join(dir, "a.txt"), "one\n");
   await vcs.stage(["a.txt"]);
   const message = `test: it's "quoted" $(danger)`;
-  expect((await vcs.commit(message)).ok).toBe(true);
+  await vcs.commit(message);
   expect(await git(host, ["log", "-1", "--format=%s"])).toBe(message);
+});
+
+test("a commit git refuses is a fault the agent gets first", async () => {
+  const { vcs } = await repo();
+  const failing = vcs.commit("test: nothing staged");
+  await expect(failing).rejects.toThrow(Fault);
+  await expect(failing).rejects.toMatchObject({ fix: "agent" });
 });
 
 test("pull refuses to touch diverged work; resetHard is the explicit discard", async () => {
@@ -95,12 +101,11 @@ test("pull refuses to touch diverged work; resetHard is the explicit discard", a
   const before = await git(ours.host, ["rev-parse", "HEAD"]);
 
   const pulled = await ours.vcs.pull(branch);
-  expect(pulled.ok).toBe(false);
+  expect(pulled.fastForwarded).toBe(false);
   expect(await git(ours.host, ["rev-parse", "HEAD"])).toBe(before);
   expect(fs.existsSync(path.join(ours.dir, "ours.txt"))).toBe(true);
 
-  const reset = await ours.vcs.resetHard("FETCH_HEAD");
-  expect(reset.ok).toBe(true);
+  await ours.vcs.resetHard("FETCH_HEAD");
   expect(fs.existsSync(path.join(ours.dir, "theirs.txt"))).toBe(true);
   expect(fs.existsSync(path.join(ours.dir, "ours.txt"))).toBe(false);
 });
@@ -112,7 +117,7 @@ test("worktree.add notes the new folder in the run's file", async () => {
     const { dir, host, vcs } = await repo();
     await commitFile({ dir, host }, "base.txt", "base");
     const added = await vcs.worktree.add("feature");
-    expect(added.ok).toBe(true);
+    expect(added.existed).toBe(false);
     expect(added.path.startsWith(path.join(home, "worktrees"))).toBe(true);
     const written = fs.readFileSync(path.join(dir, "run.jsonl"), "utf8");
     const note = JSON.parse(written.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>;
@@ -141,7 +146,7 @@ test("pull fast-forwards when histories have not diverged", async () => {
   await git(theirs.host, ["push", "-q"]);
 
   const pulled = await ours.vcs.pull(branch);
-  expect(pulled.ok).toBe(true);
+  expect(pulled.fastForwarded).toBe(true);
   expect(fs.existsSync(path.join(ours.dir, "theirs.txt"))).toBe(true);
 });
 
@@ -164,8 +169,7 @@ test("fetch moves the branch's remote-tracking ref", async () => {
   await git(theirs.host, ["push", "-q"]);
   const sent = await git(theirs.host, ["rev-parse", "HEAD"]);
 
-  const fetched = await ours.vcs.fetch(branch);
-  expect(fetched.ok).toBe(true);
+  await ours.vcs.fetch(branch);
   expect(await git(ours.host, ["rev-parse", `origin/${branch}`])).toBe(sent);
 });
 
@@ -179,7 +183,7 @@ test("worktree.add starts the branch at the ref it is given", async () => {
     await commitFile({ dir, host }, "later.txt", "later");
 
     const added = await vcs.worktree.add("feature", { from });
-    expect(added.ok).toBe(true);
+    expect(added.existed).toBe(false);
     const started = await host.exec(["git", "rev-parse", "HEAD"], { cwd: added.path });
     expect(started.stdout.trim()).toBe(from);
     expect(fs.existsSync(path.join(added.path, "later.txt"))).toBe(false);
@@ -195,12 +199,12 @@ test("worktree.add buckets by the repository, not the checkout it was called fro
     const { dir, host, vcs } = await repo();
     await commitFile({ dir, host }, "base.txt", "base");
     const first = await vcs.worktree.add("one");
-    expect(first.ok).toBe(true);
+    expect(first.existed).toBe(false);
 
     // A run whose cwd is a worktree of the same repository must land in the same folder.
     const inside = definition.build(hostFor(first.path));
     const second = await inside.worktree.add("two");
-    expect(second.ok).toBe(true);
+    expect(second.existed).toBe(false);
     expect(path.dirname(second.path)).toBe(path.dirname(first.path));
   } finally {
     delete process.env["PENGUIN_HOME"];
@@ -214,13 +218,12 @@ test("worktree.add reports a branch another worktree holds as one already there"
     const { dir, host, vcs } = await repo();
     await commitFile({ dir, host }, "base.txt", "base");
     const first = await vcs.worktree.add("feature");
-    expect(first.ok).toBe(true);
+    expect(first.existed).toBe(false);
 
     // The same branch from a different bucket: git refuses, and the caller is told where it sits.
     process.env["PENGUIN_HOME"] = tempDir("penguin-home-");
     const again = await definition.build(hostFor(dir)).worktree.add("feature");
-    expect(again.ok).toBe(false);
-    expect(again.exists).toBe(true);
+    expect(again.existed).toBe(true);
     expect(again.path).toBe(fs.realpathSync(first.path));
   } finally {
     delete process.env["PENGUIN_HOME"];
@@ -233,12 +236,9 @@ test("sha names the commit a ref points at, and refuses one that does not resolv
   const head = await vcs.head();
 
   const named = await vcs.sha(head.branch);
-  expect(named.ok).toBe(true);
   expect(named.sha).toBe(head.sha);
 
-  const missing = await vcs.sha("origin/nothing");
-  expect(missing.ok).toBe(false);
-  expect(missing.sha).toBe("");
+  await expect(vcs.sha("origin/nothing")).rejects.toThrow(Fault);
 });
 
 test("a base ahead of origin takes the branch only when the branch rebased onto the base itself", async () => {
@@ -256,18 +256,15 @@ test("a base ahead of origin takes the branch only when the branch rebased onto 
     await commitFile(ours, "landed.txt", "landed");
 
     const added = await ours.vcs.worktree.add("feature", { from: `origin/${base}` });
-    expect(added.ok).toBe(true);
     fs.writeFileSync(path.join(added.path, "feature.txt"), "feature\n");
     await ours.vcs.stage(["feature.txt"], { cwd: added.path });
     await ours.vcs.commit("test: feature", { cwd: added.path });
 
-    const off = await ours.vcs.merge("feature", { ffOnly: true });
-    expect(off.ok).toBe(false);
+    await expect(ours.vcs.merge("feature", { ffOnly: true })).rejects.toThrow(Fault);
 
     const onto = await ours.vcs.rebase.onto(base, { cwd: added.path });
-    expect(onto.ok).toBe(true);
-    const merged = await ours.vcs.merge("feature", { ffOnly: true });
-    expect(merged.ok).toBe(true);
+    expect(onto.conflicted).toBe(false);
+    await ours.vcs.merge("feature", { ffOnly: true });
     expect((await ours.vcs.head()).sha).toBe((await ours.vcs.head({ cwd: added.path })).sha);
   } finally {
     delete process.env["PENGUIN_HOME"];
@@ -285,19 +282,28 @@ async function origin(): Promise<{ bare: string; ours: Awaited<ReturnType<typeof
   return { bare, ours, base };
 }
 
+async function cloneOf(bare: string): Promise<{ dir: string; host: Host }> {
+  const dir = tempDir("penguin-theirs-");
+  const host = hostFor(dir);
+  await git(host, ["clone", "-q", bare, "."]);
+  await git(host, ["config", "user.email", "test@test"]);
+  await git(host, ["config", "user.name", "test"]);
+  return { dir, host };
+}
+
 test("a rebased branch reaches the remote only when the push carries force", async () => {
   const { ours, base } = await origin();
   await git(ours.host, ["checkout", "-q", "-b", "feature"]);
   await commitFile(ours, "feature.txt", "feature");
-  expect((await ours.vcs.push("feature")).ok).toBe(true);
+  await ours.vcs.raw.push("feature");
 
   await git(ours.host, ["checkout", "-q", base]);
   await commitFile(ours, "moved.txt", "moved");
   await git(ours.host, ["checkout", "-q", "feature"]);
-  expect((await ours.vcs.rebase.onto(base)).ok).toBe(true);
+  expect((await ours.vcs.rebase.onto(base)).conflicted).toBe(false);
 
-  expect((await ours.vcs.push("feature")).ok).toBe(false);
-  expect((await ours.vcs.push("feature", { force: true })).ok).toBe(true);
+  await expect(ours.vcs.raw.push("feature")).rejects.toThrow(Fault);
+  await ours.vcs.raw.push("feature", { force: true });
   expect(await git(ours.host, ["rev-parse", "origin/feature"])).toBe(
     await git(ours.host, ["rev-parse", "HEAD"]),
   );
@@ -307,20 +313,16 @@ test("force leaves a commit this clone never saw alone", async () => {
   const { bare, ours } = await origin();
   await git(ours.host, ["checkout", "-q", "-b", "feature"]);
   await commitFile(ours, "feature.txt", "feature");
-  expect((await ours.vcs.push("feature")).ok).toBe(true);
+  await ours.vcs.raw.push("feature");
 
-  const theirsDir = tempDir("penguin-theirs-");
-  const theirs = { dir: theirsDir, host: hostFor(theirsDir) };
-  await git(theirs.host, ["clone", "-q", bare, "."]);
-  await git(theirs.host, ["config", "user.email", "test@test"]);
-  await git(theirs.host, ["config", "user.name", "test"]);
+  const theirs = await cloneOf(bare);
   await git(theirs.host, ["checkout", "-q", "feature"]);
   await commitFile(theirs, "reviewed.txt", "reviewed");
   await git(theirs.host, ["push", "-q"]);
   const sent = await git(theirs.host, ["rev-parse", "HEAD"]);
 
   await commitFile(ours, "more.txt", "more");
-  expect((await ours.vcs.push("feature", { force: true })).ok).toBe(false);
+  await expect(ours.vcs.raw.push("feature", { force: true })).rejects.toThrow(Fault);
   expect(await git(hostFor(bare), ["rev-parse", "feature"])).toBe(sent);
 });
 
@@ -333,7 +335,7 @@ test("force still opens a branch the remote does not have yet", async () => {
   await git(ours.host, ["checkout", "-q", "-b", "feature"]);
   await commitFile(ours, "feature.txt", "feature");
 
-  expect((await ours.vcs.push("feature", { force: true })).ok).toBe(true);
+  await ours.vcs.raw.push("feature", { force: true });
   expect(await git(hostFor(bare), ["rev-parse", "feature"])).toBe(
     await git(ours.host, ["rev-parse", "HEAD"]),
   );
@@ -350,23 +352,101 @@ test("a hook that refuses a push the remote already has does not fail it", async
   const { ours } = await origin();
   await git(ours.host, ["checkout", "-q", "-b", "feature"]);
   await commitFile(ours, "feature.txt", "feature");
-  expect((await ours.vcs.push("feature")).ok).toBe(true);
+  await ours.vcs.raw.push("feature");
 
   refuse(ours.dir);
-  const sent = await ours.vcs.push("feature");
-  expect(sent.ok).toBe(true);
-  expect(sent.reason).not.toBe("");
+  await ours.vcs.raw.push("feature");
 });
 
 test("a hook still stops a push carrying a commit the remote does not have", async () => {
   const { ours } = await origin();
   await git(ours.host, ["checkout", "-q", "-b", "feature"]);
   await commitFile(ours, "feature.txt", "feature");
-  expect((await ours.vcs.push("feature")).ok).toBe(true);
+  await ours.vcs.raw.push("feature");
 
   refuse(ours.dir);
   await commitFile(ours, "more.txt", "more");
-  expect((await ours.vcs.push("feature")).ok).toBe(false);
+  await expect(ours.vcs.raw.push("feature")).rejects.toThrow(Fault);
+});
+
+test("sync puts the branch on a base that moved and lands it on origin", async () => {
+  const { bare, ours, base } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+
+  const theirs = await cloneOf(bare);
+  await commitFile(theirs, "moved.txt", "moved");
+  await git(theirs.host, ["push", "-q"]);
+
+  const synced = await ours.vcs.sync("feature", base);
+  expect(synced.conflicted).toBe(false);
+  if (!synced.conflicted) {
+    expect(synced.same).toBe(false);
+    expect(synced.baseSha).not.toBe("");
+  }
+  expect(await git(hostFor(bare), ["rev-parse", "feature"])).toBe(
+    await git(ours.host, ["rev-parse", "HEAD"]),
+  );
+  // The branch now sits on the moved base.
+  expect(fs.existsSync(path.join(ours.dir, "moved.txt"))).toBe(true);
+});
+
+test("sync answers same for a branch with nothing over its base, and pushes nothing", async () => {
+  const { bare, ours, base } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+
+  const synced = await ours.vcs.sync("feature", base);
+  expect(synced).toMatchObject({ conflicted: false, same: true });
+  const listed = await hostFor(bare).exec(["git", "rev-parse", "--verify", "feature"]);
+  expect(listed.code).not.toBe(0);
+});
+
+test("sync hands conflicts back with the rebase dropped and the tree clean", async () => {
+  const { bare, ours, base } = await origin();
+  fs.writeFileSync(path.join(ours.dir, "same.txt"), "ours\n");
+  await git(ours.host, ["add", "same.txt"]);
+  await git(ours.host, ["commit", "-q", "-m", "base holds same.txt"]);
+  await git(ours.host, ["push", "-q"]);
+  await git(ours.host, ["checkout", "-q", "-b", "feature", "HEAD~1"]);
+  fs.writeFileSync(path.join(ours.dir, "same.txt"), "theirs\n");
+  await git(ours.host, ["add", "same.txt"]);
+  await git(ours.host, ["commit", "-q", "-m", "feature holds same.txt"]);
+
+  const synced = await ours.vcs.sync("feature", base);
+  expect(synced.conflicted).toBe(true);
+  if (synced.conflicted) expect(synced.files).toEqual(["same.txt"]);
+  expect(await ours.vcs.rebase.pending()).toBe(false);
+  expect((await ours.vcs.head()).branch).toBe("feature");
+  expect((await ours.vcs.dirty()).dirty).toBe(false);
+  void bare;
+});
+
+test("sync refuses when origin holds commits of the branch this checkout has not seen", async () => {
+  const { bare, ours, base } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+  await ours.vcs.raw.push("feature");
+
+  const theirs = await cloneOf(bare);
+  await git(theirs.host, ["checkout", "-q", "feature"]);
+  await commitFile(theirs, "reviewed.txt", "reviewed");
+  await git(theirs.host, ["push", "-q"]);
+
+  await commitFile(ours, "more.txt", "more");
+  const failing = ours.vcs.sync("feature", base);
+  await expect(failing).rejects.toThrow("has commits this checkout does not");
+  expect(await git(hostFor(bare), ["rev-parse", "feature"])).toBe(
+    await git(theirs.host, ["rev-parse", "HEAD"]),
+  );
+});
+
+test("sync refuses a dirty tree before it touches anything", async () => {
+  const { ours, base } = await origin();
+  await git(ours.host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile(ours, "feature.txt", "feature");
+  fs.writeFileSync(path.join(ours.dir, "loose.txt"), "loose\n");
+
+  await expect(ours.vcs.sync("feature", base)).rejects.toThrow("uncommitted changes");
 });
 
 const LOCKED =
@@ -389,24 +469,20 @@ test("a fetch a sibling worktree beat to the ref runs again", async () => {
     { code: 1, stdout: "", stderr: LOCKED },
     { code: 0, stdout: "", stderr: "" },
   ]);
-  expect((await definition.build(host).fetch("main")).ok).toBe(true);
+  await definition.build(host).fetch("main");
   expect(calls).toHaveLength(2);
 });
 
 test("a fetch that fails for another reason is not run again", async () => {
   const { host, calls } = scripted([{ code: 128, stdout: "", stderr: "fatal: no such remote" }]);
-  const done = await definition.build(host).fetch("main");
-  expect(done.ok).toBe(false);
-  expect(done.reason).toBe("fatal: no such remote");
+  await expect(definition.build(host).fetch("main")).rejects.toThrow("fatal: no such remote");
   expect(calls).toHaveLength(1);
 });
 
 test("a ref that stays contended gives up with what git said", async () => {
   const locked = { code: 1, stdout: "", stderr: LOCKED };
   const { host, calls } = scripted([locked, locked, locked, locked, locked]);
-  const done = await definition.build(host).fetch("main");
-  expect(done.ok).toBe(false);
-  expect(done.reason).toBe(LOCKED);
+  await expect(definition.build(host).fetch("main")).rejects.toThrow(LOCKED);
   expect(calls).toHaveLength(5);
 });
 
@@ -434,7 +510,18 @@ test("pending reads the rebase a stopped run left open, and abort clears it", as
   expect(onto.conflicted).toBe(true);
   expect(await ours.vcs.rebase.pending()).toBe(true);
 
-  expect((await ours.vcs.rebase.abort()).ok).toBe(true);
+  await ours.vcs.rebase.abort();
   expect(await ours.vcs.rebase.pending()).toBe(false);
   expect((await ours.vcs.head()).branch).toBe("feature");
+});
+
+test("check flags a folder that is not a repository, and passes a clean one", async () => {
+  const check = definition.check;
+  if (check === undefined) throw new Error("the git adapter defines no check");
+  const dir = tempDir("penguin-plain-");
+  const bad = await check(hostFor(dir));
+  expect(bad.some((problem) => problem.includes("not a git repository"))).toBe(true);
+
+  const { ours } = await origin();
+  expect(await check(ours.host)).toEqual([]);
 });

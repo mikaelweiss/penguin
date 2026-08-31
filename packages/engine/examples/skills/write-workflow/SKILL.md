@@ -23,3 +23,6 @@ File rules:
 - Import `penguin`, `zod`, other workflow files, and shared TypeScript files by relative path. Nothing else.
 - Match the idiom of the installed workflow files: result schemas at the top, pure helpers next, the workflow export last.
 - Every skill name the file uses must resolve: reuse an installed name, or write the new skill in this same change.
+- Write the happy path. Adapter faults are the engine's: no `try` around a call unless this workflow genuinely handles that failure differently, and no re-implementing retry, fix, or gate loops the engine already runs.
+- Branch only on data an adapter answers (`dirty`, `conflicted`, a null pull request, `landed`), never on a failure shape.
+- After any block (an ask, a watch), act on a fresh read of the world, not on a variable set before the block. An ask that can outlive its subject takes `{ until }` and handles `isWithdrawn`.

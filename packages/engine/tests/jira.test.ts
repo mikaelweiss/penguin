@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Host } from "../src/core/adapter.ts";
+import { Fault } from "../src/core/errors.ts";
 import definition from "../examples/adapters/jira.ts";
 
 type Note = Record<string, unknown>;
@@ -47,12 +48,6 @@ function fakeHost(): Fake {
   };
   return { host, notes, opened, save, state };
 }
-
-type Jira = {
-  issue: {
-    get(key: string): Promise<{ ok: boolean; issue: unknown; reason: string }>;
-  };
-};
 
 type Sent = { url: string; token: string };
 
@@ -108,7 +103,7 @@ afterEach(() => {
 test("missing credentials pause the call until the app saves them", async () => {
   const { host, notes, save } = fakeHost();
   fakeFetch(() => issueReply());
-  const jira = definition.build(host) as Jira;
+  const jira = definition.build(host);
 
   const reading = jira.issue.get("PENG-1");
   await until(() => notes.length === 1);
@@ -117,7 +112,7 @@ test("missing credentials pause the call until the app saves them", async () => 
 
   save(CREDS);
   const found = await reading;
-  expect(found.ok).toBe(true);
+  expect(found.key).toBe("PENG-1");
   expect((notes[1]?.["auth"] as Note)["resolved"]).toBe(true);
 });
 
@@ -127,7 +122,7 @@ test("a refusal shelves the tuple and retries only with new credentials", async 
   const sent = fakeFetch((one) =>
     one.token === "stale" ? Response.json({}, { status: 401 }) : issueReply(),
   );
-  const jira = definition.build(host) as Jira;
+  const jira = definition.build(host);
 
   const reading = jira.issue.get("PENG-1");
   await until(() => notes.length === 1);
@@ -135,7 +130,7 @@ test("a refusal shelves the tuple and retries only with new credentials", async 
 
   save(CREDS);
   const found = await reading;
-  expect(found.ok).toBe(true);
+  expect(found.key).toBe("PENG-1");
   expect(sent.map((one) => one.token)).toEqual(["stale", "good"]);
 });
 
@@ -148,10 +143,10 @@ test("refused environment credentials fall back to saved ones without pausing", 
   const sent = fakeFetch((one) =>
     one.token === "stale" ? Response.json({}, { status: 401 }) : issueReply(),
   );
-  const jira = definition.build(host) as Jira;
+  const jira = definition.build(host);
 
   const found = await jira.issue.get("PENG-1");
-  expect(found.ok).toBe(true);
+  expect(found.key).toBe("PENG-1");
   expect(sent.map((one) => one.token)).toEqual(["stale", "good"]);
   expect(notes).toHaveLength(0);
 });
@@ -160,25 +155,25 @@ test("a 404 returns an error without pausing", async () => {
   const { host, notes, save } = fakeHost();
   save(CREDS);
   fakeFetch(() => Response.json({}, { status: 404 }));
-  const jira = definition.build(host) as Jira;
+  const jira = definition.build(host);
 
-  const found = await jira.issue.get("PENG-404");
-  expect(found.ok).toBe(false);
-  expect(found.reason).toContain("404");
+  const failing = jira.issue.get("PENG-404");
+  await expect(failing).rejects.toThrow(Fault);
+  await expect(failing).rejects.toThrow("404");
   expect(notes).toHaveLength(0);
 });
 
 test("concurrent calls share one pause and one note pair", async () => {
   const { host, notes, save } = fakeHost();
   fakeFetch(() => issueReply());
-  const jira = definition.build(host) as Jira;
+  const jira = definition.build(host);
 
   const readings = [jira.issue.get("PENG-1"), jira.issue.get("PENG-2")];
   await until(() => notes.length === 1);
 
   save(CREDS);
   const found = await Promise.all(readings);
-  expect(found.every((one) => one.ok)).toBe(true);
+  expect(found.every((one) => one.key === "PENG-1")).toBe(true);
   expect(notes).toHaveLength(2);
 });
 
@@ -186,7 +181,7 @@ test("reading a ticket puts it in front of the person watching", async () => {
   const { host, opened, save } = fakeHost();
   save(CREDS);
   fakeFetch(() => issueReply());
-  const jira = definition.build(host) as Jira;
+  const jira = definition.build(host);
 
   await jira.issue.get("PENG-1");
   expect(opened).toEqual(["https://acme.atlassian.net/browse/PENG-1"]);

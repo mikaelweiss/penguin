@@ -128,12 +128,13 @@ test("a poll the branch cannot be read on reports nothing and keeps watching", a
   expect(poll.reads()).toBe(3);
 });
 
-/** A gh that answers one canned result and keeps what it was asked. */
-function fakeGh(reply: CommandResult): {
+/** A gh that answers canned results in order and keeps what it was asked. */
+function fakeGh(replies: CommandResult | CommandResult[]): {
   gh: ReturnType<typeof definition.build>;
   args: string[][];
   opened: string[];
 } {
+  const canned = Array.isArray(replies) ? replies : [replies];
   const args: string[][] = [];
   const opened: string[] = [];
   const host: Host = {
@@ -154,30 +155,98 @@ function fakeGh(reply: CommandResult): {
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: async (argv) => {
       args.push(argv);
-      return reply;
+      return canned[Math.min(args.length, canned.length) - 1] ?? { code: 0, stdout: "", stderr: "" };
     },
   };
   return { gh: definition.build(host), args, opened };
 }
 
+const PR_URL = "https://github.com/o/r/pull/9";
+
+function prJson(over: Record<string, unknown> = {}): CommandResult {
+  return {
+    code: 0,
+    stdout: JSON.stringify({
+      number: 9,
+      title: "t",
+      body: "b",
+      state: "OPEN",
+      isDraft: false,
+      headRefOid: "abc",
+      baseRefName: "main",
+      url: PR_URL,
+      ...over,
+    }),
+    stderr: "",
+  };
+}
+
+const NO_QUEUE: CommandResult = { code: 0, stdout: "false\n", stderr: "" };
+const NONE: CommandResult = { code: 0, stdout: "[]\n", stderr: "" };
+
 test("a branch with no pull request open on it comes back empty, not failed", async () => {
-  const { gh } = fakeGh({ code: 0, stdout: "[]\n", stderr: "" });
-  expect(await gh.pr.of("feature")).toEqual({ ok: true, prs: [], reason: "" });
+  const { gh } = fakeGh(NONE);
+  expect(await gh.pr.of("feature")).toEqual([]);
 });
 
 test("the base an open pull request lands on comes back with it", async () => {
   const listed = [{ number: 7, baseRefName: "stack-below", url: "https://github.com/o/r/pull/7" }];
   const { gh, args } = fakeGh({ code: 0, stdout: JSON.stringify(listed), stderr: "" });
-  expect(await gh.pr.of("feature")).toEqual({ ok: true, prs: listed, reason: "" });
+  expect(await gh.pr.of("feature")).toEqual(listed);
   expect(args[0]).toContain("feature");
 });
 
-test("creating a pull request puts it in front of the person watching", async () => {
-  const { gh, opened } = fakeGh({
-    code: 0,
-    stdout: "https://github.com/o/r/pull/9\n",
-    stderr: "",
-  });
-  await gh.pr.create({ title: "t", body: "b" });
-  expect(opened).toEqual(["https://github.com/o/r/pull/9"]);
+test("ensure opens a pull request when the branch has neither an open nor a merged one", async () => {
+  const { gh, opened } = fakeGh([
+    NONE,
+    NONE,
+    { code: 0, stdout: `${PR_URL}\n`, stderr: "" },
+    prJson(),
+    NO_QUEUE,
+  ]);
+  const made = await gh.pr.ensure({ head: "feature", base: "main", title: "t", body: "b" });
+  expect(made.landed).toBe(false);
+  expect(made.created).toBe(true);
+  expect(made.pr?.number).toBe(9);
+  expect(opened).toEqual([PR_URL]);
+});
+
+test("ensure hands back the open pull request as it stands, base and all", async () => {
+  const listed = [{ number: 9, baseRefName: "stack-below", url: PR_URL }];
+  const { gh } = fakeGh([
+    { code: 0, stdout: JSON.stringify(listed), stderr: "" },
+    prJson({ baseRefName: "stack-below" }),
+    NO_QUEUE,
+  ]);
+  const made = await gh.pr.ensure({ head: "feature", base: "main", title: "t", body: "b" });
+  expect(made.landed).toBe(false);
+  expect(made.created).toBe(false);
+  expect(made.pr?.baseRefName).toBe("stack-below");
+});
+
+test("ensure answers landed for a branch whose pull request already merged", async () => {
+  const listed = [{ number: 9, baseRefName: "main", url: PR_URL }];
+  const { gh } = fakeGh([
+    NONE,
+    { code: 0, stdout: JSON.stringify(listed), stderr: "" },
+    prJson({ state: "MERGED" }),
+    NO_QUEUE,
+  ]);
+  const made = await gh.pr.ensure({ head: "feature", base: "main", title: "t", body: "b" });
+  expect(made.landed).toBe(true);
+  expect(made.pr?.state).toBe("MERGED");
+});
+
+test("ensure answers landed for a branch with nothing over the base", async () => {
+  const { gh } = fakeGh([
+    NONE,
+    NONE,
+    {
+      code: 1,
+      stdout: "",
+      stderr: "GraphQL: No commits between main and feature (createPullRequest)",
+    },
+  ]);
+  const made = await gh.pr.ensure({ head: "feature", base: "main", title: "t", body: "b" });
+  expect(made).toEqual({ landed: true, pr: null, created: false });
 });
