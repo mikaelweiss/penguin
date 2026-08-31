@@ -6,8 +6,12 @@ import { installedIn, pick } from "./catalog/adapters.ts";
 import { builtinCatalog, checkoutOf, roots, type Catalog } from "./catalog/catalogs.ts";
 import { load } from "./catalog/loader.ts";
 import { skillLookup } from "./catalog/skills.ts";
-import { messageOf, PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
+import { Fault, messageOf, PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
+import { createRescue, worldOf } from "./core/rescue.ts";
+import type { Adapter, Host } from "./core/adapter.ts";
+import type { View } from "./core/view.ts";
 import { RUN, type RunHooks } from "./core/workflow.ts";
+import { z } from "zod";
 import { createHost } from "./host.ts";
 import { projectRoot, runDir } from "./paths.ts";
 import { createTrace, openJournal, runId, type Trace } from "./trace.ts";
@@ -50,14 +54,22 @@ export async function run(
     const host = createHost(cwd, { id, dir: trace.dir }, skillLookup(list));
     const found = await installedIn(list);
     const ctx: Record<PropertyKey, unknown> = { params: parsed };
+    const rescue = createRescue(worldOf(ctx));
+    const installed: Adapter[] = [];
     for (const role of new Set(found.map((entry) => entry.role))) {
       const picked = pick(found, role);
       if ("missing" in picked) throw new PenguinError(picked.missing);
       if ("conflict" in picked) throw new PenguinError(picked.conflict);
+      installed.push(picked.found.definition as Adapter);
       const built = picked.found.definition.build(host);
-      ctx[role] = trace.wrap(role, built);
+      const traced = trace.wrap(role, built);
+      // The view asks and the agent turns are how faults get handled, so wrapping
+      // them in the same recovery would ask about the asking.
+      ctx[role] = role === "view" || role === "agent" ? traced : rescue(role, traced);
     }
     ctx[RUN] = hooks(trace, id, cwd, list);
+    // A child run works where its parent already checked, so only a root run pays for preflight.
+    if (options?.parent === undefined) await preflight(installed, host, ctx);
     // The loader duck-typed the definition, so its schema's static type is gone here.
     const result = await definition.run(reached(ctx) as never);
     trace.note({ outcome: result ?? null });
@@ -98,6 +110,40 @@ function reached(ctx: Record<PropertyKey, unknown>): Record<PropertyKey, unknown
       return undefined;
     },
   });
+}
+
+const Preflight = z.enum(["retry", "skip", "stop"]);
+
+/**
+ * Every installed adapter's fast local checks, before the workflow runs. What
+ * blocks the run surfaces at second zero with a person watching, not an hour in
+ * at a git hook. The person fixes and retries, skips past a check they know
+ * better than, or stops.
+ */
+async function preflight(
+  installed: Adapter[],
+  host: Host,
+  ctx: Record<PropertyKey, unknown>,
+): Promise<void> {
+  for (;;) {
+    const problems: string[] = [];
+    for (const definition of installed) {
+      if (definition.check === undefined) continue;
+      problems.push(...(await definition.check(host)));
+    }
+    if (problems.length === 0) return;
+    const view = ctx["view"] as View | undefined;
+    const listed = problems.map((problem) => `- ${problem}`).join("\n");
+    if (view === undefined || typeof view.ask !== "function") {
+      throw new Fault(`the run cannot start:\n${listed}`);
+    }
+    const answer = await view.ask(
+      `These block the run:\n\n${listed}\n\nFix them and type retry, skip to run anyway, or stop.`,
+      Preflight,
+    );
+    if (answer === "skip") return;
+    if (answer === "stop") throw new Fault(`the run cannot start:\n${listed}`);
+  }
 }
 
 type Job = { workflow: string; params: unknown; cwd?: string };

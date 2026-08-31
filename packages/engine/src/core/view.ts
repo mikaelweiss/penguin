@@ -23,9 +23,33 @@ export type Action = {
   output?: string;
 };
 
+/**
+ * The answer an ask settles with when its premise died first: the world it asked
+ * about is gone, so the workflow reads the world again instead of acting on it.
+ */
+export type Withdrawn = { withdrawn: true; reason: string };
+
+export function isWithdrawn(value: unknown): value is Withdrawn {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Record<string, unknown>)["withdrawn"] === true
+  );
+}
+
+export type AskOptions = {
+  /** Settling this withdraws the question. It resolves with why the question is moot. */
+  until: Promise<string>;
+};
+
 export type Ask = {
   (question: string): Promise<string>;
   <Shape extends z.ZodType>(question: string, shape: Shape): Promise<z.infer<Shape>>;
+  <Shape extends z.ZodType>(
+    question: string,
+    shape: Shape,
+    options: AskOptions,
+  ): Promise<z.infer<Shape> | Withdrawn>;
 };
 
 /** The one way a workflow reaches the person watching. */

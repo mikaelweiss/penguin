@@ -4,7 +4,7 @@ import type { z } from "zod";
 import { adapter } from "../core/adapter.ts";
 import { Channel } from "../core/channel.ts";
 import { issuesOf } from "../core/errors.ts";
-import { candidates, type Ask, type Message, type View } from "../core/view.ts";
+import { candidates, type Ask, type AskOptions, type Message, type View } from "../core/view.ts";
 
 type Pending = {
   shape: z.ZodType | undefined;
@@ -86,10 +86,24 @@ export function createFilesView(dir: string): View {
     note({ rejected: value, problem });
   }
 
-  const asked = (shape: z.ZodType | undefined): Promise<unknown> =>
+  const asked = (shape: z.ZodType | undefined, options?: AskOptions): Promise<unknown> =>
     new Promise((resolve) => {
-      asks.push({ shape, resolve });
+      const pending: Pending = { shape, resolve };
+      asks.push(pending);
       ensure();
+      // A dead premise pulls the question out of the queue, so the next answer
+      // lands on a live question and never on this one.
+      options?.until.then(
+        (reason) => {
+          const at = asks.indexOf(pending);
+          if (at === -1) return;
+          asks.splice(at, 1);
+          release();
+          note({ withdrawn: reason });
+          resolve({ withdrawn: true, reason });
+        },
+        () => {},
+      );
     });
 
   function listen(): AsyncIterable<Message> {
@@ -127,7 +141,8 @@ export function createFilesView(dir: string): View {
     async open(url: string): Promise<void> {
       note({ open: url });
     },
-    ask: ((_question: string, shape?: z.ZodType) => asked(shape)) as Ask,
+    ask: ((_question: string, shape?: z.ZodType, options?: AskOptions) =>
+      asked(shape, options)) as Ask,
     listen,
   };
 }

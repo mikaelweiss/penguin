@@ -152,6 +152,121 @@ test("a resumed run replays recorded calls instead of repeating them", async () 
   expect(fs.readFileSync(tally, "utf8")).toBe("hello pip\n");
 });
 
+const FLAKY = `import fs from "node:fs";
+import { adapter, Fault } from "penguin";
+export default adapter({
+  role: "echo",
+  name: "test",
+  description: "faults on the first call ever, counts each attempt",
+  build: () => ({
+    async say(text: string) {
+      const tally = process.env["PENGUIN_TEST_TALLY"] ?? "";
+      const tried = fs.readFileSync(tally, "utf8");
+      fs.appendFileSync(tally, text + "\\n");
+      if (tried === "") throw new Fault("the world refused, once");
+      return { ok: true, text };
+    },
+  }),
+});
+`;
+
+/** Waits for an unanswered view.ask in any run's file, then answers it through that run's inbox. */
+async function answerNext(answer: string): Promise<string> {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const dirs = fs.existsSync(runsDir()) ? fs.readdirSync(runsDir()) : [];
+    for (const dir of dirs) {
+      const file = path.join(runsDir(), dir, "run.jsonl");
+      if (!fs.existsSync(file)) continue;
+      const entries = fs
+        .readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const opens = entries.filter((e) => e["call"] === "view.ask" && e["pending"] === true);
+      const closed = new Set(
+        entries
+          .filter((e) => e["call"] === "view.ask" && e["elapsedMs"] !== undefined)
+          .map((e) => e["id"]),
+      );
+      const open = opens.find((e) => !closed.has(e["id"]));
+      if (open !== undefined) {
+        fs.appendFileSync(path.join(runsDir(), dir, "inbox.jsonl"), `${JSON.stringify({ answer })}\n`);
+        return String((open["args"] as unknown[])[0]);
+      }
+    }
+    if (Date.now() > deadline) throw new Error("no ask appeared");
+    await Bun.sleep(25);
+  }
+}
+
+test("a faulted call waits at the engine's gate, and a resume runs it again", async () => {
+  const tally = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-tally-")), "tally");
+  temps.push(path.dirname(tally));
+  fs.writeFileSync(tally, "");
+  process.env["PENGUIN_TEST_TALLY"] = tally;
+  const { list, workflow } = catalog({ "adapters/echo.ts": FLAKY, "workflows/hello.ts": HELLO });
+
+  // The fault holds the run at a gate. Stop ends the run on the fault itself.
+  const first = run(workflow, { name: "pip" }, { catalogs: list });
+  const gate = await answerNext("stop");
+  expect(gate).toContain("echo.say failed");
+  expect(gate).toContain("the world refused, once");
+  await expect(first).rejects.toThrow("the world refused, once");
+
+  const previous = latestRun();
+  if (previous === undefined) throw new Error("no run file");
+  const result = await run(workflow, { name: "pip" }, { catalogs: list, resume: previous });
+  expect(result).toEqual({ ok: true, text: "hello pip" });
+  expect(fs.readFileSync(tally, "utf8")).toBe("hello pip\nhello pip\n");
+});
+
+test("retry at the gate runs the faulted call again in place", async () => {
+  const tally = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-tally-")), "tally");
+  temps.push(path.dirname(tally));
+  fs.writeFileSync(tally, "");
+  process.env["PENGUIN_TEST_TALLY"] = tally;
+  const { list, workflow } = catalog({ "adapters/echo.ts": FLAKY, "workflows/hello.ts": HELLO });
+
+  const running = run(workflow, { name: "pip" }, { catalogs: list });
+  await answerNext("retry");
+  expect(await running).toEqual({ ok: true, text: "hello pip" });
+  expect(fs.readFileSync(tally, "utf8")).toBe("hello pip\nhello pip\n");
+});
+
+const UNREADY = `import { adapter } from "penguin";
+export default adapter({
+  role: "echo",
+  name: "test",
+  description: "echoes back, but its preflight always objects",
+  async check() {
+    return ["the echo chamber is not installed"];
+  },
+  build: () => ({
+    async say(text: string) {
+      return { ok: true, text };
+    },
+  }),
+});
+`;
+
+test("preflight holds a root run at a gate; skip runs anyway, and a child skips the checks", async () => {
+  const { list, workflow } = catalog({ "adapters/echo.ts": UNREADY, "workflows/hello.ts": HELLO });
+
+  const stopped = run(workflow, { name: "pip" }, { catalogs: list });
+  const gate = await answerNext("stop");
+  expect(gate).toContain("the echo chamber is not installed");
+  await expect(stopped).rejects.toThrow("the run cannot start");
+
+  const skipped = run(workflow, { name: "pip" }, { catalogs: list });
+  await answerNext("skip");
+  expect(await skipped).toEqual({ ok: true, text: "hello pip" });
+
+  // A child works where its parent already checked, so its own preflight never runs.
+  const asChild = await run(workflow, { name: "pip" }, { catalogs: list, parent: "someone" });
+  expect(asChild).toEqual({ ok: true, text: "hello pip" });
+});
+
 test("a run file of other params refuses to resume", async () => {
   const { list, workflow } = catalog({ "adapters/echo.ts": ECHO, "workflows/hello.ts": HELLO });
   await run(workflow, { name: "pip" }, { catalogs: list });

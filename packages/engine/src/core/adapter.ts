@@ -80,6 +80,12 @@ export type Adapter<A = unknown> = {
   description: string;
   /** Makes the API a workflow calls through ctx.<role>. Plain data in, plain data, streams, or handles of those out. */
   build(host: Host): A;
+  /**
+   * Fast, local preflight the engine runs before a root run starts: is the CLI
+   * installed, is the login there, is the folder a repo. Returns what blocks the
+   * run, empty when nothing does. No network calls, so a run starts in under a second.
+   */
+  check?(host: Host): Promise<string[]>;
 };
 
 export function adapter<A>(definition: Adapter<A>): Adapter<A> {

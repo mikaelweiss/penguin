@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { createFilesView } from "../src/adapters/files-view.ts";
-import { menuOf, type View } from "../src/core/index.ts";
+import { isWithdrawn, menuOf, type View } from "../src/core/index.ts";
 
 let temps: string[] = [];
 
@@ -118,6 +118,38 @@ test("open notes the url, and a workflow that means it twice says it twice", asy
     "http://localhost:5173",
     "http://localhost:5173",
   ]);
+});
+
+test("a dead premise withdraws the ask, and the next answer lands on the live question", async () => {
+  const { view, dir, sent } = filesView();
+  let moot: (reason: string) => void = () => {};
+  const closed = new Promise<string>((settle) => {
+    moot = settle;
+  });
+  const stale = view.ask("act on the PR?", z.enum(["go", "skip"]), { until: closed });
+  const live = view.ask("still here?");
+
+  moot("the PR merged");
+  const first = await stale;
+  expect(isWithdrawn(first)).toBe(true);
+  if (isWithdrawn(first)) expect(first.reason).toBe("the PR merged");
+  expect(await writes(dir, '"withdrawn"')).toContain('"withdrawn":"the PR merged"');
+
+  sent({ answer: "yes" });
+  expect(await live).toBe("yes");
+});
+
+test("an answer that beats the premise wins, and the withdrawal is a no-op", async () => {
+  const { view, sent } = filesView();
+  let moot: (reason: string) => void = () => {};
+  const closed = new Promise<string>((settle) => {
+    moot = settle;
+  });
+  const asked = view.ask("act on the PR?", z.enum(["go", "skip"]), { until: closed });
+  sent({ answer: "go" });
+  expect(await asked).toBe("go");
+  moot("too late");
+  expect(isWithdrawn(await asked)).toBe(false);
 });
 
 test("a boolean shape maps to yes and no", () => {
