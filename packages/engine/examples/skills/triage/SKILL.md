@@ -26,3 +26,7 @@ Split only at a shippable seam. Each task is a vertical slice: a thin path throu
 Size each task as big as one review can hold. Review capacity tracks the number of independent decisions in a change, not its line count.
 
 Write each task as self-contained text: what to build, why, and the ticket context a planner needs. A task never references another task's internals. An actionable ticket returns at least one task. A ticket that is not actionable returns none.
+
+## Read in batches
+
+Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

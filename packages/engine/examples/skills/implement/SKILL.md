@@ -25,3 +25,7 @@ Run each gate once. Send the output to a file, for example `bun test > /tmp/gate
 While you fix one failing test, run that test alone. Run the whole suite again only when you believe the fix is done.
 
 A failure the input's baseline already names was there before you started. Leave it. Fix what this change breaks.
+
+## Read in batches
+
+Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

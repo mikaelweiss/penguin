@@ -56,3 +56,7 @@ A genuine product or scope choice the repository cannot settle goes back to the 
 Keep it lean: decisions and invariants, not prose. Each invariant should be implementable in a few lines and pinned by a test. Prefer one decision plus one test over defensive sprawl.
 
 Return the whole plan as `plan`, in markdown, and the acceptance criteria as `acceptance`, one per line.
+
+## Read in batches
+
+Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

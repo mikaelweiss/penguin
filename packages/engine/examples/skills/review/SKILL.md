@@ -30,3 +30,7 @@ A failure that line already names is not this change's defect. It is not a block
 A gate that is red in a way the baseline does not name is this change's defect. That one blocks.
 
 Report what you confirmed. Do not report style opinions.
+
+## Read in batches
+
+Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.
