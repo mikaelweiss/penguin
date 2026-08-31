@@ -350,8 +350,8 @@ export function App() {
                               className="flex min-h-0 min-w-0 flex-col"
                             >
                               <BrowserPanel
-                                runId={run.id}
                                 held={browser.of(run.id)}
+                                all={browser.all}
                                 full={fullBrowser}
                                 showing={!overlay}
                                 onOpen={(url) => browser.open(run.id, url)}

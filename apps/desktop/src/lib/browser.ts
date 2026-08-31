@@ -28,6 +28,11 @@ export const NO_TABS: RunTabs = { tabs: [], active: undefined, applied: 0 };
 
 export type Held = Record<string, RunTabs>;
 
+/** Every tab the app holds. The native pages are the window's, so they are counted together. */
+export function allTabs(held: Held): Tab[] {
+  return Object.values(held).flatMap((one) => one.tabs);
+}
+
 function newTab(url: string): Tab {
   return { id: crypto.randomUUID(), url, title: "" };
 }

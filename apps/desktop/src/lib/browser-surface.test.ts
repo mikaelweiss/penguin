@@ -52,3 +52,23 @@ test("a first look opens once, and a tab that left is closed", () => {
   expect(pass.hide).toEqual(["a"]);
   expect(pass.show).toBeUndefined();
 });
+
+test("another run's page is hidden, not closed, so a switch back does not reload it", () => {
+  const pass = surfacePass({
+    live: new Set(["a"]),
+    tabs: [tab("a", "https://a.test/"), tab("b", "https://b.test/")],
+    active: "b",
+    showing: true,
+  });
+  expect(pass.close).toEqual([]);
+  expect(pass.hide).toEqual(["a"]);
+
+  const back = surfacePass({
+    live: new Set(["a", "b"]),
+    tabs: [tab("a", "https://a.test/"), tab("b", "https://b.test/")],
+    active: "a",
+    showing: true,
+  });
+  expect(back.open).toBeUndefined();
+  expect(back.show).toBe("a");
+});

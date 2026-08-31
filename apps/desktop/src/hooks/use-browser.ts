@@ -28,6 +28,8 @@ export type OpenIn = "app" | "system";
 export type BrowserState = {
   /** One run's tabs. A run with none reads as empty, never undefined. */
   of: (runId: string | undefined) => RunTabs;
+  /** Every run's tabs. The native pages outlive a run switch, so they are placed against all of them. */
+  all: Held;
   open: (runId: string, url: string) => void;
   close: (runId: string, tabId: string) => void;
   select: (runId: string, tabId: string) => void;
@@ -133,6 +135,7 @@ export function useBrowser(): BrowserState {
 
   return {
     of: (runId) => (runId === undefined ? NO_TABS : (held[runId] ?? NO_TABS)),
+    all: held,
     open: (runId, url) => change(runId, (one) => openTab(one, url)),
     close: (runId, tabId) => change(runId, (one) => closeTab(one, tabId)),
     select: (runId, tabId) => change(runId, (one) => ({ ...one, active: tabId })),

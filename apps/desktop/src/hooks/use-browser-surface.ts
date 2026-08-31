@@ -8,6 +8,8 @@ import {
   browserHide,
   browserOpen,
   browserShow,
+  forgetTab,
+  liveTabs,
   type Rect,
 } from "@/lib/webview";
 
@@ -27,7 +29,7 @@ function rectOf(mount: HTMLDivElement): Rect {
 
 type Surface = {
   mount: RefObject<HTMLDivElement | null>;
-  runId: string | undefined;
+  /** Every tab the app holds, every run. The pages belong to the window, not to one run. */
   tabs: Tab[];
   active: string | undefined;
   /** False whenever something must draw over the page: a dialog, a full screen sibling, no panel. */
@@ -39,11 +41,10 @@ type Surface = {
  * React tree, so nothing here is layout: the page is positioned at the rect the placeholder
  * measures, and hidden outright whenever the app needs to draw on top of it.
  *
- * A tab gets its webview the first time it is looked at and keeps it until the tab closes or the
- * run is left, so going back to a tab finds the page where it was.
+ * A tab gets its webview the first time it is looked at and keeps it until the tab closes, so
+ * going back to a tab, in this run or in another one, finds the page where it was.
  */
-export function useBrowserSurface({ mount, runId, tabs, active, showing }: Surface): string | undefined {
-  const live = useRef<Set<string>>(new Set());
+export function useBrowserSurface({ mount, tabs, active, showing }: Surface): string | undefined {
   const at = useRef<Rect | undefined>(undefined);
   const tabsRef = useRef(tabs);
   const activeRef = useRef(active);
@@ -54,53 +55,36 @@ export function useBrowserSurface({ mount, runId, tabs, active, showing }: Surfa
   const [error, setError] = useState<string | undefined>(undefined);
   const ids = tabs.map((tab) => tab.id).join("\0");
 
-  // Leaving a run closes its pages. Only what you are looking at costs a webview.
-  useEffect(
-    () => () => {
-      for (const id of live.current) browserClose(id).catch(() => {});
-      live.current.clear();
-      at.current = undefined;
-    },
-    [runId],
-  );
-
   // Close pages whose tabs left. Ids, not the tabs array: a title or url rewrite is not a close.
   useEffect(() => {
     const { close } = surfacePass({
-      live: live.current,
+      live: liveTabs(),
       tabs: tabsRef.current,
       active: activeRef.current,
       showing: showingRef.current,
     });
-    for (const id of close) {
-      browserClose(id).catch(() => {});
-      live.current.delete(id);
-    }
-  }, [ids, runId]);
+    for (const id of close) browserClose(id).catch(() => {});
+  }, [ids]);
 
   // Open, show, hide, bounds. `tabs` stays in the ref so a title or url event cannot re-enter here.
   useEffect(() => {
     const showable = mount.current;
     const pass = surfacePass({
-      live: live.current,
+      live: liveTabs(),
       tabs: tabsRef.current,
       active,
       showing: showing && showable !== null,
     });
-    for (const id of pass.close) {
-      browserClose(id).catch(() => {});
-      live.current.delete(id);
-    }
+    for (const id of pass.close) browserClose(id).catch(() => {});
 
     if (pass.open !== undefined && showable !== null) {
       const rect = rectOf(showable);
       at.current = rect;
       const { id, url } = pass.open;
-      live.current.add(id);
       browserOpen(id, url, rect).then(
         () => {
           setError(undefined);
-          if (!live.current.has(id)) {
+          if (!liveTabs().has(id)) {
             browserClose(id).catch(() => {});
             return;
           }
@@ -108,23 +92,29 @@ export function useBrowserSurface({ mount, runId, tabs, active, showing }: Surfa
             browserHide(id).catch(() => {});
           }
         },
-        (cause: unknown) => {
-          live.current.delete(id);
-          setError(cause instanceof Error ? cause.message : String(cause));
-        },
+        (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)),
       );
     } else if (pass.show !== undefined && showable !== null) {
       const rect = rectOf(showable);
       at.current = rect;
       const shown = pass.show;
-      browserBounds(shown, rect).catch(() => live.current.delete(shown));
-      browserShow(shown).catch(() => live.current.delete(shown));
+      browserBounds(shown, rect).catch(() => forgetTab(shown));
+      browserShow(shown).catch(() => forgetTab(shown));
     }
 
     for (const id of pass.hide) {
-      browserHide(id).catch(() => live.current.delete(id));
+      browserHide(id).catch(() => forgetTab(id));
     }
-  }, [mount, runId, active, showing]);
+  }, [mount, active, showing]);
+
+  // Nothing measures the placeholder once the panel is gone, so a page left showing would sit over
+  // the UI with no way to move it. The pages stay open: it is the panel that left, not the tabs.
+  useEffect(
+    () => () => {
+      for (const id of liveTabs()) browserHide(id).catch(() => forgetTab(id));
+    },
+    [],
+  );
 
   // The page has no layout of its own, so it follows the placeholder frame by frame: a panel drag,
   // a sidebar toggle, and a window resize all move the rect without changing anything React renders.
@@ -134,11 +124,11 @@ export function useBrowserSurface({ mount, runId, tabs, active, showing }: Surfa
     const follow = () => {
       frame = requestAnimationFrame(follow);
       const showable = mount.current;
-      if (showable === null || !live.current.has(active)) return;
+      if (showable === null || !liveTabs().has(active)) return;
       const rect = rectOf(showable);
       if (sameRect(at.current, rect)) return;
       at.current = rect;
-      browserBounds(active, rect).catch(() => live.current.delete(active));
+      browserBounds(active, rect).catch(() => forgetTab(active));
     };
     frame = requestAnimationFrame(follow);
     return () => cancelAnimationFrame(frame);

@@ -31,7 +31,7 @@ import { Spinner } from "@workspace/ui/components/spinner";
 import { PanelChrome } from "@/components/panel-chrome";
 import { useBrowserSurface } from "@/hooks/use-browser-surface";
 import { useLocalServers } from "@/hooks/use-local-servers";
-import { isBlank, typedUrl, type RunTabs } from "@/lib/browser";
+import { allTabs, isBlank, typedUrl, type Held, type RunTabs } from "@/lib/browser";
 import {
   browserBack,
   browserForward,
@@ -41,8 +41,9 @@ import {
 } from "@/lib/webview";
 
 type BrowserPanelProps = {
-  runId: string;
   held: RunTabs;
+  /** Every run's tabs. A page stays open across a run switch, so all of them place it. */
+  all: Held;
   full: boolean;
   /** False while a dialog or the palette needs to draw over the page. */
   showing: boolean;
@@ -68,8 +69,8 @@ function tabName(url: string, title: string): string {
 }
 
 export function BrowserPanel({
-  runId,
   held,
+  all,
   full,
   showing,
   onOpen,
@@ -87,8 +88,7 @@ export function BrowserPanel({
   const loading = useLoading(showingPage ? held.active : undefined);
   const surfaceError = useBrowserSurface({
     mount,
-    runId,
-    tabs: held.tabs,
+    tabs: allTabs(all),
     active: showingPage ? held.active : undefined,
     showing,
   });

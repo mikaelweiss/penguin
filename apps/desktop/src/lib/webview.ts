@@ -11,6 +11,22 @@ export function labelOf(tabId: string): string {
 export type Rect = { x: number; y: number; width: number; height: number };
 
 /**
+ * The tabs the window is holding a page for. One window holds one set of them, whichever run is
+ * on screen, so it outlives every panel that draws them: a panel that is gone still has pages to
+ * answer for, and a page kept alive is a page that does not reload when you come back to it.
+ */
+const live = new Set<string>();
+
+export function liveTabs(): ReadonlySet<string> {
+  return live;
+}
+
+/** A page that will not answer is no longer held, whatever the window still thinks. */
+export function forgetTab(tabId: string): void {
+  live.delete(tabId);
+}
+
+/**
  * A rect plus the viewport it was measured in. Rust places a page against the window's content
  * area, which on macOS can reach up under the title bar; comparing the two heights is what tells
  * it how far apart the two are, without either side hard-coding a title bar.
@@ -24,11 +40,18 @@ function bounds(rect: Rect): Rect & { viewport: number } {
  * and nothing else can reach them, so this runs before the first tab of a session.
  */
 export function browserReset(): Promise<void> {
+  live.clear();
   return invoke("browser_reset");
 }
 
 export function browserOpen(tabId: string, url: string, rect: Rect): Promise<void> {
-  return invoke("browser_open", { label: labelOf(tabId), url, at: bounds(rect) });
+  live.add(tabId);
+  return invoke<void>("browser_open", { label: labelOf(tabId), url, at: bounds(rect) }).catch(
+    (cause: unknown) => {
+      live.delete(tabId);
+      throw cause;
+    },
+  );
 }
 
 export function browserBounds(tabId: string, rect: Rect): Promise<void> {
@@ -44,6 +67,7 @@ export function browserHide(tabId: string): Promise<void> {
 }
 
 export function browserClose(tabId: string): Promise<void> {
+  live.delete(tabId);
   return invoke("browser_close", { label: labelOf(tabId) });
 }
 
