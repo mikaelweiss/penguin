@@ -37,6 +37,9 @@ const runs = new Map<string, Watched>();
 const prompts: Prompt[] = [];
 let presented: Prompt | undefined;
 
+/** What the whole tree spent, summed from every run's usage notes. */
+const spent = { turns: 0, tokens: 0, usd: 0, priced: false };
+
 const rootId = runId();
 runs.set(rootId, { id: rootId, label: "", offset: 0, pid: undefined, listening: false, done: false });
 
@@ -94,6 +97,19 @@ function consume(watched: Watched, entry: Record<string, unknown>): void {
   }
   if (entry["listening"] === true) watched.listening = true;
   if (entry["listening"] === false) watched.listening = false;
+  const usage = entry["usage"];
+  if (usage !== null && typeof usage === "object") {
+    const counted = usage as Record<string, unknown>;
+    const number = (key: string): number =>
+      typeof counted[key] === "number" ? (counted[key] as number) : 0;
+    spent.turns += 1;
+    spent.tokens += number("input") + number("cacheRead") + number("cacheWrite") + number("output");
+    if (typeof counted["usd"] === "number") {
+      spent.usd += counted["usd"] as number;
+      spent.priced = true;
+    }
+    return;
+  }
   const args = Array.isArray(entry["args"]) ? (entry["args"] as unknown[]) : [];
   if (entry["call"] === "view.show" && entry["pending"] === true) {
     out.write(`${prefix(watched)}${String(args[0])}\n`);
@@ -234,6 +250,10 @@ try {
   });
   drain();
   out.write(`\n${JSON.stringify(result, null, 2)}\n`);
+  if (spent.turns > 0) {
+    const dollars = spent.priced ? `, $${spent.usd.toFixed(2)}` : "";
+    out.write(`\nspent: ${spent.turns} turns, ${spent.tokens.toLocaleString()} tokens${dollars}\n`);
+  }
   process.exit(0);
 } catch (error) {
   drain();

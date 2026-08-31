@@ -48,8 +48,8 @@ import { useRunTree } from "@/hooks/use-run-tree";
 import { useWindowBackground } from "@/hooks/use-window-background";
 import { useWorkflowIndex } from "@/hooks/use-workflow-index";
 import { autoShows, notificationSound, openIn } from "@/lib/settings";
-import { findRun, subtree } from "@/lib/runs";
-import type { Project } from "@/lib/runs";
+import { costLabel, findRun, subtree, subtreeCost } from "@/lib/runs";
+import type { Project, Run } from "@/lib/runs";
 import type { Workflow } from "@/lib/workflows";
 
 type Starting = {
@@ -57,6 +57,20 @@ type Starting = {
   /** Set when the palette already picked the workflow, so only its params are left. */
   workflow?: Workflow;
 };
+
+/** What the run's tree spent, and the run's own share when its children spent too. */
+function RunSpend({ run }: { run: Run }) {
+  const tree = costLabel(subtreeCost(run));
+  if (tree === undefined) return null;
+  const own = costLabel(run.cost);
+  const detail = own !== undefined && own !== tree ? ` (this run ${own})` : "";
+  return (
+    <div className="hidden shrink-0 text-xs text-muted-foreground tabular-nums md:block">
+      {tree}
+      {detail}
+    </div>
+  );
+}
 
 export function App() {
   useWindowBackground();
@@ -220,6 +234,7 @@ export function App() {
                 {selected.run.dir}
               </div>
             ) : null}
+            {selected ? <RunSpend run={selected.run} /> : null}
             <span className="flex-1" />
             <PanelButton
               label="Toggle browser"

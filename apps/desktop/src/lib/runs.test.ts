@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
 
-import { blockedOn, isIdle, needsYouNotice, newlyBlocked, nextView, toProjects } from "@/lib/runs";
+import {
+  blockedOn,
+  costLabel,
+  isIdle,
+  needsYouNotice,
+  newlyBlocked,
+  nextView,
+  subtreeCost,
+  toProjects,
+} from "@/lib/runs";
 import type { Ask, Auth, Follow, Project, Run, RunFile, RunStatus } from "@/lib/runs";
 
 type Sketch = {
@@ -270,4 +279,31 @@ test("a run that ended while paused is not shown as waiting", () => {
 
   expect(ended.status).toBe("stopped");
   expect(ended.paused).toBeUndefined();
+});
+
+test("usage notes sum into the run's cost, and a child's spend joins the subtree's", () => {
+  const spent = only([
+    live(
+      { at: "t2", usage: { adapter: "claude", session: "s", input: 10, cacheRead: 100, cacheWrite: 5, output: 20, usd: 0.5 } },
+      { at: "t3", usage: { adapter: "claude", session: "s", input: 1, cacheRead: 200, cacheWrite: 0, output: 2, usd: 0.25 } },
+    ),
+  ]);
+  expect(spent.cost).toEqual({ turns: 2, input: 11, cacheRead: 300, cacheWrite: 5, output: 22, usd: 0.75 });
+  expect(costLabel(spent.cost)).toBe("$0.75");
+
+  const child: Run = { ...spent, id: "child", children: [], cost: { turns: 1, input: 1, cacheRead: 1, cacheWrite: 1, output: 1, usd: 0.05 } };
+  const parent: Run = { ...spent, id: "parent", children: [child] };
+  expect(subtreeCost(parent)).toEqual({ turns: 3, input: 12, cacheRead: 301, cacheWrite: 6, output: 23, usd: 0.8 });
+});
+
+test("a run with no usage notes has no cost, and a tokens-only note keeps usd unknown", () => {
+  expect(only([live()]).cost).toBeUndefined();
+  expect(costLabel(undefined)).toBeUndefined();
+
+  const counted = only([
+    live({ at: "t2", usage: { adapter: "codex", session: "s", input: 1500, cacheRead: 0, cacheWrite: 0, output: 500 } }),
+  ]);
+  expect(counted.cost).toEqual({ turns: 1, input: 1500, cacheRead: 0, cacheWrite: 0, output: 500 });
+  expect(counted.cost?.usd).toBeUndefined();
+  expect(costLabel(counted.cost)).toBe("2k tok");
 });

@@ -77,6 +77,16 @@ export type Paused = {
 /** One plain-text value the run was started with. */
 export type RunInput = { name: string; text: string };
 
+/** What a run's agent turns spent, summed from its usage notes. usd is unknown until a note priced one. */
+export type Cost = {
+  turns: number;
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+  usd?: number;
+};
+
 
 export type Run = {
   id: string;
@@ -91,6 +101,8 @@ export type Run = {
   problem?: string;
   /** The run is waiting on view.listen, so it can take a message. */
   listening: boolean;
+  /** This run's own spend. Absent when no agent turn reported any. */
+  cost?: Cost;
   state?: RunState;
   input: RunInput[];
   output: TranscriptItem[];
@@ -125,6 +137,44 @@ export function isIdle(run: Run): boolean {
 /** A run and every run inside it, outermost first, the order stopping sends them in. */
 export function subtree(run: Run): string[] {
   return [run.id, ...run.children.flatMap(subtree)];
+}
+
+function addCost(total: Cost | undefined, more: Cost | undefined): Cost | undefined {
+  if (more === undefined) return total;
+  if (total === undefined) return { ...more };
+  const usd =
+    total.usd === undefined && more.usd === undefined
+      ? undefined
+      : Math.round(((total.usd ?? 0) + (more.usd ?? 0)) * 1e6) / 1e6;
+  return {
+    turns: total.turns + more.turns,
+    input: total.input + more.input,
+    cacheRead: total.cacheRead + more.cacheRead,
+    cacheWrite: total.cacheWrite + more.cacheWrite,
+    output: total.output + more.output,
+    ...(usd === undefined ? {} : { usd }),
+  };
+}
+
+/** What the run and every run inside it spent. Absent when none of them reported any. */
+export function subtreeCost(run: Run): Cost | undefined {
+  return run.children.reduce<Cost | undefined>(
+    (total, child) => addCost(total, subtreeCost(child)),
+    run.cost,
+  );
+}
+
+function tokens(count: number): string {
+  if (count < 1000) return `${count}`;
+  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+  return `${(count / 1_000_000).toFixed(1)}M`;
+}
+
+/** The figure a row shows: dollars when any turn was priced, else the tokens sent to the model. */
+export function costLabel(cost: Cost | undefined): string | undefined {
+  if (cost === undefined) return undefined;
+  if (cost.usd !== undefined) return cost.usd < 0.01 && cost.usd > 0 ? "<$0.01" : `$${cost.usd.toFixed(2)}`;
+  return `${tokens(cost.input + cost.cacheRead + cost.cacheWrite + cost.output)} tok`;
 }
 
 /** The first run inside this one waiting on an answer, and the ids to expand to reach it. */
@@ -363,6 +413,30 @@ function pausedOf(notes: Entry[]): Paused | undefined {
   return { reason: text(held["reason"]) ?? "", at: text(last?.["at"]) ?? "" };
 }
 
+function number(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** The run's own spend, one usage note per agent attempt. */
+function costOf(notes: Entry[]): Cost | undefined {
+  let total: Cost | undefined;
+  for (const note of notes) {
+    const usage = note["usage"];
+    if (usage === null || typeof usage !== "object") continue;
+    const spent = usage as Record<string, unknown>;
+    const usd = spent["usd"];
+    total = addCost(total, {
+      turns: 1,
+      input: number(spent["input"]),
+      cacheRead: number(spent["cacheRead"]),
+      cacheWrite: number(spent["cacheWrite"]),
+      output: number(spent["output"]),
+      ...(typeof usd === "number" ? { usd } : {}),
+    });
+  }
+  return total;
+}
+
 /** The engine's complaint about the last answer, when it came after this question. */
 function problemOf(entries: Entry[], waiting: Entry): string | undefined {
   const refused = entries.slice(entries.indexOf(waiting)).findLast((entry) => "rejected" in entry);
@@ -539,6 +613,7 @@ function place(file: RunFile): Placed | undefined {
   const paused = status === "running" ? pausedOf(notes) : undefined;
   const listening = status === "running" && heard?.["listening"] === true;
   const state = status === "running" ? stateOf(file.entries) : undefined;
+  const cost = costOf(notes);
 
   return {
     run: {
@@ -551,6 +626,7 @@ function place(file: RunFile): Placed | undefined {
       ...(paused === undefined ? {} : { paused }),
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
+      ...(cost === undefined ? {} : { cost }),
       ...(state === undefined ? {} : { state }),
       input: inputOf(head),
       output: outputOf(file.entries),
