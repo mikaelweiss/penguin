@@ -5,10 +5,11 @@ export const PANEL_GRAB = { coarse: 24, fine: 14 } as const;
 
 /**
  * The divider between two panels. Stock shadcn leaves it a hairline that never reacts, so the
- * band lights up under the pointer, while it is dragged, and when a key focuses it.
+ * band lights up under the pointer, while it is dragged, and when a key focuses it. The band
+ * reaches into both panels, and panel content stacks itself, so it needs a layer of its own.
  */
 export function PanelHandle() {
   return (
-    <ResizableHandle className="after:w-1.5 after:rounded-full after:transition-colors aria-[orientation=horizontal]:after:h-1.5 focus-visible:after:bg-ring data-[separator=hover]:after:bg-ring data-[separator=active]:after:bg-primary" />
+    <ResizableHandle className="z-10 after:w-1.5 after:rounded-full after:transition-colors aria-[orientation=horizontal]:after:h-1.5 focus-visible:after:bg-ring data-[separator=hover]:after:bg-ring data-[separator=active]:after:bg-primary" />
   );
 }

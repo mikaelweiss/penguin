@@ -146,7 +146,10 @@ export function BrowserPanel({
       />
 
       {showingPage ? (
-        <div ref={mount} className="min-h-0 flex-1 bg-background" />
+        // A native page draws over the DOM, so it stops short of the resize bands that reach in.
+        <div className="flex min-h-0 flex-1 flex-col bg-background pb-[3px] pl-[3px]">
+          <div ref={mount} className="min-h-0 flex-1" />
+        </div>
       ) : (
         <Landing looking={showing} onOpen={onOpen} />
       )}
