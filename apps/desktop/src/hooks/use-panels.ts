@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
-export type PanelName = "terminal" | "browser" | "diff";
+export type PanelName = "terminal" | "browser" | "diff" | "info";
 
 /** The browser and the diff share the right column, so the browser's size is a height. */
 export const PANEL_DEFAULTS = { terminal: 224, right: 460, browser: 420 } as const;
@@ -11,6 +11,7 @@ export const PANEL_MINIMUMS = {
   right: 320,
   browser: 160,
   diff: 160,
+  info: 160,
 } as const;
 
 type Sized = "terminal" | "right" | "browser";
@@ -23,7 +24,7 @@ type Panels = {
 };
 
 const SHUT: Panels = {
-  open: { terminal: false, browser: false, diff: false },
+  open: { terminal: false, browser: false, diff: false, info: false },
   full: undefined,
   size: {},
 };

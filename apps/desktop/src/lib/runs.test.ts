@@ -26,6 +26,8 @@ function run(sketch: Sketch): Run {
     name: sketch.id,
     status: sketch.status ?? "running",
     dir: "/work",
+    cwd: "/work",
+    at: "t1",
     ...(sketch.ask === undefined
       ? {}
       : { ask: { prompt: "which one?", schema: undefined, problem: undefined, ...sketch.ask } }),
@@ -306,4 +308,67 @@ test("a run with no usage notes has no cost, and a tokens-only note keeps usd un
   expect(counted.cost).toEqual({ turns: 1, input: 1500, cacheRead: 0, cacheWrite: 0, output: 500 });
   expect(counted.cost?.usd).toBeUndefined();
   expect(costLabel(counted.cost)).toBe("2k tok");
+});
+
+test("the last pr.get and issue.get settle what the info panel shows, stamped with when", () => {
+  const seen = only([
+    live(
+      {
+        at: "t2",
+        call: "github.pr.get",
+        args: ["12"],
+        id: "c1",
+        elapsedMs: 5,
+        outcome: {
+          ok: true,
+          pr: { number: 12, title: "Fix it", state: "OPEN", isDraft: true, isInMergeQueue: false, url: "https://github.com/o/r/pull/12" },
+        },
+      },
+      {
+        at: "t3",
+        call: "github.pr.get",
+        args: ["12"],
+        id: "c2",
+        elapsedMs: 5,
+        outcome: {
+          ok: true,
+          pr: { number: 12, title: "Fix it", state: "MERGED", isDraft: false, isInMergeQueue: false, url: "https://github.com/o/r/pull/12" },
+        },
+      },
+      {
+        at: "t4",
+        call: "jira.issue.get",
+        args: ["SS-9"],
+        id: "c3",
+        elapsedMs: 5,
+        outcome: { ok: true, issue: { key: "SS-9", summary: "Do the thing", status: "In Progress", url: "https://x.atlassian.net/browse/SS-9" } },
+      },
+    ),
+  ]);
+  expect(seen.pr).toEqual({
+    number: 12,
+    title: "Fix it",
+    state: "MERGED",
+    isDraft: false,
+    isInMergeQueue: false,
+    url: "https://github.com/o/r/pull/12",
+    at: "t3",
+  });
+  expect(seen.ticket).toEqual({
+    source: "jira",
+    name: "SS-9",
+    title: "Do the thing",
+    status: "In Progress",
+    url: "https://x.atlassian.net/browse/SS-9",
+    at: "t4",
+  });
+});
+
+test("a run that read no pr and no ticket shows neither, and keeps where it started", () => {
+  const bare = only([live({ at: "t2", dir: "/worktrees/thing" })]);
+  expect(bare.pr).toBeUndefined();
+  expect(bare.ticket).toBeUndefined();
+  expect(bare.dir).toBe("/worktrees/thing");
+  expect(bare.cwd).toBe("/work");
+  expect(bare.at).toBe("t1");
 });

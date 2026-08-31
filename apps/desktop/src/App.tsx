@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { FileDiffIcon, GlobeIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
+import { FileDiffIcon, GlobeIcon, InfoIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
 import { Button } from "@workspace/ui/components/button";
@@ -23,6 +23,7 @@ import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { DiffPanel } from "@/components/diff-panel";
 import { DiffWorkerPool } from "@/components/diff-worker-pool";
+import { InfoPanel } from "@/components/info-panel";
 import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { RunAuth } from "@/components/run-auth";
@@ -48,8 +49,8 @@ import { useRunTree } from "@/hooks/use-run-tree";
 import { useWindowBackground } from "@/hooks/use-window-background";
 import { useWorkflowIndex } from "@/hooks/use-workflow-index";
 import { autoShows, notificationSound, openIn } from "@/lib/settings";
-import { costLabel, findRun, subtree, subtreeCost } from "@/lib/runs";
-import type { Project, Run } from "@/lib/runs";
+import { findRun, subtree } from "@/lib/runs";
+import type { Project } from "@/lib/runs";
 import type { Workflow } from "@/lib/workflows";
 
 type Starting = {
@@ -57,20 +58,6 @@ type Starting = {
   /** Set when the palette already picked the workflow, so only its params are left. */
   workflow?: Workflow;
 };
-
-/** What the run's tree spent, and the run's own share when its children spent too. */
-function RunSpend({ run }: { run: Run }) {
-  const tree = costLabel(subtreeCost(run));
-  if (tree === undefined) return null;
-  const own = costLabel(run.cost);
-  const detail = own !== undefined && own !== tree ? ` (this run ${own})` : "";
-  return (
-    <div className="hidden shrink-0 text-xs text-muted-foreground tabular-nums md:block">
-      {tree}
-      {detail}
-    </div>
-  );
-}
 
 export function App() {
   useWindowBackground();
@@ -96,11 +83,13 @@ export function App() {
   const showTerminal = panels.open("terminal") && run !== undefined;
   const showBrowser = panels.open("browser") && run !== undefined;
   const showDiff = panels.open("diff") && run !== undefined;
+  const showInfo = panels.open("info") && run !== undefined;
   const fullTerminal = panels.full === "terminal" && showTerminal;
   const fullBrowser = panels.full === "browser" && showBrowser;
   const fullDiff = panels.full === "diff" && showDiff;
-  const fullRight = fullBrowser || fullDiff;
-  const showRight = showBrowser || showDiff;
+  const fullInfo = panels.full === "info" && showInfo;
+  const fullRight = fullBrowser || fullDiff || fullInfo;
+  const showRight = showBrowser || showDiff || showInfo;
 
   const show = (id: string) => {
     const node = findRun(projects, id);
@@ -234,8 +223,15 @@ export function App() {
                 {selected.run.dir}
               </div>
             ) : null}
-            {selected ? <RunSpend run={selected.run} /> : null}
             <span className="flex-1" />
+            <PanelButton
+              label="Toggle info"
+              showing={showInfo}
+              disabled={run === undefined}
+              onClick={() => panels.toggle("info")}
+            >
+              <InfoIcon />
+            </PanelButton>
             <PanelButton
               label="Toggle browser"
               showing={showBrowser}
@@ -323,7 +319,28 @@ export function App() {
                           className="min-h-0 flex-1"
                           onLayoutChanged={panels.onDragged}
                         >
-                          {showBrowser && !fullDiff ? (
+                          {showInfo && !fullBrowser && !fullDiff ? (
+                            <ResizablePanel
+                              key="info"
+                              id="info"
+                              minSize={PANEL_MINIMUMS.info}
+                              className="flex min-h-0 min-w-0 flex-col"
+                            >
+                              <InfoPanel
+                                run={run}
+                                wrote={wrote}
+                                full={fullInfo}
+                                onOpenUrl={(url) => followLink(run.id, url)}
+                                onShowDiff={() => panels.show("diff")}
+                                onToggleFull={() => panels.toggleFull("info")}
+                                onClose={() => panels.close("info")}
+                              />
+                            </ResizablePanel>
+                          ) : null}
+                          {showInfo && (showBrowser || showDiff) && !fullRight ? (
+                            <ResizableHandle key="info-handle" />
+                          ) : null}
+                          {showBrowser && !fullDiff && !fullInfo ? (
                             <ResizablePanel
                               key="browser"
                               id="browser"
@@ -350,7 +367,7 @@ export function App() {
                           {showBrowser && showDiff && !fullRight ? (
                             <ResizableHandle key="stack-handle" />
                           ) : null}
-                          {showDiff && !fullBrowser ? (
+                          {showDiff && !fullBrowser && !fullInfo ? (
                             <ResizablePanel
                               key="diff"
                               id="diff"

@@ -50,7 +50,7 @@ import { cn } from "@workspace/ui/lib/utils";
 import { RenameRunDialog } from "@/components/rename-run-dialog";
 import type { RunActions } from "@/hooks/use-run-actions";
 import type { RunTree } from "@/hooks/use-run-tree";
-import { costLabel, findBlocked, isIdle, isLive, needsYou, subtreeCost, visibleRuns } from "@/lib/runs";
+import { findBlocked, isIdle, isLive, needsYou, visibleRuns } from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
 
 function statusColor(run: Run): string {
@@ -88,7 +88,6 @@ function RunRow({
 }: RunRowProps) {
   const { run, depth } = node;
   const carried = collapsed && !needsYou(run) ? findBlocked(run) : undefined;
-  const spent = costLabel(subtreeCost(run));
 
   return (
     <ContextMenu>
@@ -125,9 +124,6 @@ function RunRow({
           >
             <span className="w-(--run-indent) shrink-0" />
             <span className="min-w-0 flex-1 truncate">{run.name}</span>
-            {spent === undefined ? null : (
-              <span className="ml-2 shrink-0 text-muted-foreground tabular-nums">{spent}</span>
-            )}
             <span className="sr-only">{statusLabel(run)}</span>
           </SidebarMenuButton>
 

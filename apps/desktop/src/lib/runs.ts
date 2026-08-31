@@ -77,6 +77,27 @@ export type Paused = {
 /** One plain-text value the run was started with. */
 export type RunInput = { name: string; text: string };
 
+/** The pull request as the run last read it. Stale once the run stops looking, so `at` says when. */
+export type PrState = {
+  number?: number;
+  title?: string;
+  state: string;
+  isDraft: boolean;
+  isInMergeQueue: boolean;
+  url: string;
+  at: string;
+};
+
+/** The ticket as the run last read it: a jira issue or a github issue. */
+export type TicketState = {
+  source: "jira" | "github";
+  name: string;
+  title?: string;
+  status: string;
+  url?: string;
+  at: string;
+};
+
 /** What a run's agent turns spent, summed from its usage notes. usd is unknown until a note priced one. */
 export type Cost = {
   turns: number;
@@ -92,7 +113,12 @@ export type Run = {
   id: string;
   name: string;
   status: RunStatus;
+  /** Where the run works: the worktree it moved into, else where it was invoked. */
   dir: string;
+  /** The folder the run was invoked from, which a worktree run leaves behind. */
+  cwd: string;
+  /** When the run started. */
+  at: string;
   ask?: Ask;
   auth?: Auth;
   /** The agent hit a usage limit and the run is waiting for it to reset. */
@@ -103,6 +129,10 @@ export type Run = {
   listening: boolean;
   /** This run's own spend. Absent when no agent turn reported any. */
   cost?: Cost;
+  /** The pull request the run last read, when it read one. */
+  pr?: PrState;
+  /** The ticket the run last read, when it read one. */
+  ticket?: TicketState;
   state?: RunState;
   input: RunInput[];
   output: TranscriptItem[];
@@ -437,6 +467,68 @@ function costOf(notes: Entry[]): Cost | undefined {
   return total;
 }
 
+function settled(entries: Entry[], call: string): Entry | undefined {
+  return entries.findLast(
+    (entry) => entry["call"] === call && entry["pending"] !== true && "outcome" in entry,
+  );
+}
+
+function outcomeOf(entry: Entry | undefined): Record<string, unknown> | undefined {
+  const outcome = entry?.["outcome"];
+  if (outcome === null || typeof outcome !== "object") return undefined;
+  return outcome as Record<string, unknown>;
+}
+
+/** The pull request as the run's last github.pr.get read it. */
+function prOf(entries: Entry[]): PrState | undefined {
+  const entry = settled(entries, "github.pr.get");
+  const found = outcomeOf(entry)?.["pr"];
+  if (found === null || typeof found !== "object") return undefined;
+  const pr = found as Record<string, unknown>;
+  const state = text(pr["state"]);
+  const url = text(pr["url"]);
+  if (state === undefined || url === undefined) return undefined;
+  return {
+    ...(typeof pr["number"] === "number" ? { number: pr["number"] } : {}),
+    ...(text(pr["title"]) === undefined ? {} : { title: text(pr["title"]) }),
+    state,
+    isDraft: pr["isDraft"] === true,
+    isInMergeQueue: pr["isInMergeQueue"] === true,
+    url,
+    at: text(entry?.["at"]) ?? "",
+  };
+}
+
+/** The ticket as the run's last jira.issue.get or github.issue.get read it. */
+function ticketOf(entries: Entry[]): TicketState | undefined {
+  const jira = settled(entries, "jira.issue.get");
+  const github = settled(entries, "github.issue.get");
+  const entry = (text(jira?.["at"]) ?? "") >= (text(github?.["at"]) ?? "") && jira !== undefined ? jira : github;
+  if (entry === undefined) return undefined;
+  const source = entry === jira ? "jira" : "github";
+  const found = outcomeOf(entry)?.["issue"];
+  if (found === null || typeof found !== "object") return undefined;
+  const issue = found as Record<string, unknown>;
+  const name =
+    source === "jira"
+      ? text(issue["key"])
+      : typeof issue["number"] === "number"
+        ? `#${issue["number"]}`
+        : undefined;
+  const status = text(issue["status"]) ?? text(issue["state"]);
+  if (name === undefined || status === undefined) return undefined;
+  const title = text(issue["summary"]) ?? text(issue["title"]);
+  const url = text(issue["url"]);
+  return {
+    source,
+    name,
+    ...(title === undefined ? {} : { title }),
+    status,
+    ...(url === undefined ? {} : { url }),
+    at: text(entry["at"]) ?? "",
+  };
+}
+
 /** The engine's complaint about the last answer, when it came after this question. */
 function problemOf(entries: Entry[], waiting: Entry): string | undefined {
   const refused = entries.slice(entries.indexOf(waiting)).findLast((entry) => "rejected" in entry);
@@ -614,6 +706,8 @@ function place(file: RunFile): Placed | undefined {
   const listening = status === "running" && heard?.["listening"] === true;
   const state = status === "running" ? stateOf(file.entries) : undefined;
   const cost = costOf(notes);
+  const pr = prOf(file.entries);
+  const ticket = ticketOf(file.entries);
 
   return {
     run: {
@@ -621,12 +715,16 @@ function place(file: RunFile): Placed | undefined {
       name: text(renamed?.["name"]) ?? workflowName(workflow),
       status,
       dir: text(moved?.["dir"]) ?? cwd,
+      cwd,
+      at: text(head["at"]) ?? "",
       ...(ask === undefined ? {} : { ask }),
       ...(auth === undefined ? {} : { auth }),
       ...(paused === undefined ? {} : { paused }),
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
       ...(cost === undefined ? {} : { cost }),
+      ...(pr === undefined ? {} : { pr }),
+      ...(ticket === undefined ? {} : { ticket }),
       ...(state === undefined ? {} : { state }),
       input: inputOf(head),
       output: outputOf(file.entries),
