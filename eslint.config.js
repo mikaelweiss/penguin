@@ -57,8 +57,16 @@ export default [
         {
           patterns: [
             {
-              group: ["node:*", "**/host*", "**/catalog/**", "**/paths*", "**/run*", "**/trace*"],
-              message: "core imports only zod and itself",
+              group: [
+                "node:*",
+                "!node:async_hooks",
+                "**/host*",
+                "**/catalog/**",
+                "**/paths*",
+                "**/run*",
+                "**/trace*",
+              ],
+              message: "core imports only zod, async context, and itself",
             },
           ],
         },

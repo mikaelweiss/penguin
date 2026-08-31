@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import { Fault, messageOf } from "./errors.ts";
 import type { View } from "./view.ts";
@@ -12,6 +13,18 @@ import type { View } from "./view.ts";
  */
 
 const FIXES = 3;
+
+const bare = new AsyncLocalStorage<boolean>();
+
+/**
+ * Runs the job with the engine's fault gate off, so a Fault reaches the caller
+ * to handle itself. For the rare call whose failure the workflow genuinely
+ * answers differently: a best-effort teardown, a freshness probe inside a
+ * watch. Everything else belongs outside attempt, where the gate does its job.
+ */
+export function attempt<T>(job: () => Promise<T>): Promise<T> {
+  return bare.run(true, job);
+}
 
 const Fixed = z.object({
   fixed: z.boolean().describe("true when the cause is cleared and the call is worth another try"),
@@ -125,6 +138,7 @@ export function createRescue(world: World): <A>(role: string, api: A) => A {
     return (...args: unknown[]): unknown => {
       const first = fn.apply(self, args);
       if (!(first instanceof Promise)) return first;
+      if (bare.getStore() === true) return first;
       return (async () => {
         let agentTries = 0;
         let result = first;

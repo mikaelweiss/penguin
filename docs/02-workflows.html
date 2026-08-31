@@ -235,8 +235,10 @@ if (heard !== undefined) {
 }</code></pre>
 
     <p>
-      Catch a <code>Fault</code> only when this workflow genuinely wants different handling, such
-      as a teardown that must not block the run's return, and say why.
+      The rare call whose failure this workflow answers itself, a best-effort teardown or a
+      freshness probe inside a watch, runs inside <code>attempt(() =&gt; ...)</code>, which turns
+      the gate off for that call so the <code>Fault</code> reaches the caller to catch. Say why,
+      each time.
     </p>
 
     <p>Keep return values JSON-serializable. A frontend other than a terminal has to show them.</p>

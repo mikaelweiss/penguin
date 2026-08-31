@@ -56,7 +56,7 @@ test("stage, commit, dirty, and head walk the happy path", async () => {
   fs.writeFileSync(path.join(dir, "a.txt"), "one\n");
   expect((await vcs.dirty()).dirty).toBe(true);
   await vcs.stage(["a.txt"]);
-  await vcs.commit("test: first");
+  expect((await vcs.commit("test: first")).committed).toBe(true);
   expect((await vcs.dirty()).dirty).toBe(false);
   const head = await vcs.head();
   expect(head.detached).toBe(false);
@@ -72,9 +72,21 @@ test("a commit message with quotes survives intact", async () => {
   expect(await git(host, ["log", "-1", "--format=%s"])).toBe(message);
 });
 
-test("a commit git refuses is a fault the agent gets first", async () => {
-  const { vcs } = await repo();
-  const failing = vcs.commit("test: nothing staged");
+test("a commit with nothing to commit is an answer, not a fault", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "base.txt", "base");
+  expect((await vcs.commit("test: nothing staged")).committed).toBe(false);
+});
+
+test("a commit a hook refuses is a fault the agent gets first", async () => {
+  const { dir, vcs } = await repo();
+  const hook = path.join(dir, ".git", "hooks", "pre-commit");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, "#!/bin/sh\necho the hook objects\nexit 1\n");
+  fs.chmodSync(hook, 0o755);
+  fs.writeFileSync(path.join(dir, "a.txt"), "one\n");
+  await vcs.stage(["a.txt"]);
+  const failing = vcs.commit("test: refused");
   await expect(failing).rejects.toThrow(Fault);
   await expect(failing).rejects.toMatchObject({ fix: "agent" });
 });

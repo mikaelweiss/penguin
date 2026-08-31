@@ -1,4 +1,4 @@
-import { messageOf, workflow } from "penguin";
+import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
 import { narrate, narrated, retried } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
@@ -159,9 +159,11 @@ export default workflow({
       if (head === "") return "unread";
       // A freshness read stays best-effort: a fault here must not hold the review at a gate.
       try {
-        await vcs.fetch(ref, { cwd: dir });
-        const now = await vcs.sha("FETCH_HEAD", { cwd: dir });
-        return now.sha === head ? "same" : "moved";
+        return await attempt(async () => {
+          await vcs.fetch(ref, { cwd: dir });
+          const now = await vcs.sha("FETCH_HEAD", { cwd: dir });
+          return now.sha === head ? "same" : "moved";
+        });
       } catch {
         return "unread";
       }
@@ -346,8 +348,9 @@ export default workflow({
         if (change.kind === "comments") notes = notes.concat(change.comments);
       }
     } finally {
+      // Best-effort teardown: the review's outcome must not wait on a gate about a folder.
       try {
-        await vcs.worktree.remove(dir);
+        await attempt(() => vcs.worktree.remove(dir));
       } catch (error) {
         await view.show(`the worktree stayed: ${messageOf(error)}`);
       }

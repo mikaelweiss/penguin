@@ -29,7 +29,11 @@ export default workflow({
     }
 
     await vcs.stage(written.files);
-    await vcs.commit(written.message);
+    const wrote = await vcs.commit(written.message);
+    if (!wrote.committed) {
+      await view.show("the picked files held no changes");
+      return { committed: false, message: written.message };
+    }
     await view.show(`committed: ${written.message.split("\n")[0]}`);
     return { committed: true, message: written.message };
   },

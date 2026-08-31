@@ -147,10 +147,19 @@ export default adapter({
         const done = await git(["add", "--", ...files], options?.cwd);
         if (done.code !== 0) throw new Fault(done.stderr.trim());
       },
-      /** Commit hooks are what usually refuse one, and those are the agent's to clear. */
-      async commit(message: string, options?: { cwd?: string }): Promise<void> {
+      /**
+       * `committed: false` means there was nothing to commit, which a resume
+       * reads as its no-op. Hooks are what usually refuse a real commit, and
+       * those are the agent's to clear.
+       */
+      async commit(message: string, options?: { cwd?: string }): Promise<{ committed: boolean }> {
         const done = await git(["commit", "-m", message], options?.cwd);
-        if (done.code !== 0) throw new Fault(saidOf(done), { fix: "agent" });
+        if (done.code === 0) return { committed: true };
+        const said = saidOf(done);
+        if (/nothing to commit|no changes added to commit|nothing added to commit/i.test(said)) {
+          return { committed: false };
+        }
+        throw new Fault(said, { fix: "agent" });
       },
       async dirty(options?: { cwd?: string }): Promise<{ dirty: boolean }> {
         return { dirty: await dirtyOf(options?.cwd) };

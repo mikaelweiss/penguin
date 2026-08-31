@@ -104,8 +104,9 @@ which holds the run at a gate instead of ending it. A fault built with
 what stopped the call and answers retry, stop, or an instruction for the
 fixer. Retry runs the same call again, so adapter operations converge on a
 goal (`vcs.sync`, `github.pr.ensure`) rather than fire a command once. A
-workflow that wants different handling catches the `Fault` itself; everything
-it does not catch is the engine's.
+workflow that wants different handling wraps the call in `attempt(() => ...)`,
+which turns the gate off for that call so the `Fault` reaches its own catch;
+everything outside an attempt is the engine's.
 
 One role, many implementations. A workflow calls `ctx.vcs.commit(...)` and
 does not care whether git or jj answers. When more than one implementation of

@@ -288,6 +288,11 @@
             <td>How <code>call</code> rejects when a child was stopped, or died silently.</td>
           </tr>
           <tr>
+            <td><code>attempt</code></td>
+            <td><code>(job: () =&gt; Promise&lt;T&gt;) =&gt; Promise&lt;T&gt;</code></td>
+            <td>Runs the job with the fault gate off, so the caller handles the <code>Fault</code> itself.</td>
+          </tr>
+          <tr>
             <td><code>isWithdrawn</code></td>
             <td><code>(value: unknown) =&gt; value is Withdrawn</code></td>
             <td>Whether an ask's answer is its premise dying, so the caller re-reads the world.</td>

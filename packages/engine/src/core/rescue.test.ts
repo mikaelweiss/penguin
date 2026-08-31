@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Fault } from "./errors.ts";
-import { createRescue, worldOf } from "./rescue.ts";
+import { attempt, createRescue, worldOf } from "./rescue.ts";
 
 type Fixes = { fixed: boolean; notes: string }[];
 
@@ -117,6 +117,21 @@ test("a run with no view has nobody to ask, so the fault ends it", async () => {
 
   await expect(wrap("vcs", fn.api).work()).rejects.toThrow("the remote refused");
   expect(fn.calls()).toBe(1);
+});
+
+test("attempt turns the gate off, so the fault reaches the caller itself", async () => {
+  const { asked, wrap } = harness({ answers: ["retry"] });
+  const fn = failing([new Fault("the remote refused"), new Fault("the remote refused")]);
+  const api = wrap("vcs", fn.api);
+
+  await expect(attempt(() => api.work())).rejects.toThrow("the remote refused");
+  expect(asked).toHaveLength(0);
+  expect(fn.calls()).toBe(1);
+
+  // Outside attempt, the same call gates as ever.
+  expect(await api.work()).toBe("done");
+  expect(asked).toHaveLength(1);
+  expect(fn.calls()).toBe(3);
 });
 
 test("nested apis and sync handles keep working through the wrap", async () => {
