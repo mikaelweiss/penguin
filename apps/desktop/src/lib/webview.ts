@@ -27,6 +27,20 @@ export function forgetTab(tabId: string): void {
 }
 
 /**
+ * The one page drawn right now. Focus can only be handed back to a page the window is showing,
+ * and a hidden page taking the keyboard would leave it typing into nothing.
+ */
+let onScreen: string | undefined;
+
+export function pageOnScreen(): string | undefined {
+  return onScreen;
+}
+
+export function showsPage(tabId: string | undefined): void {
+  onScreen = tabId;
+}
+
+/**
  * A rect plus the viewport it was measured in. Rust places a page against the window's content
  * area, which on macOS can reach up under the title bar; comparing the two heights is what tells
  * it how far apart the two are, without either side hard-coding a title bar.
@@ -64,6 +78,10 @@ export function browserShow(tabId: string): Promise<void> {
 
 export function browserHide(tabId: string): Promise<void> {
   return invoke("browser_hide", { label: labelOf(tabId) });
+}
+
+export function browserFocus(tabId: string): Promise<void> {
+  return invoke("browser_focus", { label: labelOf(tabId) });
 }
 
 export function browserClose(tabId: string): Promise<void> {

@@ -34,6 +34,7 @@ import { useBrowser } from "@/hooks/use-browser";
 import { useConfig } from "@/hooks/use-config";
 import { useDiffView } from "@/hooks/use-diff-view";
 import { useDirectories } from "@/hooks/use-directories";
+import { useDragKeepsFocus } from "@/hooks/use-drag-keeps-focus";
 import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
 import { useNeedsYou } from "@/hooks/use-needs-you";
@@ -58,6 +59,7 @@ type Starting = {
 
 export function App() {
   useWindowBackground();
+  useDragKeepsFocus();
   const directories = useDirectories();
   const { projects, published, error } = useRuns(directories.dirs, directories.hidden);
   const removing = useRemoveProject(projects, directories);

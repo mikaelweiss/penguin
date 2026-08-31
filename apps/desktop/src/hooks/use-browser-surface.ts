@@ -10,6 +10,7 @@ import {
   browserShow,
   forgetTab,
   liveTabs,
+  showsPage,
   type Rect,
 } from "@/lib/webview";
 
@@ -106,6 +107,12 @@ export function useBrowserSurface({ mount, tabs, active, showing }: Surface): st
       browserHide(id).catch(() => forgetTab(id));
     }
   }, [mount, active, showing]);
+
+  // Which page the window is drawing, for anything that has to give the keyboard back to it.
+  useEffect(() => {
+    showsPage(showing ? active : undefined);
+    return () => showsPage(undefined);
+  }, [active, showing]);
 
   // Nothing measures the placeholder once the panel is gone, so a page left showing would sit over
   // the UI with no way to move it. The pages stay open: it is the panel that left, not the tabs.

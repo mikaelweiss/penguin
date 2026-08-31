@@ -177,6 +177,14 @@ pub fn browser_hide(app: tauri::AppHandle, label: String) -> Result<(), String> 
     webview(&app, &label)?.hide().map_err(|cause| cause.to_string())
 }
 
+/// Gives the keyboard back to a page that lost it to the window's own webview.
+#[tauri::command]
+pub fn browser_focus(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    webview(&app, &label)?
+        .set_focus()
+        .map_err(|cause| cause.to_string())
+}
+
 /// Closing a tab the window never opened is the state the caller wanted, not a failure.
 #[tauri::command]
 pub fn browser_close(app: tauri::AppHandle, label: String) -> Result<(), String> {
