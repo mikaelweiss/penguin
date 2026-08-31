@@ -124,7 +124,7 @@ export default adapter({
   role: "agent",
   name: "copilot",
   description:
-    "runs prompts on the copilot CLI. A session is one conversation: every turn names the same session id, and copilot creates it on the first turn. The CLI takes no schema, so a typed result is asked for in the prompt and read back out of the reply.",
+    "runs prompts on the copilot CLI. A session is one conversation: every turn names the same session id, and copilot creates it on the first turn. The CLI takes no schema, so a typed result is asked for in the prompt and read back out of the reply. Its event stream reports no token usage, so a copilot turn writes no usage note.",
   build: (host) => {
     async function runOnce(
       invocation: Invocation<OpenOptions>,

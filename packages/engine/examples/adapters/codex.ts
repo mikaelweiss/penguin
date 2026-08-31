@@ -4,7 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
 import { modelFor, type ModelMap } from "../helpers/models.ts";
-import { clip, flatten, said, sessions, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import { priced } from "../helpers/prices.ts";
+import {
+  clip,
+  flatten,
+  said,
+  sessions,
+  type Attempt,
+  type Chunk,
+  type Invocation,
+  type Usage,
+} from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -36,12 +46,20 @@ type Item = {
   receiver_thread_ids?: string[];
 };
 
+type TokenUsage = {
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  cache_write_input_tokens?: number;
+  output_tokens?: number;
+};
 type StreamLine = {
   type?: string;
   thread_id?: string;
   item?: Item;
   error?: { message?: string };
   message?: string;
+  /** On turn.completed: the turn's tokens. input_tokens includes the cached ones. */
+  usage?: TokenUsage;
 };
 
 const TOOLS: Record<string, string> = {
@@ -91,6 +109,22 @@ function target(item: Item): string | undefined {
     return blank(item.prompt ?? (item.receiver_thread_ids ?? []).join(", "));
   }
   return undefined;
+}
+
+function count(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function usageOf(tokens: TokenUsage, model: string | undefined): Usage {
+  const cached = count(tokens.cached_input_tokens);
+  const written = count(tokens.cache_write_input_tokens);
+  return {
+    ...(model === undefined ? {} : { model }),
+    input: Math.max(0, count(tokens.input_tokens) - cached - written),
+    cacheRead: cached,
+    cacheWrite: written,
+    output: count(tokens.output_tokens),
+  };
 }
 
 function blank(text: string | undefined): string | undefined {
@@ -242,11 +276,15 @@ export default adapter({
         let buffer = "";
         let message: string | undefined;
         let failed: string | undefined;
+        let usage: Usage | undefined;
         const handle = (line: string): void => {
           const parsed = readJson(line);
           if (!isObject(parsed)) return;
           const event = parsed as StreamLine;
           if (said(event.thread_id)) threads.set(session, event.thread_id);
+          if (event.type === "turn.completed" && event.usage !== undefined) {
+            usage = priced(usageOf(event.usage, model), host.config);
+          }
           if (event.type === "turn.failed") {
             failed = event.error?.message ?? "codex reported a failed turn";
           }
@@ -290,6 +328,7 @@ export default adapter({
         });
         if (buffer.trim() !== "") handle(buffer);
 
+        const spent = usage === undefined ? {} : { usage };
         if (done.code !== 0) {
           const tail = done.stderr.trim().split("\n").at(-1) ?? "";
           return {
@@ -298,13 +337,16 @@ export default adapter({
               tail === ""
                 ? `codex exited with code ${done.code}`
                 : `codex exited with code ${done.code}: ${tail}`,
+            ...spent,
           };
         }
-        if (failed !== undefined) return { ok: false, error: failed };
-        if (schema === undefined) return { ok: true, value: null };
+        if (failed !== undefined) return { ok: false, error: failed, ...spent };
+        if (schema === undefined) return { ok: true, value: null, ...spent };
         const value = message === undefined ? undefined : structured(message);
-        if (value === undefined) return { ok: false, error: "codex returned no structured output" };
-        return { ok: true, value: clean(value, schema, schema) };
+        if (value === undefined) {
+          return { ok: false, error: "codex returned no structured output", ...spent };
+        }
+        return { ok: true, value: clean(value, schema, schema), ...spent };
       } finally {
         if (dir !== undefined) fs.rmSync(dir, { recursive: true, force: true });
       }

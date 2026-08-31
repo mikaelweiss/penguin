@@ -279,11 +279,12 @@ const commit = await turn.value;</code></pre>
 
     <p>
       Tokens are the turn's own. <code>usd</code> is set when the CLI priced the turn (claude,
-      opencode, pi) or when <code>examples/helpers/prices.ts</code> could, from its table or a
-      <code>price-&lt;model&gt;</code> line in <code>~/.penguin/config</code> holding input, cached
-      input, and output dollars per million tokens (codex, cursor). A failed attempt is noted too,
-      since its tokens were spent, so a corrected retry shows as two notes. An adapter whose CLI
-      reports nothing writes nothing, and a reader takes a missing note as unknown, never as free.
+      opencode, pi) or when a <code>price-&lt;model&gt;</code> line in
+      <code>~/.penguin/config</code> holds the model's input, cached input, and output dollars
+      per million tokens, as in <code>price-gpt-5.6-sol 2,0.5,10</code> (codex, cursor, through
+      <code>examples/helpers/prices.ts</code>). A failed attempt is noted too, since its tokens
+      were spent, so a corrected retry shows as two notes. An adapter whose CLI reports nothing
+      writes nothing (copilot), and a reader takes a missing note as unknown, never as free.
       The penguin app sums the notes per run and per tree, and
       <code>bun examples/cost.ts</code> lists runs with their cost, which is how a change to a
       skill or an adapter is checked against the runs before it.

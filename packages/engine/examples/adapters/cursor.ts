@@ -2,7 +2,17 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
 import { modelFor } from "../helpers/models.ts";
-import { flatten, said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import { priced } from "../helpers/prices.ts";
+import {
+  flatten,
+  said,
+  sessions,
+  targetIn,
+  type Attempt,
+  type Chunk,
+  type Invocation,
+  type Usage,
+} from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -11,6 +21,12 @@ type OpenOptions = {
 
 type ContentBlock = { type?: string; text?: string };
 type ToolCall = { args?: unknown };
+type TokenUsage = {
+  input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  output_tokens?: number;
+};
 type StreamLine = {
   type?: string;
   session_id?: unknown;
@@ -19,7 +35,23 @@ type StreamLine = {
   call_id?: unknown;
   tool_call?: Record<string, ToolCall>;
   message?: { content?: ContentBlock[] };
+  /** On the result event, when the CLI counted: the turn's tokens, input already net of the cached ones. */
+  usage?: TokenUsage;
 };
+
+function count(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function usageOf(tokens: TokenUsage, model: string): Usage {
+  return {
+    model,
+    input: count(tokens.input_tokens),
+    cacheRead: count(tokens.cache_read_input_tokens),
+    cacheWrite: count(tokens.cache_creation_input_tokens),
+    output: count(tokens.output_tokens),
+  };
+}
 
 const ASK = "Reply with one JSON object that matches this JSON Schema:";
 
@@ -114,7 +146,8 @@ export default adapter({
       const argv = ["cursor-agent", "-p", "--force", "--output-format", "stream-json", "--trust"];
       const chat = chats.get(session);
       if (chat !== undefined) argv.push("--resume", chat);
-      argv.push("--model", modelFor(options.model, "cursor", {}, host.config) ?? "grok-4.6");
+      const model = modelFor(options.model, "cursor", {}, host.config) ?? "grok-4.6";
+      argv.push("--model", model);
       const prompt =
         schema === undefined
           ? invocation.prompt
@@ -124,6 +157,7 @@ export default adapter({
       let buffer = "";
       let answer = "";
       let failed: string | undefined;
+      let usage: Usage | undefined;
       const handle = (line: string): void => {
         if (line.trim() === "") return;
         let event: StreamLine;
@@ -168,6 +202,7 @@ export default adapter({
             failed = said(event.result) ? event.result : "cursor-agent reported an error";
           }
           if (typeof event.result === "string") answer = event.result;
+          if (event.usage !== undefined) usage = priced(usageOf(event.usage, model), host.config);
         }
       };
 
@@ -185,6 +220,7 @@ export default adapter({
       });
       if (buffer.trim() !== "") handle(buffer);
 
+      const spent = usage === undefined ? {} : { usage };
       if (done.code !== 0) {
         const tail = done.stderr.trim().split("\n").at(-1) ?? "";
         return {
@@ -193,10 +229,11 @@ export default adapter({
             tail === ""
               ? `cursor-agent exited with code ${done.code}`
               : `cursor-agent exited with code ${done.code}: ${tail}`,
+          ...spent,
         };
       }
-      if (failed !== undefined) return { ok: false, error: failed };
-      if (schema === undefined) return { ok: true, value: null };
+      if (failed !== undefined) return { ok: false, error: failed, ...spent };
+      if (schema === undefined) return { ok: true, value: null, ...spent };
       const value = lastObject(answer);
       if (value === undefined) {
         const text = flatten(answer);
@@ -206,9 +243,10 @@ export default adapter({
             text === ""
               ? "cursor-agent returned no text"
               : `cursor-agent returned no JSON object: ${text}`,
+          ...spent,
         };
       }
-      return { ok: true, value };
+      return { ok: true, value, ...spent };
     }
 
     return sessions(host, runOnce, "cursor");

@@ -2,7 +2,16 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
 import { modelFor } from "../helpers/models.ts";
-import { clip, said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import {
+  clip,
+  said,
+  sessions,
+  targetIn,
+  type Attempt,
+  type Chunk,
+  type Invocation,
+  type Usage,
+} from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -16,12 +25,20 @@ type ToolState = {
   output?: string;
   error?: unknown;
 };
+type Tokens = {
+  input?: number;
+  output?: number;
+  cache?: { read?: number; write?: number };
+};
 type Part = {
   id?: string;
   type?: string;
   text?: string;
   tool?: string;
   state?: ToolState;
+  /** On a step-finish part: what that model call cost. A turn is the sum of its steps. */
+  tokens?: Tokens;
+  cost?: number;
 };
 type StreamLine = {
   type?: string;
@@ -42,6 +59,31 @@ const target = targetIn([
   "description",
   "prompt",
 ]);
+
+function count(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** The turn's usage so far with one more step added in. */
+function added(total: Usage | undefined, part: Part, model: string | undefined): Usage {
+  const tokens = part.tokens ?? {};
+  const base: Usage = total ?? {
+    ...(model === undefined ? {} : { model }),
+    input: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    output: 0,
+    usd: 0,
+  };
+  return {
+    ...base,
+    input: base.input + count(tokens.input),
+    cacheRead: base.cacheRead + count(tokens.cache?.read),
+    cacheWrite: base.cacheWrite + count(tokens.cache?.write),
+    output: base.output + count(tokens.output),
+    usd: Math.round(((base.usd ?? 0) + count(part.cost)) * 1e6) / 1e6,
+  };
+}
 
 function reason(error: unknown): string {
   if (said(error)) return error;
@@ -140,6 +182,7 @@ export default adapter({
       let buffer = "";
       let text = "";
       let failed: string | undefined;
+      let usage: Usage | undefined;
       const handle = (line: string): void => {
         if (line.trim() === "") return;
         let event: StreamLine;
@@ -162,6 +205,7 @@ export default adapter({
         if (event.type === "tool_use" && part?.tool !== undefined) {
           emit({ kind: "tool", call: act(part, part.id ?? crypto.randomUUID()) });
         }
+        if (event.type === "step_finish" && part !== undefined) usage = added(usage, part, model);
         if (event.type === "error") failed = reason(event.error);
       };
 
@@ -179,8 +223,9 @@ export default adapter({
       });
       if (buffer.trim() !== "") handle(buffer);
 
+      const spent = usage === undefined ? {} : { usage };
       /** The reason rides an error event on stdout. opencode writes stderr under --print-logs only. */
-      if (failed !== undefined) return { ok: false, error: failed };
+      if (failed !== undefined) return { ok: false, error: failed, ...spent };
       if (done.code !== 0) {
         const tail = done.stderr.trim().split("\n").at(-1) ?? "";
         return {
@@ -189,12 +234,15 @@ export default adapter({
             tail === ""
               ? `opencode exited with code ${done.code}`
               : `opencode exited with code ${done.code}: ${tail}`,
+          ...spent,
         };
       }
-      if (schema === undefined) return { ok: true, value: null };
+      if (schema === undefined) return { ok: true, value: null, ...spent };
       const value = structured(text);
-      if (value === undefined) return { ok: false, error: "opencode returned no JSON result" };
-      return { ok: true, value };
+      if (value === undefined) {
+        return { ok: false, error: "opencode returned no JSON result", ...spent };
+      }
+      return { ok: true, value, ...spent };
     }
 
     return sessions(host, runOnce, "opencode");

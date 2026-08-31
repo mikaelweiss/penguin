@@ -4,7 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { adapter, type ActionKind } from "penguin";
 import { modelFor } from "../helpers/models.ts";
-import { sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import {
+  sessions,
+  targetIn,
+  type Attempt,
+  type Chunk,
+  type Invocation,
+  type Usage,
+} from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -18,11 +25,21 @@ type ContentBlock = {
   name?: string;
   arguments?: unknown;
 };
+type Spent = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost?: { total?: number };
+};
 type Message = {
   role?: string;
+  model?: string;
   content?: ContentBlock[];
   stopReason?: string;
   errorMessage?: string;
+  /** What this one model call cost. A turn is the sum over its assistant messages. */
+  usage?: Spent;
 };
 type StreamLine = {
   type?: string;
@@ -45,6 +62,31 @@ const KINDS: Record<string, ActionKind> = {
   glob: "search",
   fetch: "fetch",
 };
+
+function count(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** The turn's usage so far with one more assistant message added in. */
+function added(total: Usage | undefined, message: Message): Usage {
+  const spent = message.usage ?? {};
+  const base: Usage = total ?? {
+    ...(typeof message.model === "string" && message.model !== "" ? { model: message.model } : {}),
+    input: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    output: 0,
+    usd: 0,
+  };
+  return {
+    ...base,
+    input: base.input + count(spent.input),
+    cacheRead: base.cacheRead + count(spent.cacheRead),
+    cacheWrite: base.cacheWrite + count(spent.cacheWrite),
+    output: base.output + count(spent.output),
+    usd: Math.round(((base.usd ?? 0) + count(spent.cost?.total)) * 1e6) / 1e6,
+  };
+}
 
 /** pi takes a result schema as a tool, so the schema of one turn rides in as an extension file. */
 function extension(schema: Record<string, unknown>): string {
@@ -93,6 +135,7 @@ export default adapter({
 
       let buffer = "";
       let value: unknown;
+      let usage: Usage | undefined;
       let failed = false;
       let why = "";
       /** The first failure wins the turn, and the first reason with words wins the text. */
@@ -117,6 +160,7 @@ export default adapter({
         if (event.type !== "message_end") return;
         const message = event.message;
         if (message?.role !== "assistant") return;
+        if (message.usage !== undefined) usage = added(usage, message);
         for (const block of message.content ?? []) {
           if (block.type === "text" && block.text !== undefined && block.text !== "") {
             emit({ kind: "text", text: block.text });
@@ -161,6 +205,7 @@ export default adapter({
         });
         if (buffer.trim() !== "") handle(buffer);
 
+        const spent = usage === undefined ? {} : { usage };
         if (done.code !== 0) {
           const tail = done.stderr.trim().split("\n").at(-1) ?? "";
           return {
@@ -169,13 +214,14 @@ export default adapter({
               tail === ""
                 ? `pi exited with code ${done.code}`
                 : `pi exited with code ${done.code}: ${tail}`,
+            ...spent,
           };
         }
-        if (failed) return { ok: false, error: why === "" ? "pi reported an error" : why };
+        if (failed) return { ok: false, error: why === "" ? "pi reported an error" : why, ...spent };
         if (schema !== undefined && value === undefined) {
-          return { ok: false, error: "pi returned no structured output" };
+          return { ok: false, error: "pi returned no structured output", ...spent };
         }
-        return { ok: true, value: value ?? null };
+        return { ok: true, value: value ?? null, ...spent };
       } finally {
         if (temporary !== undefined) fs.rmSync(temporary, { recursive: true, force: true });
       }
