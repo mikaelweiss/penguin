@@ -72,6 +72,10 @@ export default workflow({
       .describe(
         "markdown appended to the pull request body, e.g. what a calling workflow carried past",
       ),
+    ticket: z
+      .string()
+      .default("")
+      .describe("the issue id the title and every commit carry verbatim, empty when there is none"),
   }),
 
   async run(ctx) {
@@ -103,7 +107,7 @@ export default workflow({
      * the person dropped the rebase, which ends the run.
      */
     const delivered = async (): Promise<boolean> => {
-      await call(ctx, commit, {});
+      await call(ctx, commit, { ticket: params.ticket });
       for (;;) {
         const synced = await vcs.sync(head.branch, base);
         if (!synced.conflicted) return true;
@@ -118,7 +122,13 @@ export default workflow({
     const written = await narrated(view, () =>
       agent.turn(
         writer,
-        { skill: "open-pr", prompt: `# Base branch\n\n${base}` },
+        {
+          skill: "open-pr",
+          prompt:
+            params.ticket === ""
+              ? `# Base branch\n\n${base}`
+              : `# Base branch\n\n${base}\n\n# Ticket\n\n${params.ticket}`,
+        },
         { result: Description },
       ),
     );
@@ -317,7 +327,7 @@ export default workflow({
       // the last title it wrote and asks again rather than dropping an unpushed commit.
       let message = "";
       for (;;) {
-        const wrote = await call(ctx, commit, {});
+        const wrote = await call(ctx, commit, { ticket: params.ticket });
         if (wrote.committed) message = wrote.message.split("\n")[0] ?? "";
         else if (message === "") {
           await view.show("No code changed, so nothing goes up");

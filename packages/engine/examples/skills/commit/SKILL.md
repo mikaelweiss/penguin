@@ -5,10 +5,10 @@ description: Picks the files for one commit and writes its message. Use when a t
 
 # Pick the files and write the message
 
-The tree is below: what `git status` prints, the diff of every change including the untracked files, and the newest subject lines. That is everything the decision needs. Run no commands. Do not stage the files. Do not commit. penguin does both after you answer.
+The tree is below: what `git status` prints, the diff of every change including the untracked files, and the newest subject lines. A `<ticket>` section, when present, names the issue this work is for. That is everything the decision needs. Run no commands. Do not stage the files. Do not commit. penguin does both after you answer.
 
 1. Pick the files that belong to the work, each path exactly as the status list spells it. A deleted path commits the deletion. Leave out scratch files, logs, build output, and anything that holds a secret. When nothing belongs in a commit, answer an empty list.
-2. Write `subject` in the style of the subject lines above: their prefix convention, their mood, their length. Say what the change does, under 50 characters, imperative, no period.
+2. Write `subject` in the style of the subject lines above: their prefix convention, their mood, their length. An issue id in those subjects belongs to other work, so never copy one. When the prompt holds a `<ticket>` section, place its id where the subjects above place theirs. Without one, write the subject with no id. Say what the change does, under 50 characters, imperative, no period.
 3. Write `body` only when the diff does not show why the change is right. One short paragraph. Leave it empty otherwise, which is the usual answer.
 
 The diff already says what changed. A body says why. Never list the files. Never add a footer or a signature.

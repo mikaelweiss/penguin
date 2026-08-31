@@ -14,9 +14,14 @@ function section(name: string, body: string): string {
 
 export default workflow({
   description: "commit the work in the tree: the agent picks the files and writes the message",
-  params: z.object({}),
+  params: z.object({
+    ticket: z
+      .string()
+      .default("")
+      .describe("the issue id the subject carries verbatim, empty when there is none"),
+  }),
 
-  async run({ agent, vcs, view }) {
+  async run({ agent, params, vcs, view }) {
     const { files } = await vcs.status();
     if (files.length === 0) {
       await view.show("nothing to commit");
@@ -38,6 +43,7 @@ export default workflow({
           : diff.text,
       ),
       section("recent_subjects", style.subjects.join("\n")),
+      ...(params.ticket === "" ? [] : [section("ticket", params.ticket)]),
     ].join("\n\n");
 
     // Every constraint the answer has to meet is in the schema, so the CLI holds the
