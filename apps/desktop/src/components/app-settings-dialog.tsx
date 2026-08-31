@@ -41,7 +41,16 @@ import { useCatalogs } from "@/hooks/use-catalogs";
 import type { Config } from "@/hooks/use-config";
 import { useDark } from "@/hooks/use-dark";
 import type { Directories } from "@/hooks/use-directories";
-import { autoShows, AUTO_SHOW, openIn, OPEN_IN } from "@/lib/settings";
+import { playSound } from "@/lib/notifications";
+import {
+  autoShows,
+  AUTO_SHOW,
+  notificationSound,
+  NOTIFICATION_SOUND,
+  NOTIFICATION_SOUNDS,
+  openIn,
+  OPEN_IN,
+} from "@/lib/settings";
 
 const SECTIONS = [
   { value: "general", label: "General" },
@@ -136,6 +145,31 @@ export function AppSettingsDialog({
                 {agents.map((adapter) => (
                   <SelectItem key={adapter.file} value={adapter.name}>
                     {adapter.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor="notification-sound">Notification sound</FieldLabel>
+              <FieldDescription>What plays when a run starts waiting on you.</FieldDescription>
+            </FieldContent>
+            <Select
+              value={notificationSound(config.values)}
+              onValueChange={(next) => {
+                config.set(NOTIFICATION_SOUND, next === "chime" ? "" : next);
+                playSound(next).catch(() => {});
+              }}
+            >
+              <SelectTrigger id="notification-sound" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {NOTIFICATION_SOUNDS.map((sound) => (
+                  <SelectItem key={sound.value} value={sound.value}>
+                    {sound.label}
                   </SelectItem>
                 ))}
               </SelectContent>

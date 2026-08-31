@@ -14,3 +14,20 @@ export function openIn(values: Record<string, string>): OpenIn {
 export function autoShows(values: Record<string, string>): boolean {
   return values[AUTO_SHOW] !== "off";
 }
+
+/** Which sound plays with a needs-you notification. */
+export const NOTIFICATION_SOUND = "notification-sound";
+
+/** Named for how each one sounds, because every platform files its own under a different name. */
+export const NOTIFICATION_SOUNDS = [
+  { value: "chime", label: "Chime" },
+  { value: "ping", label: "Ping" },
+  { value: "pop", label: "Pop" },
+  { value: "sonar", label: "Sonar" },
+  { value: "none", label: "None" },
+];
+
+export function notificationSound(values: Record<string, string>): string {
+  const chosen = values[NOTIFICATION_SOUND];
+  return NOTIFICATION_SOUNDS.some((sound) => sound.value === chosen) ? chosen : "chime";
+}

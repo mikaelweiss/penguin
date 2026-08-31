@@ -914,16 +914,83 @@ fn opens_the_run(response: &notify_rust::NotificationResponse) -> bool {
     }
 }
 
+/// A sound choice under the name this platform's notifier knows it by. `None` stays silent.
+#[cfg(target_os = "macos")]
+fn sound_name(choice: &str) -> Option<&'static str> {
+    Some(match choice {
+        "ping" => "Ping",
+        "pop" => "Pop",
+        "sonar" => "Submarine",
+        "none" => return None,
+        _ => "Glass",
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn sound_name(choice: &str) -> Option<&'static str> {
+    Some(match choice {
+        "ping" => "SMS",
+        "pop" => "Mail",
+        "sonar" => "Reminder",
+        "none" => return None,
+        _ => "IM",
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn sound_name(choice: &str) -> Option<&'static str> {
+    Some(match choice {
+        "ping" => "message",
+        "pop" => "message-new-email",
+        "sonar" => "complete",
+        "none" => return None,
+        _ => "bell",
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn play(name: &str) {
+    let _ = Command::new("afplay")
+        .arg(format!("/System/Library/Sounds/{name}.aiff"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn play(name: &str) {
+    let _ = Command::new("canberra-gtk-play")
+        .args(["-i", name])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(target_os = "windows")]
+fn play(_name: &str) {
+    // A toast sound is reachable only through a toast, so Windows hears its choice on the notice.
+}
+
+/// The sound alone, so picking one in settings is something you hear.
+#[tauri::command]
+fn play_sound(sound: String) {
+    let Some(name) = sound_name(&sound) else {
+        return;
+    };
+    std::thread::spawn(move || play(name));
+}
+
 /// Posts a notification for a waiting run. Its thread lives until the person acts on the
 /// notification or clears it, because macOS only sends one while something waits on the response.
 #[tauri::command]
-fn notify_needs_you(app: tauri::AppHandle, id: String, title: String, body: String) {
+fn notify_needs_you(app: tauri::AppHandle, id: String, title: String, body: String, sound: String) {
     std::thread::spawn(move || {
-        let sent = notify_rust::Notification::new()
-            .summary(&title)
-            .body(&body)
-            .action(OPEN_ACTION, "Show")
-            .show();
+        let mut notice = notify_rust::Notification::new();
+        notice.summary(&title).body(&body).action(OPEN_ACTION, "Show");
+        if let Some(name) = sound_name(&sound) {
+            notice.sound_name(name);
+        }
+        let sent = notice.show();
         if let Ok(handle) = sent {
             let _ = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
                 if opens_the_run(response) {
@@ -999,6 +1066,7 @@ pub fn run() {
             store_auth_secret,
             terminal_host,
             notify_needs_you,
+            play_sound,
             read_browser,
             write_browser,
             servers::local_servers,
@@ -1344,6 +1412,13 @@ mod tests {
 
         std::fs::write(dir.join("start.log"), "bun: out of memory\n").unwrap();
         assert_eq!(start_log(&dir), "bun: out of memory\n");
+    }
+
+    #[test]
+    fn only_none_is_silent_and_anything_unknown_falls_back() {
+        assert_eq!(sound_name("none"), None);
+        assert!(sound_name("ping").is_some());
+        assert_eq!(sound_name("nonsense"), sound_name("chime"));
     }
 
     #[test]

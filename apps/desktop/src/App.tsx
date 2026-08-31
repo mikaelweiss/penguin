@@ -47,7 +47,7 @@ import { useRuns } from "@/hooks/use-runs";
 import { useRunTree } from "@/hooks/use-run-tree";
 import { useWindowBackground } from "@/hooks/use-window-background";
 import { useWorkflowIndex } from "@/hooks/use-workflow-index";
-import { autoShows, openIn } from "@/lib/settings";
+import { autoShows, notificationSound, openIn } from "@/lib/settings";
 import { findRun, subtree } from "@/lib/runs";
 import type { Project } from "@/lib/runs";
 import type { Workflow } from "@/lib/workflows";
@@ -98,7 +98,8 @@ export function App() {
     clearFollow();
     show(id);
   };
-  useNeedsYou(projects, published, selectedId, select);
+  const sound = notificationSound(config.values);
+  useNeedsYou(projects, published, sound, selectedId, select);
 
   const into = openIn(config.values);
   const auto = autoShows(config.values);
