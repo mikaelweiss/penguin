@@ -1,8 +1,16 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import { adapter, type Action, type ActionKind } from "penguin";
+import { adapter, type Action, type ActionKind, type CommandResult, type Process } from "penguin";
 import { modelFor, type ModelMap } from "../helpers/models.ts";
-import { clip, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
+import {
+  clip,
+  sessions,
+  targetIn,
+  type Attempt,
+  type Chunk,
+  type Invocation,
+  type Usage,
+} from "../helpers/turns.ts";
 
 type OpenOptions = {
   cwd?: string;
@@ -11,6 +19,9 @@ type OpenOptions = {
 };
 
 const MODELS = { best: "fable", big: "opus", small: "sonnet" } satisfies ModelMap;
+
+/** Turns sit seconds apart, so the 5 minute cache tier holds and costs less to write than the CLI's 1 hour default. */
+const CACHE_TTL = "5m";
 
 type ContentBlock = {
   type?: string;
@@ -23,6 +34,21 @@ type ContentBlock = {
   content?: unknown;
   is_error?: boolean;
 };
+type TokenUsage = {
+  input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  output_tokens?: number;
+};
+type ModelUsage = Record<
+  string,
+  {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  }
+>;
 type StreamLine = {
   type?: string;
   is_error?: boolean;
@@ -33,6 +59,25 @@ type StreamLine = {
   /** The wrapper fields claude puts beside an assistant message it built from an API error. */
   is_api_error_message?: boolean;
   error?: string;
+  /** This turn's tokens. */
+  usage?: TokenUsage;
+  /** Running totals for the process, so a turn's share is the growth since the last result. */
+  total_cost_usd?: number;
+  modelUsage?: ModelUsage;
+};
+
+/** One claude process, kept open across the turns of a session that share a schema. */
+type Live = {
+  key: string;
+  child: Process;
+  controller: AbortController;
+  exited: boolean;
+  /** What the last result reported, so the next turn reports only its own growth. */
+  costUsd: number;
+  modelTokens: Map<string, number>;
+  /** The turn reading the stream now. */
+  onLine: ((line: string) => void) | undefined;
+  onExit: ((done: CommandResult) => void) | undefined;
 };
 
 /** Only this adapter knows claude's tool shapes. */
@@ -84,18 +129,88 @@ function resultText(content: unknown): string {
     .join("\n");
 }
 
+function count(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function tokensOf(entry: ModelUsage[string]): number {
+  return (
+    count(entry.inputTokens) +
+    count(entry.outputTokens) +
+    count(entry.cacheReadInputTokens) +
+    count(entry.cacheCreationInputTokens)
+  );
+}
+
+/** The model this turn ran on: the one whose running total grew the most since the last result. */
+function grownModel(live: Live, reported: ModelUsage | undefined): string | undefined {
+  if (reported === undefined) return undefined;
+  let best: { model: string; grew: number } | undefined;
+  for (const [model, entry] of Object.entries(reported)) {
+    const now = tokensOf(entry);
+    const grew = now - (live.modelTokens.get(model) ?? 0);
+    live.modelTokens.set(model, now);
+    if (best === undefined || grew > best.grew) best = { model, grew };
+  }
+  return best?.model;
+}
+
+function usageOf(event: StreamLine, live: Live, model: string | undefined): Usage | undefined {
+  const tokens = event.usage;
+  if (tokens === undefined) return undefined;
+  const usage: Usage = {
+    input: count(tokens.input_tokens),
+    cacheRead: count(tokens.cache_read_input_tokens),
+    cacheWrite: count(tokens.cache_creation_input_tokens),
+    output: count(tokens.output_tokens),
+  };
+  const named = grownModel(live, event.modelUsage) ?? model;
+  if (named !== undefined) usage.model = named;
+  if (typeof event.total_cost_usd === "number") {
+    const grew = Math.max(0, event.total_cost_usd - live.costUsd);
+    live.costUsd = event.total_cost_usd;
+    usage.usd = Math.round(grew * 1e6) / 1e6;
+  }
+  return usage;
+}
+
+/** Every process any build of this adapter holds open. A run that ends must not leave an agent editing files. */
+const open = new Set<Live>();
+process.on("exit", () => {
+  for (const live of open) live.controller.abort();
+});
+
+function exitFailure(done: CommandResult): string {
+  const tail = done.stderr.trim().split("\n").at(-1) ?? "";
+  return tail === ""
+    ? `claude exited with code ${done.code}`
+    : `claude exited with code ${done.code}: ${tail}`;
+}
+
 export default adapter({
   role: "agent",
   name: "claude",
   description:
-    "runs prompts on the claude CLI. A session is one conversation: the first turn opens it, later turns resume it.",
+    "runs prompts on the claude CLI. A session is one conversation held by one CLI process: every turn goes down its stdin, and a process that ended is resumed by session id.",
   build: (host) => {
-    async function runOnce(
-      invocation: Invocation<OpenOptions>,
-      emit: (chunk: Chunk) => void,
-    ): Promise<Attempt> {
-      const { session, first, options, prompt, schema, signal } = invocation;
-      const argv = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
+    const lives = new Map<string, Live>();
+
+    function start(
+      session: string,
+      first: boolean,
+      options: OpenOptions,
+      schema: Record<string, unknown> | undefined,
+      key: string,
+    ): Live {
+      const argv = [
+        "claude",
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+      ];
       if (schema !== undefined) argv.push("--json-schema", JSON.stringify(schema));
       argv.push(first ? "--session-id" : "--resume", session);
       const model = modelFor(options.model, "claude", MODELS, host.config);
@@ -103,24 +218,83 @@ export default adapter({
       // A run has no one to ask, so any prompt is a denial. `permission` overrides it.
       argv.push("--permission-mode", options.permission ?? "bypassPermissions");
 
+      const controller = new AbortController();
       let buffer = "";
+      const live: Live = {
+        key,
+        child: undefined as unknown as Process,
+        controller,
+        exited: false,
+        costUsd: 0,
+        modelTokens: new Map(),
+        onLine: undefined,
+        onExit: undefined,
+      };
+      live.child = host.spawn(argv, {
+        cwd: path.resolve(host.cwd, options.cwd ?? "."),
+        signal: controller.signal,
+        env: { CLAUDE_CODE_PROMPT_CACHE_TTL: host.config("claude-cache-ttl") ?? CACHE_TTL },
+        onOutput: (chunk, stream) => {
+          if (stream !== "stdout") return;
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) live.onLine?.(line);
+        },
+      });
+      const ended = (done: CommandResult): void => {
+        if (buffer.trim() !== "") live.onLine?.(buffer);
+        buffer = "";
+        live.exited = true;
+        open.delete(live);
+        if (lives.get(session) === live) lives.delete(session);
+        live.onExit?.(done);
+      };
+      live.child.exited.then(ended, (error: unknown) => {
+        ended({ code: 1, stdout: "", stderr: error instanceof Error ? error.message : String(error) });
+      });
+      lives.set(session, live);
+      open.add(live);
+      return live;
+    }
+
+    function retire(session: string, live: Live): void {
+      if (lives.get(session) === live) lives.delete(session);
+      live.onLine = undefined;
+      live.onExit = undefined;
+      if (!live.exited) live.child.end();
+    }
+
+    async function runOnce(
+      invocation: Invocation<OpenOptions>,
+      emit: (chunk: Chunk) => void,
+    ): Promise<Attempt> {
+      const { session, first, options, prompt, schema, signal } = invocation;
+      const key = schema === undefined ? "" : JSON.stringify(schema);
+      const held = lives.get(session);
+      // The result tool is fixed when the process starts, so a new schema needs a new process.
+      if (held !== undefined && (held.exited || held.key !== key)) retire(session, held);
+      const live = lives.get(session) ?? start(session, first, options, schema, key);
+      const model = modelFor(options.model, "claude", MODELS, host.config);
+
       let value: unknown;
       let failed: string | undefined;
       let limited: string | undefined;
+      let usage: Usage | undefined;
       const calls = new Map<string, Action>();
-      const handle = (line: string): void => {
-        if (line.trim() === "") return;
+      const handle = (line: string): boolean => {
+        if (line.trim() === "") return false;
         let event: StreamLine;
         try {
           event = JSON.parse(line) as StreamLine;
         } catch {
-          return;
+          return false;
         }
         if (event.type === "assistant") {
           // A limit says itself once. Letting it stream would repeat it on every retry.
           if (event.is_api_error_message === true && event.error === "rate_limit") {
             limited = resultText(event.message?.content).trim();
-            return;
+            return false;
           }
           for (const block of event.message?.content ?? []) {
             if (block.type === "text" && block.text !== undefined && block.text !== "") {
@@ -163,46 +337,54 @@ export default adapter({
         if (event.type === "result") {
           if (event.is_error === true) failed = reported(event);
           value = event.structured_output;
+          usage = usageOf(event, live, model);
+          return true;
         }
+        return false;
       };
 
-      const done = await host.exec(argv, {
-        cwd: path.resolve(host.cwd, options.cwd ?? "."),
-        stdin: prompt,
-        signal,
-        onOutput: (chunk, stream) => {
-          if (stream !== "stdout") return;
-          buffer += chunk;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) handle(line);
-        },
-      });
-      if (buffer.trim() !== "") handle(buffer);
-
-      const failure = ((): string | undefined => {
-        if (done.code !== 0) {
-          const tail = done.stderr.trim().split("\n").at(-1) ?? "";
-          return tail === ""
-            ? `claude exited with code ${done.code}`
-            : `claude exited with code ${done.code}: ${tail}`;
-        }
+      const settled = ((): string | undefined => {
         if (failed !== undefined) return failed;
         if (schema !== undefined && value === undefined) {
           return "claude returned no structured output";
         }
         return undefined;
-      })();
+      });
 
-      if (failure === undefined) return { ok: true, value: value ?? null };
+      const outcome = await new Promise<{ exit?: CommandResult }>((resolve) => {
+        const stop = (): void => live.controller.abort();
+        signal.addEventListener("abort", stop, { once: true });
+        const finish = (exit?: CommandResult): void => {
+          signal.removeEventListener("abort", stop);
+          live.onLine = undefined;
+          live.onExit = undefined;
+          resolve(exit === undefined ? {} : { exit });
+        };
+        live.onLine = (line) => {
+          if (handle(line)) finish();
+        };
+        live.onExit = (done) => finish(done);
+        if (signal.aborted) {
+          stop();
+          return;
+        }
+        live.child.write(
+          `${JSON.stringify({ type: "user", message: { role: "user", content: prompt } })}\n`,
+        );
+      });
+
+      const failure =
+        outcome.exit !== undefined && outcome.exit.code !== 0 ? exitFailure(outcome.exit) : settled();
+      const spent = usage === undefined ? {} : { usage };
+      if (failure === undefined) return { ok: true, value: value ?? null, ...spent };
       // A limit clears on its own, so the turn waits it out rather than spending a retry.
       if (limited !== undefined) {
         const said = limited === "" ? "claude hit its usage limit" : limited;
-        return { ok: false, error: said, limited: true };
+        return { ok: false, error: said, limited: true, ...spent };
       }
-      return { ok: false, error: failure };
+      return { ok: false, error: failure, ...spent };
     }
 
-    return sessions(host, runOnce);
+    return sessions(host, runOnce, "claude");
   },
 });

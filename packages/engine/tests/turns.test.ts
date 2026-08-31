@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
+import type { Host } from "../src/core/adapter.ts";
 import type { View } from "../src/core/view.ts";
-import { narrated, type Turn } from "../examples/helpers/turns.ts";
+import { narrated, sessions, type Turn, type Usage } from "../examples/helpers/turns.ts";
 
 function viewWith(answers: string[]): { view: View; asked: string[] } {
   const asked: string[] = [];
@@ -52,4 +53,66 @@ test("a turn that finishes never asks", async () => {
 
   expect(await narrated(view, start)).toBe("value");
   expect(asked).toHaveLength(0);
+});
+
+function hostWith(notes: Record<string, unknown>[]): Host {
+  return {
+    cwd: "/",
+    home: "/tmp",
+    state: "/tmp",
+    run: { id: "test", dir: "/tmp" },
+    config: () => undefined,
+    secret: async () => undefined,
+    note: (entry) => {
+      notes.push(entry);
+    },
+    open: () => {},
+    skill: (name) => ({ name, description: "test skill", dir: "/tmp", text: "# Skill" }),
+    shell: async () => ({ code: 0, stdout: "", stderr: "" }),
+    exec: async () => ({ code: 0, stdout: "", stderr: "" }),
+    spawn: () => {
+      throw new Error("no spawn in this test");
+    },
+  };
+}
+
+const SPENT: Usage = { model: "m", input: 1, cacheRead: 2, cacheWrite: 3, output: 4, usd: 0.01 };
+
+test("every attempt that reports usage is noted, the failed one too, after it ran", async () => {
+  const notes: Record<string, unknown>[] = [];
+  let tries = 0;
+  const agent = sessions(
+    hostWith(notes),
+    async () => {
+      tries += 1;
+      expect(notes).toHaveLength(tries - 1);
+      return tries === 1
+        ? { ok: false, error: "no", usage: SPENT }
+        : { ok: true, value: null, usage: { ...SPENT, usd: 0.02 } };
+    },
+    "fake",
+  );
+  const session = await agent.open();
+  await agent.turn(session, { skill: "review" }).value;
+  expect(notes).toEqual([
+    { usage: { adapter: "fake", session, skill: "review", ...SPENT } },
+    { usage: { adapter: "fake", session, skill: "review", ...SPENT, usd: 0.02 } },
+  ]);
+});
+
+test("an attempt without usage writes nothing, and a bare prompt names no skill", async () => {
+  const notes: Record<string, unknown>[] = [];
+  let tries = 0;
+  const agent = sessions(
+    hostWith(notes),
+    async () => {
+      tries += 1;
+      return tries === 1 ? { ok: true, value: null } : { ok: true, value: null, usage: SPENT };
+    },
+    "fake",
+  );
+  const session = await agent.open();
+  await agent.turn(session, "go").value;
+  await agent.turn(session, "go").value;
+  expect(notes).toEqual([{ usage: { adapter: "fake", session, ...SPENT } }]);
 });

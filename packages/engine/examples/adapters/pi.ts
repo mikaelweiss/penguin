@@ -181,6 +181,6 @@ export default adapter({
       }
     }
 
-    return sessions(host, runOnce);
+    return sessions(host, runOnce, "pi");
   },
 });

@@ -19,10 +19,20 @@ export type TurnAsk = string | { skill: string; prompt?: string };
 
 export type Turn<T> = { output: AsyncIterable<Chunk>; value: Promise<T> };
 
+/** What one attempt cost, as the CLI reported it. usd is set only when the CLI priced it or a price table did. */
+export type Usage = {
+  model?: string;
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+  usd?: number;
+};
+
 export type Attempt =
-  | { ok: true; value: unknown }
+  | { ok: true; value: unknown; usage?: Usage }
   /** `limited` means the agent hit a usage limit: the turn waits it out instead of retrying. */
-  | { ok: false; error: string; limited?: boolean };
+  | { ok: false; error: string; limited?: boolean; usage?: Usage };
 
 export type TurnFn = {
   (session: string, ask: TurnAsk): Turn<null>;
@@ -101,9 +111,14 @@ const LIMIT_WAIT_SECONDS = 120;
 /**
  * The session machinery every agent adapter shares: open handles, run a turn
  * with one corrected retry, wait out a usage limit, validate a typed result,
- * and stop mid-flight. The adapter supplies runOnce, the one CLI invocation.
+ * note what each attempt cost, and stop mid-flight. The adapter supplies
+ * runOnce, the one CLI invocation, and its name for the usage notes.
  */
-export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentApi<Options> {
+export function sessions<Options>(
+  host: Host,
+  runOnce: RunOnce<Options>,
+  adapter: string,
+): AgentApi<Options> {
   const opened = new Map<string, Options>();
   const started = new Set<string>();
   const running = new Map<string, AbortController>();
@@ -162,6 +177,7 @@ export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentA
       throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
     }
     const prompt = typeof ask === "string" ? ask : withSkill(host.skill(ask.skill), ask.prompt);
+    const skill = typeof ask === "string" ? undefined : ask.skill;
     const output = new Channel<Chunk>();
     const schema = options?.result === undefined ? undefined : jsonSchema(options.result);
     const pause = parking();
@@ -192,6 +208,12 @@ export function sessions<Options>(host: Host, runOnce: RunOnce<Options>): AgentA
             );
           } finally {
             running.delete(session);
+          }
+          // Every attempt spent tokens, the failed ones too, so each one is written down.
+          if (attempt.usage !== undefined) {
+            host.note({
+              usage: { adapter, session, ...(skill === undefined ? {} : { skill }), ...attempt.usage },
+            });
           }
           halt();
           if (!attempt.ok && attempt.limited === true) {

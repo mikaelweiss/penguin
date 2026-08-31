@@ -211,6 +211,6 @@ export default adapter({
       return { ok: true, value };
     }
 
-    return sessions(host, runOnce);
+    return sessions(host, runOnce, "cursor");
   },
 });

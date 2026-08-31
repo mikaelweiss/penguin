@@ -133,7 +133,8 @@ return definition.run(reached(ctx));</code></pre>
       workflow, params, cwd, git root, and parent; a <code>pending</code> line when a call starts
       and a line with its <code>outcome</code> and <code>elapsedMs</code> when it settles, the two
       sharing an id; a note per spawned child; a <code>{"dir": ...}</code> note when the run moves
-      its work into a worktree; and the final result, error, or stop. Values are recorded
+      its work into a worktree; a <code>{"usage": ...}</code> note per agent attempt with the
+      tokens and dollars it spent; and the final result, error, or stop. Values are recorded
       whole, with a zod shape written as its JSON Schema so a frontend can render the control an
       ask needs. A call that returns a live object (an open stream, a turn) is marked
       <code>handle: true</code> instead, since an object like that cannot be written down. One

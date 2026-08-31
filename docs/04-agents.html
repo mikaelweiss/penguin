@@ -204,6 +204,13 @@ const commit = await turn.value;</code></pre>
 
     <h2>How the claude adapter drives the CLI</h2>
 
+    <p>
+      One CLI process serves a session. The first turn starts it and every later turn goes down
+      the same stdin, so the CLI builds its prompt once and the API's cache holds across turns.
+      Restarting a process per turn, the old way, rewrote the whole conversation into cache at
+      three out of four turn boundaries, at the write rate.
+    </p>
+
     <div class="table-wrap">
       <table>
         <thead>
@@ -214,29 +221,73 @@ const commit = await turn.value;</code></pre>
         </thead>
         <tbody>
           <tr>
-            <td><code>--output-format stream-json --verbose</code></td>
-            <td>Line-delimited events, so <code>output</code> can emit while the turn runs.</td>
+            <td><code>--input-format stream-json --output-format stream-json --verbose</code></td>
+            <td>
+              Prompts go in as line-delimited user messages and events come out the same way, so
+              one process takes many turns and <code>output</code> emits while a turn runs.
+            </td>
           </tr>
           <tr>
             <td><code>--session-id</code> then <code>--resume</code></td>
-            <td>The adapter tracks which sessions have started and picks the right one.</td>
+            <td>
+              The first process of a session names it. A process that ended, was stopped, or
+              held a different result schema is replaced by one that resumes the same id.
+            </td>
           </tr>
           <tr>
             <td><code>--json-schema</code></td>
-            <td>Only when the turn asked for a typed result.</td>
+            <td>
+              Only when the turn asked for a typed result. The result tool is fixed when the
+              process starts, so a turn with a different schema starts a new process.
+            </td>
           </tr>
           <tr>
-            <td><code>--permission-mode acceptEdits</code></td>
+            <td><code>--permission-mode bypassPermissions</code></td>
             <td>
               A run has no one to ask, so a denied edit costs the turn. The <code>permission</code>
               option overrides it.
+            </td>
+          </tr>
+          <tr>
+            <td><code>CLAUDE_CODE_PROMPT_CACHE_TTL=5m</code> in the environment</td>
+            <td>
+              Turns sit seconds apart, so the five minute cache tier holds and its writes cost
+              less than the CLI's one hour default. <code>claude-cache-ttl</code> in
+              <code>~/.penguin/config</code> overrides it.
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <p>The prompt goes in on stdin. Output is buffered by line, parsed, and pushed into a Channel.</p>
+    <p>
+      Each turn's line is <code>{"type": "user", "message": {"role": "user", "content": ...}}</code>.
+      Output is buffered by line, parsed, and pushed into a Channel until the turn's
+      <code>result</code> event. A run that ends kills its processes, so no agent outlives it.
+    </p>
+
+    <h2>What a turn costs</h2>
+
+    <p>
+      After every attempt, <code>sessions()</code> writes one note to the run file with what the
+      CLI reported it spent:
+    </p>
+
+    <pre><code>{"at": "...", "usage": {"adapter": "claude", "session": "...", "skill": "review",
+  "model": "claude-opus-5", "input": 12, "cacheRead": 118400, "cacheWrite": 2100,
+  "output": 380, "usd": 0.0421}}</code></pre>
+
+    <p>
+      Tokens are the turn's own. <code>usd</code> is set when the CLI priced the turn (claude,
+      opencode, pi) or when <code>examples/helpers/prices.ts</code> could, from its table or a
+      <code>price-&lt;model&gt;</code> line in <code>~/.penguin/config</code> holding input, cached
+      input, and output dollars per million tokens (codex, cursor). A failed attempt is noted too,
+      since its tokens were spent, so a corrected retry shows as two notes. An adapter whose CLI
+      reports nothing writes nothing, and a reader takes a missing note as unknown, never as free.
+      The penguin app sums the notes per run and per tree, and
+      <code>bun examples/cost.ts</code> lists runs with their cost, which is how a change to a
+      skill or an adapter is checked against the runs before it.
+    </p>
 
     <h2>Swapping the agent</h2>
 
