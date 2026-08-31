@@ -219,24 +219,25 @@ if (heard !== undefined) {
       started being the usual one.
     </p>
 
-    <h2>Handle every adapter result</h2>
+    <h2>Branch on answers, leave faults to the engine</h2>
 
     <p>
-      Adapter calls answer with data, not exceptions, so an unchecked <code>ok</code> is a bug you
-      find later. <code>examples/workflows/commit.ts</code> leaves early on every branch, and every
-      early return has the same shape as the successful one, so a caller can spread the result
-      without asking which path produced it:
+      An adapter call answers with data, the semantic negatives included, and a workflow branches
+      on those. What the world refused to do arrives as a thrown <code>Fault</code>, and a
+      workflow does not catch it: the engine holds the run at a gate, sends the fault to a fixer
+      agent when it asks for one, lets the person retry or stop, and runs the same call again on
+      retry. So <code>examples/workflows/commit.ts</code> is the happy path and nothing else:
     </p>
 
-    <pre><code>const state = await vcs.dirty();
-if (!state.ok) {
-  await view.show(`commit failed: ${state.reason}`);
-  return { ok: false, committed: false, message: "", reason: state.reason };
-}
-if (!state.dirty) {
+    <pre><code>if (!(await vcs.dirty()).dirty) {
   await view.show("nothing to commit");
-  return { ok: true, committed: false, message: "", reason: state.reason };
+  return { committed: false, message: "" };
 }</code></pre>
+
+    <p>
+      Catch a <code>Fault</code> only when this workflow genuinely wants different handling, such
+      as a teardown that must not block the run's return, and say why.
+    </p>
 
     <p>Keep return values JSON-serializable. A frontend other than a terminal has to show them.</p>
 

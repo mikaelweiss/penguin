@@ -55,15 +55,19 @@
           </tr>
           <tr>
             <td><code>src/core/view.ts</code></td>
-            <td><code>View</code>, <code>Menu</code>, <code>menuOf</code>, <code>menuOfSchema</code>, <code>candidates</code></td>
+            <td><code>View</code>, <code>Menu</code>, <code>Withdrawn</code>, <code>isWithdrawn</code>, <code>menuOf</code>, <code>menuOfSchema</code>, <code>candidates</code></td>
           </tr>
           <tr>
             <td><code>src/core/errors.ts</code></td>
-            <td><code>PenguinError</code>, <code>RunStopped</code>, <code>RunCrashed</code>, <code>messageOf</code>, <code>issuesOf</code></td>
+            <td><code>PenguinError</code>, <code>Fault</code>, <code>RunStopped</code>, <code>RunCrashed</code>, <code>messageOf</code>, <code>issuesOf</code></td>
           </tr>
           <tr>
             <td><code>src/core/channel.ts</code></td>
             <td><code>Channel</code>, the push stream adapters return</td>
+          </tr>
+          <tr>
+            <td><code>src/core/rescue.ts</code></td>
+            <td>The engine's fault gate: <code>createRescue</code>, <code>worldOf</code></td>
           </tr>
           <tr>
             <td><code>src/core/index.ts</code></td>
@@ -274,9 +278,19 @@
             <td>Penguin refusing.</td>
           </tr>
           <tr>
+            <td><code>Fault</code></td>
+            <td><code>class extends PenguinError</code></td>
+            <td>The world refusing a call. The engine holds one at a gate; <code>{ fix: "agent" }</code> sends it to a fixer agent first.</td>
+          </tr>
+          <tr>
             <td><code>RunStopped</code>, <code>RunCrashed</code></td>
             <td><code>class extends PenguinError</code></td>
             <td>How <code>call</code> rejects when a child was stopped, or died silently.</td>
+          </tr>
+          <tr>
+            <td><code>isWithdrawn</code></td>
+            <td><code>(value: unknown) =&gt; value is Withdrawn</code></td>
+            <td>Whether an ask's answer is its premise dying, so the caller re-reads the world.</td>
           </tr>
           <tr>
             <td><code>menuOf</code>, <code>menuOfSchema</code></td>

@@ -58,7 +58,7 @@ the person watching. It is a role, a name, a description, and `build(host)`,
 which returns the functions a workflow calls through `ctx.<role>`.
 
 ```ts
-import { adapter } from "penguin";
+import { adapter, Fault } from "penguin";
 
 export default adapter({
   role: "vcs",
@@ -67,7 +67,7 @@ export default adapter({
   build: (host) => ({
     async commit(message: string) {
       const done = await host.shell(`git commit -m '${message}'`);
-      return { ok: done.code === 0, reason: done.stderr.trim() };
+      if (done.code !== 0) throw new Fault(done.stderr.trim(), { fix: "agent" });
     },
   }),
 });
@@ -85,9 +85,27 @@ Two rules keep adapters honest:
   the way `agent.turn` returns `{ output, value }`, a stream and a promise.
   What flows through is always plain data. Arbitrary objects with methods
   never cross the boundary.
-- **Expected outcomes are data, thrown errors mean the bridge broke.** A failed
-  commit returns `{ ok: false, reason }` for the workflow to handle. A throw
-  means the adapter itself could not do its job at all.
+- **Answers are data, refusals are faults.** What a call can learn is data,
+  including the negatives: `dirty: false`, a null pull request, a conflicted
+  rebase. What the world refused to do is a thrown `Fault`: the network, a
+  hook, a tool, a repo state in the way. The split is what lets workflows be
+  happy-path scripts: they branch on answers and never see most faults.
+
+An adapter may also declare `check(host)`: fast, local preflight the engine
+runs before a root run starts, answering what blocks the run (a missing CLI,
+a signed-out login, a folder that is no repo). Problems surface at second
+zero, at one gate, instead of an hour in.
+
+## Faults and the gate
+
+A `Fault` an adapter throws and a workflow does not catch lands in the engine,
+which holds the run at a gate instead of ending it. A fault built with
+`{ fix: "agent" }` goes to a fixer agent first, bounded; then the person reads
+what stopped the call and answers retry, stop, or an instruction for the
+fixer. Retry runs the same call again, so adapter operations converge on a
+goal (`vcs.sync`, `github.pr.ensure`) rather than fire a command once. A
+workflow that wants different handling catches the `Fault` itself; everything
+it does not catch is the engine's.
 
 One role, many implementations. A workflow calls `ctx.vcs.commit(...)` and
 does not care whether git or jj answers. When more than one implementation of
@@ -111,6 +129,9 @@ the story: an id, a name, a status, and what the call acted on; sending the
 same id again updates that call in place, which is how a call moves from
 running to done or failed and picks up its output. `ask` sends a question and
 resolves when a person answers, validated against the shape when one is given.
+An ask about a world that can die takes a premise: `ask(question, shape,
+{ until })` withdraws the question when `until` settles first, and the caller
+reads `isWithdrawn(answer)` and re-reads the world instead of acting on it.
 The shape is the whole input system: a bool, an enum, an array of enums, an
 object; a frontend renders whatever control fits it. Each call is its own
 request with its own response. There is no shared inbox, no queue, and no
@@ -165,13 +186,17 @@ journal and no replay.
 
 ## The engine
 
-The engine has four jobs, and any feature that needs a fifth is either a new
+The engine has five jobs, and any feature that needs a sixth is either a new
 adapter, a new workflow, or out of scope:
 
 1. **Catalog.** Find workflow files, adapter files, and skill folders across catalog directories.
 2. **Ctx.** Validate params and wire installed adapter roles onto ctx.
 3. **Process.** Own the run's working directory and the processes it spawns.
 4. **Trace.** Append each adapter call and outcome to a log, for debugging.
+5. **Recovery.** Run each adapter's preflight checks before a root run, and hold
+   uncaught faults at a gate: fixer agent first when the fault asks for one,
+   then the person, then the same call again.
 
 The engine does not route messages, hold state machines, retry agent turns,
-render anything, or know one adapter role from another.
+render anything, or know one adapter role from another beyond view and agent,
+which recovery reads to do its job.

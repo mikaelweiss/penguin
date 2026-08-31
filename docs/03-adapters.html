@@ -17,7 +17,7 @@
       adapters share their session machinery in <code>examples/helpers/turns.ts</code>.
     </p>
 
-    <pre><code>import { adapter } from "penguin";
+    <pre><code>import { adapter, Fault } from "penguin";
 
 export default adapter({
   role: "vcs",
@@ -26,7 +26,7 @@ export default adapter({
   build: (host) =&gt; ({
     async commit(message: string, options?: { cwd?: string }) {
       const done = await host.shell(`git commit -m ${quoted(message)}`, { cwd: options?.cwd });
-      return { ok: done.code === 0, reason: (done.stdout + done.stderr).trim() };
+      if (done.code !== 0) throw new Fault((done.stdout + done.stderr).trim(), { fix: "agent" });
     },
   }),
 });</code></pre>
@@ -61,20 +61,34 @@ export default adapter({
       doing the work.
     </p>
 
-    <h3>Data for expected outcomes, a throw when the bridge broke</h3>
+    <h3>Answers are data, refusals are faults</h3>
 
     <p>
-      A failed commit is a normal thing that happens, so it comes back as
-      <code>{ ok: false, reason }</code> for the workflow to handle. A throw means the adapter could
-      not do its job at all. The claude adapter throws when you pass a session id it never opened,
-      because there is no sensible <code>{ ok: false }</code> for a caller mistake:
+      What a call can learn is data, the negatives included: <code>dirty: false</code>, a null pull
+      request, a conflicted rebase. A workflow branches on those. What the world refused to do is a
+      thrown <code>Fault</code>: a failing hook, a network that will not answer, a repo state in
+      the way. A workflow does not handle faults; the engine catches what it does not catch and
+      holds the run at a gate, where a fixer agent tries first when the fault says
+      <code>{ fix: "agent" }</code> and the person decides after. That split is why a workflow is a
+      happy-path script. A plain throw, such as <code>PenguinError</code>, still means the caller
+      misused the adapter:
     </p>
 
     <pre><code>if (opened === undefined) {
   throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
 }</code></pre>
 
-    <p>Include the fix in the message. A person reads it.</p>
+    <p>Include the fix in the message. A person reads it, at the gate.</p>
+
+    <h3>Preflight</h3>
+
+    <p>
+      An adapter may declare <code>check(host)</code> beside <code>build</code>: fast, local checks
+      the engine runs before a root run starts, returning what blocks the run. The git adapter
+      answers when the folder is no repository or has no origin; the gh adapter answers when the
+      CLI is missing or signed out. Problems land at one gate at second zero, not an hour in at a
+      hook. No network calls, so a run still starts in under a second.
+    </p>
 
     <h2>What an adapter cannot do</h2>
 
@@ -219,8 +233,9 @@ await git(["commit", "-m", message], options?.cwd);</code></pre>
       </li>
       <li>
         Extra facts ride alongside rather than replacing them: <code>dirty</code> returns
-        <code>{ ok, dirty, reason }</code>, <code>head</code> returns
-        <code>{ ok, branch, sha, detached, reason }</code>.
+        <code>{ dirty }</code>, <code>head</code> returns
+        <code>{ branch, sha, detached }</code>, and either throws a <code>Fault</code> when git
+        itself refuses.
       </li>
       <li>
         <code>cwd</code> is an option on each call, not state on the adapter, so one adapter serves
@@ -235,7 +250,7 @@ await git(["commit", "-m", message], options?.cwd);</code></pre>
         Ambiguity is reported, not guessed. <code>defaultBranch</code> reads
         <code>refs/remotes/origin/HEAD</code> and answers <code>ok: false</code> when it is unset,
         rather than assuming <code>main</code>. <code>worktree.add</code> answers
-        <code>{ ok: false, exists: true }</code> when the target folder is already there, so the
+        <code>{ existed: true }</code> when the target folder is already there, so the
         workflow chooses between reusing it and failing. On success it appends a
         <code>{"dir": ...}</code> note to the run's file, so frontends follow the run there.
       </li>
