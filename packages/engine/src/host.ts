@@ -3,7 +3,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { readConfig } from "./config.ts";
-import type { CommandResult, ExecOptions, Host, RunLocation, Skill } from "./core/adapter.ts";
+import type {
+  CommandResult,
+  ExecOptions,
+  Host,
+  Process,
+  RunLocation,
+  Skill,
+  SpawnOptions,
+} from "./core/adapter.ts";
 import { PenguinError } from "./core/errors.ts";
 import { home, stateRoot } from "./paths.ts";
 
@@ -39,6 +47,11 @@ export function createHost(cwd: string, location: RunLocation, skill: SkillLooku
       if (cmd === undefined) throw new PenguinError("exec needs a command");
       return run(cmd, args, resolve(options?.cwd), options);
     },
+    spawn: (argv, options) => {
+      const [cmd, ...args] = argv;
+      if (cmd === undefined) throw new PenguinError("spawn needs a command");
+      return open(cmd, args, resolve(options?.cwd), options);
+    },
   };
 }
 
@@ -66,16 +79,41 @@ function run(
   cwd: string,
   options?: ExecOptions,
 ): Promise<CommandResult> {
-  return new Promise((resolve, reject) => {
-    const stdio: ("ignore" | "pipe")[] = [
-      options?.stdin === undefined ? "ignore" : "pipe",
-      "pipe",
-      "pipe",
-    ];
-    const child: ChildProcess =
-      args === undefined
-        ? spawn(cmd, { shell: true, cwd, stdio })
-        : spawn(cmd, args, { cwd, stdio });
+  const started = start(cmd, args, cwd, options, options?.stdin !== undefined);
+  if (options?.stdin !== undefined) started.child.stdin?.end(options.stdin);
+  return started.exited;
+}
+
+/** The child with its stdin held open. The caller writes to it and ends it. */
+function open(cmd: string, args: string[], cwd: string, options?: SpawnOptions): Process {
+  const started = start(cmd, args, cwd, options, true);
+  return {
+    write: (text) => {
+      started.child.stdin?.write(text);
+    },
+    end: () => {
+      started.child.stdin?.end();
+    },
+    exited: started.exited,
+  };
+}
+
+function start(
+  cmd: string,
+  args: string[] | undefined,
+  cwd: string,
+  options: SpawnOptions | undefined,
+  piped: boolean,
+): { child: ChildProcess; exited: Promise<CommandResult> } {
+  const stdio: ("ignore" | "pipe")[] = [piped ? "pipe" : "ignore", "pipe", "pipe"];
+  const env = options?.env === undefined ? process.env : { ...process.env, ...options.env };
+  const child: ChildProcess =
+    args === undefined
+      ? spawn(cmd, { shell: true, cwd, stdio, env })
+      : spawn(cmd, args, { cwd, stdio, env });
+  // A child that quits early closes the pipe under a later write. That is its exit code's story, not a crash here.
+  child.stdin?.on("error", () => {});
+  const exited = new Promise<CommandResult>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -88,10 +126,6 @@ function run(
       stderr += text;
       options?.onOutput?.(text, "stderr");
     });
-    if (options?.stdin !== undefined) {
-      child.stdin?.on("error", () => {});
-      child.stdin?.end(options.stdin);
-    }
     const stop = (): void => {
       child.kill();
     };
@@ -106,4 +140,5 @@ function run(
       resolve({ code: code ?? 1, stdout, stderr });
     });
   });
+  return { child, exited };
 }

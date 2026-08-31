@@ -19,7 +19,9 @@ export type {
   CommandResult,
   ExecOptions,
   Host,
+  Process,
   RunLocation,
   ShellOptions,
   Skill,
+  SpawnOptions,
 } from "./adapter.ts";

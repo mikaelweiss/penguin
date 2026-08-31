@@ -152,3 +152,43 @@ test("open ignores what no browser can show", () => {
   host.open("not a url");
   expect(fs.existsSync(path.join(dir, "run.jsonl"))).toBe(false);
 });
+
+test("env reaches the child on top of the run's own environment", async () => {
+  const host = hostFor(tempDir());
+  const done = await host.exec(["sh", "-c", 'printf "%s:%s" "$PENGUIN_TEST_ENV" "$HOME"'], {
+    env: { PENGUIN_TEST_ENV: "set" },
+  });
+  expect(done.stdout).toBe(`set:${process.env["HOME"] ?? ""}`);
+});
+
+test("spawn keeps stdin open across writes and settles when it ends", async () => {
+  const host = hostFor(tempDir());
+  let streamed = "";
+  const child = host.spawn(["cat"], {
+    onOutput: (chunk, stream) => {
+      if (stream === "stdout") streamed += chunk;
+    },
+  });
+  child.write("one\n");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  child.write("two\n");
+  child.end();
+  const done = await child.exited;
+  expect(done.code).toBe(0);
+  expect(done.stdout).toBe("one\ntwo\n");
+  expect(streamed).toBe("one\ntwo\n");
+});
+
+test("aborting a spawned child's signal ends it with a failing code", async () => {
+  const host = hostFor(tempDir());
+  const controller = new AbortController();
+  const child = host.spawn(["cat"], { signal: controller.signal });
+  setTimeout(() => controller.abort(), 50);
+  const done = await child.exited;
+  expect(done.code).not.toBe(0);
+});
+
+test("an empty spawn argv throws like exec does", () => {
+  const host = hostFor(tempDir());
+  expect(() => host.spawn([])).toThrow("spawn needs a command");
+});

@@ -107,6 +107,7 @@ export default adapter({
   skill(name: string): Skill;
   shell(cmd: string, options?: ShellOptions): Promise&lt;CommandResult&gt;;
   exec(argv: string[], options?: ExecOptions): Promise&lt;CommandResult&gt;;
+  spawn(argv: string[], options?: SpawnOptions): Process;
 };</code></pre>
 
     <p>
@@ -127,6 +128,17 @@ export default adapter({
       <code>secret(name)</code> reads one credential from the machine keystore.
       <code>note(entry)</code> appends one stamped line to the run's file, which is how the jira
       adapter says it is waiting on credentials.
+    </p>
+
+    <p>
+      <code>shell</code> and <code>exec</code> run one command to completion, the prompt on stdin
+      when one is given. <code>spawn</code> starts the same child and hands it back open:
+      <code>write(text)</code> feeds its stdin, <code>end()</code> closes it, and
+      <code>exited</code> settles with the exit code and captured output. That is how the claude
+      adapter keeps one CLI process per session and sends every turn down the same stdin, so the
+      CLI never rebuilds its prompt between turns. All three take <code>env</code>, variables set
+      over the run's own environment for that child alone, and <code>signal</code>, whose abort
+      kills the child.
     </p>
 
     <p>

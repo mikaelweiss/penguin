@@ -148,6 +148,9 @@ function fakeGh(reply: CommandResult): {
     skill: () => {
       throw new Error("no skills installed");
     },
+    spawn: () => {
+      throw new Error("no spawn in this test");
+    },
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
     exec: async (argv) => {
       args.push(argv);

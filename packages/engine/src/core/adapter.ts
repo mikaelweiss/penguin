@@ -14,6 +14,18 @@ export type ShellOptions = {
 export type ExecOptions = ShellOptions & {
   onOutput?: (chunk: string, stream: "stdout" | "stderr") => void;
   signal?: AbortSignal;
+  /** Variables set over the run's own environment for this child alone. */
+  env?: Record<string, string>;
+};
+
+export type SpawnOptions = Omit<ExecOptions, "stdin">;
+
+/** A child that stays open: the adapter writes its stdin over time and ends it when done. */
+export type Process = {
+  write(text: string): void;
+  end(): void;
+  /** Settles when the child exits, however it did. */
+  exited: Promise<CommandResult>;
 };
 
 /** Where a run's files live: run.jsonl written by the run, inbox.jsonl written by frontends. */
@@ -56,6 +68,8 @@ export type Host = {
   shell(cmd: string, options?: ShellOptions): Promise<CommandResult>;
   /** Spawns an argv directly, so arguments need no quoting. Aborting the signal kills the process. */
   exec(argv: string[], options?: ExecOptions): Promise<CommandResult>;
+  /** Spawns an argv and hands back the open child, for a CLI that takes many prompts on one stdin. */
+  spawn(argv: string[], options?: SpawnOptions): Process;
 };
 
 export type Adapter<A = unknown> = {
