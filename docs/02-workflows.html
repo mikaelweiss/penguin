@@ -229,7 +229,8 @@ if (heard !== undefined) {
       retry. So <code>examples/workflows/commit.ts</code> is the happy path and nothing else:
     </p>
 
-    <pre><code>if (!(await vcs.dirty()).dirty) {
+    <pre><code>const { files } = await vcs.status();
+if (files.length === 0) {
   await view.show("nothing to commit");
   return { committed: false, message: "" };
 }</code></pre>
@@ -365,8 +366,8 @@ import openPr from "penguin:open-pr";    // whichever catalog the run resolves</
       The reusable instructions live in a skill, and the turn names it:
       <code>agent.turn(session, { skill: "commit" }, ...)</code>. The workflow file keeps only the
       runtime part of the prompt and the schema the answer fills.
-      <code>skills/commit/SKILL.md</code> is a numbered procedure that says what to read, what to
-      decide, and what not to do:
+      <code>skills/commit/SKILL.md</code> is a numbered procedure that says what to decide and
+      what not to do:
     </p>
 
     <blockquote>
@@ -376,6 +377,31 @@ import openPr from "penguin:open-pr";    // whichever catalog the run resolves</
     <p>
       The agent picks, the workflow acts. Letting the agent run <code>git commit</code> itself would
       move a deterministic step back into prose.
+    </p>
+
+    <h2>Hand the turn what it needs</h2>
+
+    <p>
+      A skill that opens with "run <code>git status</code>, then <code>git diff</code>, then read
+      each untracked file" costs a model round trip per command before the turn has decided
+      anything. Read the world through adapters instead and put the result in the prompt. The
+      commit workflow gathers status, diff, and recent subjects itself, so the turn arrives with
+      everything and answers once.
+    </p>
+
+    <p>
+      A turn that only answers needs nothing else: <code>tools: []</code> sends no tool
+      definitions, <code>settings: []</code> leaves the person's own CLI setup, MCP servers
+      included, out of a run that never asked for it, and <code>effort: "low"</code> suits a
+      judgment that is not a deliberation. Together they take the commit workflow from twenty six
+      seconds and eighty three thousand tokens to about three seconds and ten thousand.
+    </p>
+
+    <p>
+      Put every constraint the answer has to meet in the schema rather than in prose. The commit
+      workflow builds <code>files</code> as <code>z.enum</code> over the paths git just reported
+      and caps the subject's length, so a path that is not in the tree and a subject too long to
+      read are shapes the CLI will not produce. Prose asks; a schema holds.
     </p>
 
     <h2>Run it</h2>

@@ -4,6 +4,12 @@ import { adapter, Fault, type CommandResult } from "penguin";
 
 type Rebase = { conflicted: boolean; files: string[] };
 
+/** One path the tree holds against HEAD, with git's own two-letter code. */
+type Change = { status: string; path: string };
+
+/** How much diff one read hands back. A prompt has to hold it, so a huge change is cut, not sent whole. */
+const DIFF_LIMIT = 60000;
+
 type Sync =
   | { conflicted: true; files: string[] }
   | { conflicted: false; sha: string; baseSha: string; same: boolean };
@@ -95,6 +101,35 @@ export default adapter({
       return done.stdout.trim() !== "";
     }
 
+    /** Untracked files listed one by one, so every path the answer names is one git can stage. */
+    async function changesIn(cwd: string | undefined): Promise<Change[]> {
+      const done = await git(["status", "--porcelain", "-z", "--untracked-files=all"], cwd);
+      if (done.code !== 0) throw new Fault(done.stderr.trim());
+      const entries = done.stdout.split("\0").filter((entry) => entry !== "");
+      const files: Change[] = [];
+      for (let at = 0; at < entries.length; at++) {
+        const entry = entries[at] ?? "";
+        const code = entry.slice(0, 2);
+        files.push({ status: code, path: entry.slice(3) });
+        // A rename or a copy prints where the path came from as the next entry.
+        if (code.startsWith("R") || code.startsWith("C")) at++;
+      }
+      return files;
+    }
+
+    async function hasHead(cwd: string | undefined): Promise<boolean> {
+      return (await git(["rev-parse", "--verify", "HEAD"], cwd)).code === 0;
+    }
+
+    /**
+     * An untracked file is in no diff git will print, so it is diffed against nothing.
+     * `--no-index` reports a difference with code 1, which is the whole point of the call.
+     */
+    async function untrackedDiff(file: string, cwd: string | undefined): Promise<string> {
+      const done = await git(["diff", "--no-index", "--", "/dev/null", file], cwd);
+      return done.stdout;
+    }
+
     async function shaOf(ref: string, cwd: string | undefined): Promise<string> {
       const done = await git(["rev-parse", "--short", "--verify", `${ref}^{commit}`], cwd);
       if (done.code !== 0) throw new Fault(done.stderr.trim());
@@ -163,6 +198,41 @@ export default adapter({
       },
       async dirty(options?: { cwd?: string }): Promise<{ dirty: boolean }> {
         return { dirty: await dirtyOf(options?.cwd) };
+      },
+      /** Every path the tree changed against HEAD, each one stageable as it is spelled. */
+      async status(options?: { cwd?: string }): Promise<{ files: Change[] }> {
+        return { files: await changesIn(options?.cwd) };
+      },
+      /**
+       * What the tree changed, as text: the tracked diff against HEAD, then each
+       * untracked file's content. `truncated` means the change was larger than
+       * `limit` and the tail was cut, so a reader knows it has not seen all of it.
+       */
+      async diff(
+        options?: { cwd?: string; untracked?: boolean; limit?: number },
+      ): Promise<{ text: string; truncated: boolean }> {
+        const cwd = options?.cwd;
+        const limit = options?.limit ?? DIFF_LIMIT;
+        const against = (await hasHead(cwd)) ? ["diff", "HEAD"] : ["diff", "--cached"];
+        const tracked = await git(against, cwd);
+        if (tracked.code !== 0) throw new Fault(tracked.stderr.trim());
+        const parts = [tracked.stdout];
+        if (options?.untracked === true) {
+          for (const change of await changesIn(cwd)) {
+            if (change.status !== "??") continue;
+            if (parts.join("").length >= limit) break;
+            parts.push(await untrackedDiff(change.path, cwd));
+          }
+        }
+        const text = parts.join("");
+        if (text.length <= limit) return { text, truncated: false };
+        return { text: text.slice(0, limit), truncated: true };
+      },
+      /** The newest subject lines, which are the only record of how this repository writes them. */
+      async subjects(count: number, options?: { cwd?: string }): Promise<{ subjects: string[] }> {
+        const done = await git(["log", `-${count}`, "--format=%s"], options?.cwd);
+        if (done.code !== 0) return { subjects: [] };
+        return { subjects: done.stdout.split("\n").filter((line) => line.trim() !== "") };
       },
       async head(
         options?: { cwd?: string },

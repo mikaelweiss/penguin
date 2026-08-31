@@ -462,3 +462,35 @@ test("an error result without a result field says what claude reported", async (
     "the model refused; and gave up",
   );
 });
+
+test("a session that only answers carries no tools, no settings, and its effort", async () => {
+  const { host, calls } = fakeHost((call) => emit(call, { type: "result" }));
+  const agent = definition.build(host);
+  const session = await agent.open({ tools: [], settings: [], effort: "low" });
+  await agent.turn(session, "go").value;
+  // The flags are variadic, so an empty set has to arrive as one argument carrying nothing.
+  expect(calls[0]?.argv).toEqual(
+    expect.arrayContaining(["--tools=", "--setting-sources=", "--effort", "low"]),
+  );
+});
+
+test("a session names the tools and settings it was opened with", async () => {
+  const { host, calls } = fakeHost((call) => emit(call, { type: "result" }));
+  const agent = definition.build(host);
+  const session = await agent.open({ tools: ["Read", "Grep"], settings: ["project"] });
+  await agent.turn(session, "go").value;
+  expect(calls[0]?.argv).toEqual(
+    expect.arrayContaining(["--tools", "Read", "Grep", "--setting-sources=project"]),
+  );
+});
+
+test("a session opened with none of them leaves the CLI's own defaults alone", async () => {
+  const { host, calls } = fakeHost((call) => emit(call, { type: "result" }));
+  const agent = definition.build(host);
+  const session = await agent.open();
+  await agent.turn(session, "go").value;
+  const argv = calls[0]?.argv ?? [];
+  expect(argv.some((arg) => arg.startsWith("--tools"))).toBe(false);
+  expect(argv.some((arg) => arg.startsWith("--setting-sources"))).toBe(false);
+  expect(argv).not.toContain("--effort");
+});

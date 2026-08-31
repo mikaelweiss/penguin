@@ -537,3 +537,80 @@ test("check flags a folder that is not a repository, and passes a clean one", as
   const { ours } = await origin();
   expect(await check(ours.host)).toEqual([]);
 });
+
+test("status lists each untracked file on its own, so every path it names is stageable", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "kept.txt", "base");
+  fs.mkdirSync(path.join(dir, "notes"));
+  fs.writeFileSync(path.join(dir, "notes", "one.md"), "one\n");
+  fs.writeFileSync(path.join(dir, "notes", "two.md"), "two\n");
+  fs.writeFileSync(path.join(dir, "kept.txt"), "changed\n");
+
+  const { files } = await vcs.status();
+  expect(files.map((file) => file.path).sort()).toEqual([
+    "kept.txt",
+    "notes/one.md",
+    "notes/two.md",
+  ]);
+  expect(files.find((file) => file.path === "kept.txt")?.status.trim()).toBe("M");
+  // A folder is not a path git stages by content, so the files inside it are what status names.
+  await vcs.stage(["notes/one.md"]);
+  expect((await vcs.commit("test: one note")).committed).toBe(true);
+});
+
+test("status keeps a rename's new path and drops the name it came from", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "old.txt", "base");
+  await git(host, ["mv", "old.txt", "new.txt"]);
+
+  const { files } = await vcs.status();
+  expect(files).toHaveLength(1);
+  expect(files[0]?.path).toBe("new.txt");
+  expect(files[0]?.status.trim()).toBe("R");
+});
+
+test("diff carries untracked contents only when asked for them", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "tracked.txt", "base");
+  fs.writeFileSync(path.join(dir, "tracked.txt"), "edited\n");
+  fs.writeFileSync(path.join(dir, "fresh.txt"), "brand new line\n");
+
+  const tracked = await vcs.diff();
+  expect(tracked.text).toContain("edited");
+  expect(tracked.text).not.toContain("brand new line");
+
+  const whole = await vcs.diff({ untracked: true });
+  expect(whole.text).toContain("edited");
+  expect(whole.text).toContain("brand new line");
+  expect(whole.truncated).toBe(false);
+});
+
+test("diff says so when it cut a change too large to hand on whole", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "big.txt", "base");
+  fs.writeFileSync(path.join(dir, "big.txt"), "a line of text\n".repeat(2000));
+
+  const cut = await vcs.diff({ limit: 500 });
+  expect(cut.truncated).toBe(true);
+  expect(cut.text).toHaveLength(500);
+});
+
+test("diff reads a tree that has no commit behind it", async () => {
+  const { dir, vcs } = await repo();
+  fs.writeFileSync(path.join(dir, "first.txt"), "the very first line\n");
+
+  const whole = await vcs.diff({ untracked: true });
+  expect(whole.text).toContain("the very first line");
+});
+
+test("subjects reads the newest lines, and a repository with no commit has none", async () => {
+  const { dir, host, vcs } = await repo();
+  expect((await vcs.subjects(20)).subjects).toEqual([]);
+
+  await commitFile({ dir, host }, "a.txt", "test: first");
+  await commitFile({ dir, host }, "b.txt", "test: second");
+  await commitFile({ dir, host }, "c.txt", "test: third");
+
+  expect((await vcs.subjects(20)).subjects).toEqual(["test: third", "test: second", "test: first"]);
+  expect((await vcs.subjects(2)).subjects).toEqual(["test: third", "test: second"]);
+});

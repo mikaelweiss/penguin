@@ -16,6 +16,16 @@ type OpenOptions = {
   cwd?: string;
   model?: string;
   permission?: string;
+  /** The tools the session may use. An empty list leaves a turn that only answers, which is the fastest one runs. */
+  tools?: string[];
+  /**
+   * Which of the CLI's own setting sources the session loads. An empty list is a
+   * session carrying nothing but this workflow's prompt: no user instructions, no
+   * MCP servers, no plugins. A person's interactive setup is theirs, not a run's.
+   */
+  settings?: string[];
+  /** How hard the model works before it answers: low, medium, high, xhigh, or max. */
+  effort?: string;
 };
 
 const MODELS = { best: "fable", big: "opus", small: "sonnet" } satisfies ModelMap;
@@ -219,6 +229,14 @@ export default adapter({
       argv.push(first ? "--session-id" : "--resume", session);
       const model = modelFor(options.model, "claude", MODELS, host.config);
       if (model !== undefined) argv.push("--model", model);
+      // The flag is variadic, so an empty set has to arrive as one argument carrying nothing.
+      if (options.tools !== undefined) {
+        argv.push(...(options.tools.length === 0 ? ["--tools="] : ["--tools", ...options.tools]));
+      }
+      if (options.settings !== undefined) {
+        argv.push(`--setting-sources=${options.settings.join(",")}`);
+      }
+      if (options.effort !== undefined) argv.push("--effort", options.effort);
       // A run has no one to ask, so any prompt is a denial. `permission` overrides it.
       argv.push("--permission-mode", options.permission ?? "bypassPermissions");
 

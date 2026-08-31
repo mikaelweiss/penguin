@@ -73,10 +73,11 @@
     <p><code>commit.ts</code> now executes, top to bottom, touching the world only through ctx:</p>
 
     <ol role="list">
-      <li><code>vcs.dirty()</code> asks git whether there is anything to commit. A clean tree returns early with a full result. This is the reconciler pattern: inspect first, act on what is missing.</li>
-      <li><code>agent.open()</code> makes a session, <code>agent.turn(session, { skill: "commit" }, { result: Commit })</code> loads the commit skill's instructions, starts the claude CLI as a child process, and returns a handle: <code>output</code>, a stream of chunks, and <code>value</code>, a promise of the schema-checked result.</li>
+      <li><code>vcs.status()</code> asks git what the tree changed. An unchanged tree returns early with a full result. This is the reconciler pattern: inspect first, act on what is missing.</li>
+      <li><code>vcs.diff()</code> and <code>vcs.subjects()</code> read the rest of what the decision needs: the change as text, untracked files included, and the newest subject lines the message has to sound like. The workflow gathers this, not the agent, because a turn left to fetch its own context spends a round trip per command.</li>
+      <li><code>agent.open({ model: "small", tools: [], settings: [], effort: "low" })</code> makes a session that can only answer, and <code>agent.turn(session, { skill: "commit", prompt: tree }, { result: Commit })</code> loads the commit skill's instructions, starts the claude CLI as a child process, and returns a handle: <code>output</code>, a stream of chunks, and <code>value</code>, a promise of the schema-checked result.</li>
       <li>The workflow forwards chunks it chooses to <code>view.show</code>. Nothing reaches a person unless this loop sends it.</li>
-      <li><code>await turn.value</code> is the typed answer: which files, what message. The adapter already retried once on a malformed result and validated the shape.</li>
+      <li><code>await turn.value</code> is the typed answer: which files, what subject, what body. <code>Commit</code> is built from the tree git just reported, so <code>files</code> is an enum of paths that exist and the subject carries a length limit, and the CLI holds the model to both as it writes.</li>
       <li><code>vcs.stage(files)</code> then <code>vcs.commit(message)</code> act on the answer. The agent proposed; the workflow performs the deterministic steps itself.</li>
     </ol>
 
