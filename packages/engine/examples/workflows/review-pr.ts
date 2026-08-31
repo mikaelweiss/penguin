@@ -44,6 +44,25 @@ function noted(notes: Note[]): string {
   return notes.map((note) => `## ${note.author} on ${note.at}\n\n${note.body}`).join("\n\n");
 }
 
+/** The paths a unified diff touches, in the order it names them. */
+function touched(diff: string): string[] {
+  const paths: string[] = [];
+  for (const line of diff.split("\n")) {
+    if (!line.startsWith("+++ ")) continue;
+    const named = line.slice(4).trim();
+    if (named === "/dev/null") continue;
+    paths.push(named.startsWith("b/") ? named.slice(2) : named);
+  }
+  return paths;
+}
+
+/** What the reviewer would otherwise spend its first calls rebuilding: the base, the files, the diff. */
+function changed(base: string, diff: string): string {
+  const files = touched(diff);
+  const listed = files.length === 0 ? "none read" : files.map((file) => `- ${file}`).join("\n");
+  return `# Base\n\norigin/${base}\n\n# Changed files\n\n${listed}\n\n# Diff\n\n${diff}`;
+}
+
 export default workflow({
   description:
     "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until your approval lands or it closes",
@@ -91,6 +110,7 @@ export default workflow({
     // The triage reads the diff over the wire, so a PR the user takes costs no worktree.
     const looked = await github.pr.diff(params.pr);
     if (!looked.ok) await view.show(`The PR diff did not read: ${looked.reason}`);
+    let diff = looked.ok ? looked.diff : "";
     const judge = await agent.open();
     const triaged = await narrated(view, () =>
       agent.turn(
@@ -129,8 +149,8 @@ export default workflow({
 
     const opening = (): string =>
       previous === undefined
-        ? `Review this pull request. The working tree holds its code.\n\n${briefing()}`
-        : `New code arrived since the last review, and the working tree holds it. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, review what changed, and return the full updated findings.\n\n${briefing()}`;
+        ? `Review this pull request. The working tree holds its code.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`
+        : `New code arrived since the last review, and the working tree holds it. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, review what changed, and return the full updated findings.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`;
 
     // The worktree only mirrors the PR head, so a force-push is a reset, not a merge.
     const synced = async (): Promise<void> => {
@@ -143,6 +163,9 @@ export default workflow({
         );
       const at = await vcs.sha("HEAD", { cwd: dir });
       head = at.ok ? at.sha : "";
+      // The diff the reviewer reads must be the code the tree now holds.
+      const again = await github.pr.diff(params.pr);
+      if (again.ok) diff = again.diff;
     };
 
     /** The commit the findings judge, against the commit the PR carries now. */
@@ -230,8 +253,7 @@ export default workflow({
         let update: string;
         if (change.kind === "commits") {
           await synced();
-          update =
-            "New code was pushed to the PR. The working tree now holds it. Continue the review over the current code.";
+          update = `New code was pushed to the PR. The working tree now holds it. Continue the review over the current code.\n\n${changed(pr.baseRefName, diff)}`;
         } else if (change.kind === "description") {
           description = change.body;
           update = `The PR description changed. The new description:\n\n${change.body}\n\nTake it as added context and continue the review.`;

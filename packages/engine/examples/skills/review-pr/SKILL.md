@@ -5,7 +5,7 @@ description: One deep review of a pull request checked out in the working tree, 
 
 # Review a pull request
 
-The input gives the PR title, description, and comments. The working tree holds the PR code.
+The input gives the PR title, description, and comments, the base branch, the list of changed files, and the diff. The working tree holds the PR code.
 
 The input may also hold the findings of a previous review round. Check each one against the current code: keep it if it still holds, drop it if the new code fixes it.
 
@@ -17,7 +17,7 @@ So do not run `gh pr comment`, `gh pr review`, or any `gh api` call that writes.
 
 ## Step 1 - Organize
 
-First, look at what files have changed
+The changed files and the diff are in the input. Start from them. Do not run `git diff`, `git log`, or `gh pr view` to rebuild what the input already holds; read the tree only for what the diff does not show.
 
 Assign each file one of three tiers. State the assignments in one compact grouped list before reading further, so the allocation is visible and deliberate
 
@@ -99,3 +99,7 @@ Read the PR description and comments in the input to verify each finding is new.
 ## Step 8 - Return the findings
 
 Fill the result. `blockers` lists the issues that must change before an approve. `nonBlockers` lists the improvements the author may take or leave. Write each item as one clear, specific, actionable line. An empty list means none.
+
+## Read in batches
+
+Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

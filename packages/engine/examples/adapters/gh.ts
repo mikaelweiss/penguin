@@ -1,7 +1,7 @@
 import { adapter, messageOf, type CommandResult } from "penguin";
 
 const ISSUE_FIELDS = "number,title,body,state,url";
-const PR_FIELDS = "number,title,body,state,isDraft,headRefOid,url";
+const PR_FIELDS = "number,title,body,state,isDraft,headRefOid,baseRefName,url";
 const WATCHED_FIELDS = "state,isDraft,body,headRefOid,url,comments,reviews";
 const QUEUE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){isInMergeQueue}}}";
@@ -26,6 +26,7 @@ type Pr = {
   state: string;
   isDraft: boolean;
   headRefOid: string;
+  baseRefName: string;
   url: string;
   isInMergeQueue: boolean;
 };
