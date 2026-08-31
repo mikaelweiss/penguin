@@ -51,10 +51,28 @@ for entry in "${files[@]}"; do
   cp "$from" "$to"
 done
 
+patches=()
+while IFS= read -r patch; do patches+=("$patch"); done < <(
+  find "$dest/patches" -maxdepth 1 -name '*.patch' 2>/dev/null | sort
+)
+
+for patch in ${patches[@]+"${patches[@]}"}; do
+  name=$(basename "$patch")
+  # git apply reports "Skipped patch" and still exits 0 when a path falls
+  # outside its cwd, so a reverse check is what actually proves it landed.
+  if ! git -C "$repo_root" apply --directory=packages/terminal -p1 "$patch" ||
+    ! git -C "$repo_root" apply --directory=packages/terminal -p1 --reverse --check "$patch"; then
+    echo "patch no longer applies: patches/$name" >&2
+    echo "rebase it against t3code@${SHA:0:12} or drop it" >&2
+    exit 1
+  fi
+done
+
 {
   echo "https://github.com/pingdotgg/t3code"
   echo "$SHA"
   for entry in "${files[@]}"; do echo "${entry%%:*} -> ${entry#*:}"; done
+  for patch in ${patches[@]+"${patches[@]}"}; do echo "+ patches/$(basename "$patch")"; done
 } > "$dest/UPSTREAM"
 
-echo "synced ${#files[@]} files from t3code@${SHA:0:12}"
+echo "synced ${#files[@]} files from t3code@${SHA:0:12}, applied ${#patches[@]} patches"

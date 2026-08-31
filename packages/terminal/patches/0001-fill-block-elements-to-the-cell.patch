@@ -1,0 +1,142 @@
+diff --git a/src/terminal/ghostty/renderer.ts b/src/terminal/ghostty/renderer.ts
+index 9d47718..dd99386 100644
+--- a/src/terminal/ghostty/renderer.ts
++++ b/src/terminal/ghostty/renderer.ts
+@@ -60,6 +60,97 @@ function fontForCell(cell: GhosttyCell, fontSize: number, fontFamily: string): s
+   return `${style} ${weight} ${fontSize}px ${fontFamily}`;
+ }
+ 
++/** Fractions of the cell box: left, top, right, bottom. */
++type BlockElementRect = readonly [number, number, number, number];
++
++interface BlockElement {
++  readonly rects: readonly BlockElementRect[];
++  readonly alpha: number;
++}
++
++const FULL_CELL: BlockElementRect = [0, 0, 1, 1];
++
++function solid(...rects: readonly BlockElementRect[]): BlockElement {
++  return { rects, alpha: 1 };
++}
++
++function shade(alpha: number): BlockElement {
++  return { rects: [FULL_CELL], alpha };
++}
++
++/**
++ * U+2580..U+259F as fractions of the cell rather than glyphs. A face draws
++ * these on its own em box, which is shorter than a cell at any line height
++ * above 1.0, so drawn as text they leave a horizontal seam between every row
++ * of block art. Terminals are expected to snap them to the cell instead.
++ */
++const BLOCK_ELEMENTS: Readonly<Record<string, BlockElement>> = {
++  "▀": solid([0, 0, 1, 1 / 2]),
++  "▁": solid([0, 7 / 8, 1, 1]),
++  "▂": solid([0, 3 / 4, 1, 1]),
++  "▃": solid([0, 5 / 8, 1, 1]),
++  "▄": solid([0, 1 / 2, 1, 1]),
++  "▅": solid([0, 3 / 8, 1, 1]),
++  "▆": solid([0, 1 / 4, 1, 1]),
++  "▇": solid([0, 1 / 8, 1, 1]),
++  "█": solid(FULL_CELL),
++  "▉": solid([0, 0, 7 / 8, 1]),
++  "▊": solid([0, 0, 3 / 4, 1]),
++  "▋": solid([0, 0, 5 / 8, 1]),
++  "▌": solid([0, 0, 1 / 2, 1]),
++  "▍": solid([0, 0, 3 / 8, 1]),
++  "▎": solid([0, 0, 1 / 4, 1]),
++  "▏": solid([0, 0, 1 / 8, 1]),
++  "▐": solid([1 / 2, 0, 1, 1]),
++  "░": shade(0.25),
++  "▒": shade(0.5),
++  "▓": shade(0.75),
++  "▔": solid([0, 0, 1, 1 / 8]),
++  "▕": solid([7 / 8, 0, 1, 1]),
++  "▖": solid([0, 1 / 2, 1 / 2, 1]),
++  "▗": solid([1 / 2, 1 / 2, 1, 1]),
++  "▘": solid([0, 0, 1 / 2, 1 / 2]),
++  "▙": solid([0, 0, 1 / 2, 1 / 2], [0, 1 / 2, 1, 1]),
++  "▚": solid([0, 0, 1 / 2, 1 / 2], [1 / 2, 1 / 2, 1, 1]),
++  "▛": solid([0, 0, 1, 1 / 2], [0, 1 / 2, 1 / 2, 1]),
++  "▜": solid([0, 0, 1, 1 / 2], [1 / 2, 1 / 2, 1, 1]),
++  "▝": solid([1 / 2, 0, 1, 1 / 2]),
++  "▞": solid([1 / 2, 0, 1, 1 / 2], [0, 1 / 2, 1 / 2, 1]),
++  "▟": solid([1 / 2, 0, 1, 1 / 2], [0, 1 / 2, 1, 1]),
++};
++
++export function blockElementForCell(text: string): BlockElement | null {
++  return BLOCK_ELEMENTS[text] ?? null;
++}
++
++/**
++ * Fill one cell's block element. Edges land on whole device pixels so that
++ * abutting cells share a boundary exactly; a fractional edge would antialias
++ * on both sides and draw the same seam the glyphs do.
++ */
++export function fillBlockElement(
++  context: CanvasRenderingContext2D,
++  element: BlockElement,
++  color: string,
++  left: number,
++  top: number,
++  metrics: GhosttyCellMetrics,
++): void {
++  const ratio = context.getTransform().a || 1;
++  const snap = (value: number) => Math.round(value * ratio) / ratio;
++  context.save();
++  context.globalAlpha = element.alpha;
++  context.fillStyle = color;
++  for (const [x0, y0, x1, y1] of element.rects) {
++    const startX = snap(left + x0 * metrics.width);
++    const startY = snap(top + y0 * metrics.height);
++    const endX = snap(left + x1 * metrics.width);
++    const endY = snap(top + y1 * metrics.height);
++    context.fillRect(startX, startY, endX - startX, endY - startY);
++  }
++  context.restore();
++}
++
+ export function measureGhosttyCell(
+   context: CanvasRenderingContext2D,
+   fontSize: number,
+@@ -193,7 +284,26 @@ export function renderGhosttySnapshot(options: {
+         runStart += 1;
+         continue;
+       }
+-      const runEnd = ghosttyTextRunEnd(row.cells, runStart, (cell) => sameTextStyle(cell, first));
++      const block = blockElementForCell(first.text);
++      if (block !== null) {
++        if (!first.invisible) {
++          fillBlockElement(
++            context,
++            block,
++            cssColor(first.foreground),
++            padding + runStart * metrics.width,
++            top,
++            metrics,
++          );
++        }
++        runStart += 1;
++        continue;
++      }
++      const runEnd = ghosttyTextRunEnd(
++        row.cells,
++        runStart,
++        (cell) => blockElementForCell(cell.text) === null && sameTextStyle(cell, first),
++      );
+       const text = row.cells
+         .slice(runStart, runEnd)
+         .map((cell) => cell.text)
+@@ -262,7 +372,10 @@ export function renderGhosttySnapshot(options: {
+     } else {
+       context.fillRect(left, top, metrics.width, metrics.height);
+       const cell = snapshot.rowData[snapshot.cursorY]?.cells[snapshot.cursorX];
+-      if (cell?.text) {
++      const block = cell ? blockElementForCell(cell.text) : null;
++      if (block !== null) {
++        fillBlockElement(context, block, cssColor(snapshot.background), left, top, metrics);
++      } else if (cell?.text) {
+         context.font = fontForCell(cell, fontSize, fontFamily);
+         context.fillStyle = cssColor(snapshot.background);
+         context.fillText(cell.text, left, top + metrics.baseline, metrics.width);

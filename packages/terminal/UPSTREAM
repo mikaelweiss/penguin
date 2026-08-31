@@ -12,3 +12,4 @@ apps/web/src/terminal/ghostty/fonts/LICENSE -> src/terminal/ghostty/fonts/LICENS
 apps/web/src/terminal-links.ts -> src/terminal-links.ts
 packages/client-runtime/src/state/terminalSession.ts -> src/state/terminalSession.ts
 LICENSE -> LICENSE.t3code
++ patches/0001-fill-block-elements-to-the-cell.patch
