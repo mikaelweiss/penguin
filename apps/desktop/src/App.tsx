@@ -392,8 +392,10 @@ export function App() {
                   </ResizablePanelGroup>
                 </ResizablePanel>
               )}
-              {showTerminal && !fullTerminal ? <ResizableHandle key="work-handle" /> : null}
-              {showTerminal ? (
+              {showTerminal && !fullTerminal && !fullRight ? (
+                <ResizableHandle key="work-handle" />
+              ) : null}
+              {showTerminal && !fullRight ? (
                 <ResizablePanel
                   key="terminal"
                   id="terminal"
