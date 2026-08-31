@@ -4,11 +4,7 @@ import { FileDiffIcon, GlobeIcon, InfoIcon, SquareTerminalIcon, TriangleAlertIco
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
 import { Button } from "@workspace/ui/components/button";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@workspace/ui/components/resizable";
+import { ResizablePanel, ResizablePanelGroup } from "@workspace/ui/components/resizable";
 import { Separator } from "@workspace/ui/components/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/sidebar";
 import {
@@ -25,6 +21,7 @@ import { DiffPanel } from "@/components/diff-panel";
 import { DiffWorkerPool } from "@/components/diff-worker-pool";
 import { InfoPanel } from "@/components/info-panel";
 import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
+import { PANEL_GRAB, PanelHandle } from "@/components/panel-handle";
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { RunAuth } from "@/components/run-auth";
 import { RunBreadcrumb } from "@/components/run-breadcrumb";
@@ -267,6 +264,7 @@ export function App() {
             <ResizablePanelGroup
               orientation="vertical"
               className="min-h-0 flex-1"
+              resizeTargetMinimumSize={PANEL_GRAB}
               onLayoutChanged={panels.onDragged}
             >
               {fullTerminal ? null : (
@@ -279,6 +277,7 @@ export function App() {
                   <ResizablePanelGroup
                     orientation="horizontal"
                     className="min-h-0 flex-1"
+                    resizeTargetMinimumSize={PANEL_GRAB}
                     onLayoutChanged={panels.onDragged}
                   >
                     {fullRight ? null : (
@@ -304,7 +303,7 @@ export function App() {
                         ) : null}
                       </ResizablePanel>
                     )}
-                    {showRight && !fullRight ? <ResizableHandle key="right-handle" /> : null}
+                    {showRight && !fullRight ? <PanelHandle key="right-handle" /> : null}
                     {showRight ? (
                       <ResizablePanel
                         key="right"
@@ -317,6 +316,7 @@ export function App() {
                         <ResizablePanelGroup
                           orientation="vertical"
                           className="min-h-0 flex-1"
+                          resizeTargetMinimumSize={PANEL_GRAB}
                           onLayoutChanged={panels.onDragged}
                         >
                           {showInfo && !fullBrowser && !fullDiff ? (
@@ -338,7 +338,7 @@ export function App() {
                             </ResizablePanel>
                           ) : null}
                           {showInfo && (showBrowser || showDiff) && !fullRight ? (
-                            <ResizableHandle key="info-handle" />
+                            <PanelHandle key="info-handle" />
                           ) : null}
                           {showBrowser && !fullDiff && !fullInfo ? (
                             <ResizablePanel
@@ -365,7 +365,7 @@ export function App() {
                             </ResizablePanel>
                           ) : null}
                           {showBrowser && showDiff && !fullRight ? (
-                            <ResizableHandle key="stack-handle" />
+                            <PanelHandle key="stack-handle" />
                           ) : null}
                           {showDiff && !fullBrowser && !fullInfo ? (
                             <ResizablePanel
@@ -393,7 +393,7 @@ export function App() {
                 </ResizablePanel>
               )}
               {showTerminal && !fullTerminal && !fullRight ? (
-                <ResizableHandle key="work-handle" />
+                <PanelHandle key="work-handle" />
               ) : null}
               {showTerminal && !fullRight ? (
                 <ResizablePanel
