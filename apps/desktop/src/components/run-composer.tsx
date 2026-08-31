@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CornerDownLeftIcon } from "lucide-react";
 import { menuOfSchema } from "@mikaelweiss/penguin-engine/view";
 
@@ -42,7 +42,17 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
   const group = useRef<HTMLDivElement>(null);
   const listId = useId();
   const attach = useAttachments(run.id);
-  const hovering = useFileDrop(group, attach.drop);
+  /** The text field is the row after the choices, so index order matches focus order. */
+  const textRow = menu === undefined ? "" : String(menu.choices.length);
+  const claim = useCallback(() => setChosen(textRow), [textRow]);
+  const drop = useCallback(
+    (paths: string[]) => {
+      claim();
+      attach.drop(paths);
+    },
+    [claim, attach.drop],
+  );
+  const hovering = useFileDrop(group, drop);
 
   useEffect(() => {
     const first = choices.current?.querySelector<HTMLElement>(CHOICE);
@@ -52,7 +62,7 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
 
   const body = bodyOf(attach.files, text);
   /** A menu choice is the whole answer, so attachments ride only a typed payload. */
-  const carries = menu === undefined || (typing && body !== "");
+  const carries = menu === undefined || chosen === textRow;
   const problem = attach.error ?? error;
 
   const toggle = (index: number) =>
@@ -91,6 +101,7 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
     const pasted = Array.from(event.clipboardData.files);
     if (pasted.length === 0) return;
     event.preventDefault();
+    claim();
     attach.paste(pasted);
   }
 
@@ -186,6 +197,14 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
                 className="gap-2"
               >
                 {rows}
+                {menu.other ? (
+                  <Field orientation="horizontal">
+                    <RadioGroupItem id={`${listId}-text`} value={textRow} />
+                    <FieldLabel htmlFor={`${listId}-text`} className="font-normal">
+                      Type an answer
+                    </FieldLabel>
+                  </Field>
+                ) : null}
               </RadioGroup>
             )}
 
@@ -209,13 +228,14 @@ export function RunComposer({ run, onSend, error }: RunComposerProps) {
             value={text}
             rows={1}
             placeholder={
-              run.ask === undefined
-                ? "Message the run"
-                : menu === undefined
-                  ? "Type an answer"
-                  : "or type an answer"
+              menu !== undefined
+                ? undefined
+                : run.ask === undefined
+                  ? "Message the run"
+                  : "Type an answer"
             }
             onChange={(event) => setText(event.target.value)}
+            onFocus={claim}
             onKeyDown={onFieldKeys}
             className="max-h-40 font-mono"
           />
