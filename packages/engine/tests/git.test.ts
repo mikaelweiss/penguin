@@ -242,6 +242,26 @@ test("worktree.add reports a branch another worktree holds as one already there"
   }
 });
 
+test("worktree.add refuses a folder the repository has no worktree for", async () => {
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const { dir, host, vcs } = await repo();
+    await commitFile({ dir, host }, "base.txt", "base");
+    const added = await vcs.worktree.add("feature");
+
+    // What a cleanup tool outside the run leaves: the checkout gone, a folder standing in its place.
+    await vcs.worktree.remove(added.path);
+    fs.mkdirSync(added.path, { recursive: true });
+    fs.writeFileSync(path.join(added.path, "state.json"), "{}");
+
+    await expect(vcs.worktree.add("feature")).rejects.toThrow(/no worktree for/);
+    expect(fs.existsSync(path.join(added.path, "state.json"))).toBe(true);
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});
+
 test("sha names the commit a ref points at, and refuses one that does not resolve", async () => {
   const { dir, host, vcs } = await repo();
   await commitFile({ dir, host }, "base.txt", "base");

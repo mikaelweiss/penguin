@@ -83,6 +83,17 @@ export default adapter({
       return "";
     }
 
+    /** Whether the repository holds a worktree at target, which a folder standing there is not. */
+    async function registered(target: string): Promise<boolean> {
+      const listed = await git(["worktree", "list", "--porcelain"]);
+      if (listed.code !== 0) return false;
+      const here = fs.realpathSync(target);
+      return listed.stdout
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "))
+        .some((line) => path.resolve(line.slice("worktree ".length).trim()) === here);
+    }
+
     async function headOf(
       cwd: string | undefined,
     ): Promise<{ branch: string; sha: string; detached: boolean }> {
@@ -379,7 +390,14 @@ export default adapter({
           // whatever folder holds it.
           const held = options?.ref === undefined ? await checkedOut(name) : "";
           if (held !== "") return { path: held, existed: true };
-          if (fs.existsSync(target)) return { path: target, existed: true };
+          if (fs.existsSync(target)) {
+            if (await registered(target)) return { path: target, existed: true };
+            // A folder git has no worktree for takes every command run in it down with
+            // "not a git repository", and whatever a run writes there reaches no branch.
+            throw new Fault(
+              `a folder sits at ${target} that this repository has no worktree for. Something outside the run removed the worktree and left the folder. Keep what is in it if it matters, delete it, and run this again.`,
+            );
+          }
           fs.mkdirSync(path.dirname(target), { recursive: true });
           if (options?.ref !== undefined) {
             await fetching(options.ref, undefined);
