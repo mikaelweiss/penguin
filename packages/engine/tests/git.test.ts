@@ -634,3 +634,23 @@ test("subjects reads the newest lines, and a repository with no commit has none"
   expect((await vcs.subjects(20)).subjects).toEqual(["test: third", "test: second", "test: first"]);
   expect((await vcs.subjects(2)).subjects).toEqual(["test: third", "test: second"]);
 });
+
+test("onto with from carries only the branch's own commits over a parent that was rewritten", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "base.txt", "base");
+  const base = (await vcs.head()).branch;
+  await git(host, ["checkout", "-q", "-b", "parent"]);
+  await commitFile({ dir, host }, "parent.txt", "parent");
+  const forkedAt = (await vcs.head()).sha;
+  await git(host, ["checkout", "-q", "-b", "child"]);
+  await commitFile({ dir, host }, "child.txt", "child");
+  // The parent is squashed onto the base, as a merge would do, so its old commit is history.
+  await git(host, ["checkout", "-q", base]);
+  await commitFile({ dir, host }, "parent.txt", "parent");
+  await git(host, ["checkout", "-q", "child"]);
+
+  const landed = await vcs.rebase.onto(base, { from: forkedAt });
+  expect(landed.conflicted).toBe(false);
+  const log = await git(host, ["log", "--format=%s", `${base}..child`]);
+  expect(log.split("\n")).toEqual(["child"]);
+});

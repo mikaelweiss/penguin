@@ -343,8 +343,13 @@ export default adapter({
         },
       },
       rebase: {
-        onto(ref: string, options?: { cwd?: string }): Promise<Rebase> {
-          return rebased(git(["rebase", ref], options?.cwd), options?.cwd, ref);
+        /**
+         * The branch's own commits onto ref. `from` names the commit the branch was cut from,
+         * so a parent whose history was rewritten under it is not replayed with it.
+         */
+        onto(ref: string, options?: { cwd?: string; from?: string }): Promise<Rebase> {
+          const args = options?.from === undefined ? ["rebase", ref] : ["rebase", "--onto", ref, options.from];
+          return rebased(git(args, options?.cwd), options?.cwd, ref);
         },
         continue(options?: { cwd?: string }): Promise<Rebase> {
           // GIT_EDITOR stops the continue from opening an editor. The string is constant, so shell is safe.

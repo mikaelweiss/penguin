@@ -21,6 +21,12 @@ export default workflow({
       .string()
       .default("main")
       .describe("the branch it rebases onto, empty to take the one origin calls default"),
+    from: z
+      .string()
+      .default("")
+      .describe(
+        "the commit the branch was cut from, empty when that was the base. Set it when a parent was squashed under the branch, so the parent's commits are not replayed",
+      ),
     /** The base lives only in this clone, so the branch lands on the branch and not on origin's copy. */
     local: z.boolean().default(false).meta({ internal: true }),
     /** The worktree that rebases, which is not the checkout the run started from. */
@@ -86,6 +92,7 @@ export default workflow({
     const base = await resolveBase(ctx, params.base);
     if (base === "") return { ...dropped, reason: "no base branch" };
     const onto = params.local ? base : `origin/${base}`;
+    const from = params.from === "" ? undefined : params.from;
 
     let clean = false;
     while (!clean) {
@@ -93,7 +100,7 @@ export default workflow({
         await view.show(`pass ${pass} of ${params.passes}`);
         if (!params.local) await vcs.fetch(base, { cwd });
 
-        let state = await vcs.rebase.onto(onto, { cwd });
+        let state = await vcs.rebase.onto(onto, { cwd, from });
         const conflicted = state.conflicted;
         while (state.conflicted) {
           const stopped = `The rebase onto ${onto} stopped on these files:\n\n${listed(state.files)}`;
