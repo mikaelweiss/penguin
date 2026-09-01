@@ -7,7 +7,6 @@ import rebase from "./rebase.ts";
 
 const Confirm = z.enum(["ok", "stop"]);
 const Go = z.union([z.enum(["go", "skip"]), z.string()]);
-const Send = z.union([z.enum(["push", "hold"]), z.string()]);
 
 const Description = z.object({
   title: z.string().describe("the pull request title, one line"),
@@ -205,6 +204,7 @@ export default workflow({
           return;
         }
         if (change.kind === "reviewed") {
+          // A bare approval is news. Every other review can carry inline threads the assessment reads.
           if (change.state === "APPROVED" && change.body === "") {
             await view.show(`${change.author} approved PR #${pr.number}`);
           } else {
@@ -323,35 +323,17 @@ export default workflow({
 
       await applied(who, "The approved plan", proposal(plan));
 
-      // A fix asked for at the push gate writes another commit, so the gate keeps
-      // the last title it wrote and asks again rather than dropping an unpushed commit.
-      let message = "";
-      for (;;) {
-        const wrote = await call(ctx, commit, { ticket: params.ticket });
-        if (wrote.committed) message = wrote.message.split("\n")[0] ?? "";
-        else if (message === "") {
-          await view.show("No code changed, so nothing goes up");
-          return;
-        }
-        const answer = await view.ask(
-          `Committed: ${message}\n\nCheck it, then reply push to send it to PR #${pr.number}, hold to leave it here, or say what to fix first.`,
-          Send,
-          { until: closed },
-        );
-        if (isWithdrawn(answer)) {
-          await view.show(`${answer.reason}. The commit stays local.`);
-          return;
-        }
-        if (answer === "push") {
-          await delivered();
-          return;
-        }
-        if (answer === "hold") {
-          await view.show("The commit stays local. The next push carries it up.");
-          return;
-        }
-        await applied(who, "What to fix", answer);
+      // The person approved the plan, so what it wrote goes up without a second gate.
+      const wrote = await call(ctx, commit, { ticket: params.ticket });
+      if (!wrote.committed) {
+        await view.show("No code changed, so nothing goes up");
+        return;
       }
+      if (!(await delivered())) {
+        await view.show("The rebase was dropped, so the commit stays local");
+        return;
+      }
+      await view.show(`Pushed to PR #${pr.number}: ${wrote.message.split("\n")[0] ?? ""}`);
     };
 
     let state = pr.state;
