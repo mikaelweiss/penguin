@@ -8,6 +8,14 @@ import rebase from "./rebase.ts";
 const Confirm = z.enum(["ok", "stop"]);
 const Go = z.union([z.enum(["go", "skip"]), z.string()]);
 
+const Triage = z.object({
+  asks: z.boolean().describe("true when the author has to change or answer something"),
+  why: z.string().describe("one line naming the fact that decided it"),
+});
+
+/** One thing that arrived. The user's own words go straight to a round; everything else is triaged first. */
+type Arrival = { author: string; text: string; fromUser: boolean };
+
 const Description = z.object({
   title: z.string().describe("the pull request title, one line"),
   body: z.string().describe("the pull request body, markdown, empty when the title says it all"),
@@ -160,10 +168,14 @@ export default workflow({
     // ---- the watch ----
     // Pumps keep what arrived; the loop reads the pull request fresh before it
     // acts, so nothing decides on a snapshot older than the block it just left.
-    let feedback: string[] = made.created
+    let feedback: Arrival[] = made.created
       ? []
       : [
-          "The pull request was already open before this run. Take whatever its threads still leave open.",
+          {
+            author: "",
+            text: "The pull request was already open before this run. Take whatever its threads still leave open.",
+            fromUser: true,
+          },
         ];
     let baseMoved = false;
     let ended = "";
@@ -209,11 +221,21 @@ export default workflow({
             await view.show(`${change.author} approved PR #${pr.number}`);
           } else {
             const said = change.body === "" ? "" : `:\n\n${change.body}`;
-            feedback.push(`${change.author} ${worded(change.state)}${said}`);
+            feedback.push({
+              author: change.author,
+              text: `${change.author} ${worded(change.state)}${said}`,
+              fromUser: false,
+            });
           }
         }
         if (change.kind === "comments") {
-          feedback.push(...change.comments.map((note) => `${note.author} commented:\n\n${note.body}`));
+          feedback.push(
+            ...change.comments.map((note) => ({
+              author: note.author,
+              text: `${note.author} commented:\n\n${note.body}`,
+              fromUser: false,
+            })),
+          );
         }
         if (change.kind === "draft") await view.show(`PR #${pr.number} went to draft, the watch holds`);
         if (change.kind === "ready") await view.show(`PR #${pr.number} is ready for review again`);
@@ -241,7 +263,7 @@ export default workflow({
       for (;;) {
         const message = await typed.next();
         if (message.done === true) return;
-        feedback.push(`The user says:\n\n${message.value.text}`);
+        feedback.push({ author: "", text: `The user says:\n\n${message.value.text}`, fromUser: true });
         poke();
       }
     })();
@@ -250,6 +272,20 @@ export default workflow({
     const opened = async (): Promise<string> => {
       if (session === "") session = await agent.open();
       return session;
+    };
+
+    // The judge reads text and nothing else, so its session carries no tools and no setup.
+    let judge = "";
+    const asks = async (arrival: Arrival): Promise<boolean> => {
+      if (arrival.fromUser) return true;
+      if (judge === "") {
+        judge = await agent.open({ model: "small", tools: [], settings: [], effort: "low" });
+      }
+      const verdict = await narrated(view, () =>
+        agent.turn(judge, { skill: "triage-feedback", prompt: arrival.text }, { result: Triage }),
+      );
+      if (!verdict.asks) await view.show(`${arrival.author} asks nothing: ${verdict.why}`);
+      return verdict.asks;
     };
 
     const assessed = async (who: string, prompt: string): Promise<Assessment> =>
@@ -363,11 +399,14 @@ export default workflow({
             await followed();
             continue;
           } else if (!now.isDraft) {
+            const arrived = feedback;
+            feedback = [];
+            const open: string[] = [];
+            for (const one of arrived) if (await asks(one)) open.push(one.text);
+            if (open.length === 0) continue;
             rounds += 1;
             await view.show(`feedback round ${rounds}`);
-            const asks = feedback;
-            feedback = [];
-            await round(asks);
+            await round(open);
             continue;
           }
         }
