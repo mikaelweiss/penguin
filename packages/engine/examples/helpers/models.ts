@@ -9,7 +9,9 @@ function isNeutralModel(model: string): model is NeutralModel {
 
 /**
  * Turns a workflow's neutral choice into the model name one agent CLI understands.
- * An unmapped choice returns undefined, so the adapter falls back to its default model.
+ * A session that names no model runs on best, so a bare open is the strongest model and
+ * a workflow spells out only the turns that take less. An unmapped choice returns
+ * undefined, so the adapter falls back to its default model.
  */
 export function modelFor(
   requested: string | undefined,
@@ -17,9 +19,10 @@ export function modelFor(
   defaults: Partial<ModelMap>,
   config: (key: string) => string | undefined,
 ): string | undefined {
-  if (requested === undefined || !isNeutralModel(requested)) return requested;
-  const key = `${adapter}-${requested}-model`;
+  const wanted = requested ?? "best";
+  if (!isNeutralModel(wanted)) return wanted;
+  const key = `${adapter}-${wanted}-model`;
   const configured = config(key)?.trim();
   if (configured !== undefined && configured !== "") return configured;
-  return defaults[requested];
+  return defaults[wanted];
 }

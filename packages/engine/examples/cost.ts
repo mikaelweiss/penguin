@@ -1,20 +1,25 @@
 // Lists what runs cost, from the usage notes their run files hold, so a change to a skill or
 // an adapter can be checked against the runs before it.
-// usage: bun examples/cost.ts [--since 2026-09-01] [--workflow review-pr] [--skills]
+// usage: bun examples/cost.ts [--since 2026-09-01] [--workflow review-pr] [--adapter claude] [--skills]
 import fs from "node:fs";
 import path from "node:path";
+import {
+  add,
+  callsPerTurn,
+  contextPerCall,
+  fresh,
+  spendOf,
+  turnsOf,
+  type Entry,
+  type Spend,
+} from "./helpers/spend.ts";
 import { runsDir } from "../src/paths.ts";
 
-type Entry = Record<string, unknown>;
-
-type Spend = {
-  turns: number;
-  input: number;
-  cacheRead: number;
-  cacheWrite: number;
-  output: number;
-  usd: number;
-  priced: boolean;
+/** One run's spend split three ways, since cost per token follows the vendor and the model. */
+type Grouped = {
+  skill: Map<string, Spend>;
+  adapter: Map<string, Spend>;
+  model: Map<string, Spend>;
 };
 
 type RunRecord = {
@@ -23,69 +28,52 @@ type RunRecord = {
   workflow: string;
   parent: string | undefined;
   own: Spend;
-  bySkill: Map<string, Spend>;
+  by: Grouped;
 };
 
-function fresh(): Spend {
-  return { turns: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, usd: 0, priced: false };
+function grouped(): Grouped {
+  return { skill: new Map(), adapter: new Map(), model: new Map() };
 }
 
-function add(total: Spend, more: Spend): void {
-  total.turns += more.turns;
-  total.input += more.input;
-  total.cacheRead += more.cacheRead;
-  total.cacheWrite += more.cacheWrite;
-  total.output += more.output;
-  total.usd += more.usd;
-  total.priced = total.priced || more.priced;
+function into(group: Map<string, Spend>, name: string, spend: Spend): void {
+  const held = group.get(name) ?? fresh();
+  add(held, spend);
+  group.set(name, held);
 }
 
-function number(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function merge(total: Grouped, more: Grouped): void {
+  for (const key of ["skill", "adapter", "model"] as const) {
+    for (const [name, spend] of more[key]) into(total[key], name, spend);
+  }
 }
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function spendOf(usage: Record<string, unknown>): Spend {
-  const usd = usage["usd"];
-  return {
-    turns: 1,
-    input: number(usage["input"]),
-    cacheRead: number(usage["cacheRead"]),
-    cacheWrite: number(usage["cacheWrite"]),
-    output: number(usage["output"]),
-    usd: typeof usd === "number" ? usd : 0,
-    priced: typeof usd === "number",
-  };
-}
-
 function read(id: string): RunRecord | undefined {
   const file = path.join(runsDir(), id, "run.jsonl");
   if (!fs.existsSync(file)) return undefined;
-  let head: Entry | undefined;
-  const own = fresh();
-  const bySkill = new Map<string, Spend>();
+  const entries: Entry[] = [];
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
-    let entry: Entry;
     try {
-      entry = JSON.parse(line) as Entry;
+      entries.push(JSON.parse(line) as Entry);
     } catch {
       continue;
     }
-    if (head === undefined && "workflow" in entry && "params" in entry) head = entry;
-    const usage = entry["usage"];
-    if (usage === null || typeof usage !== "object") continue;
-    const spent = spendOf(usage as Record<string, unknown>);
-    add(own, spent);
-    const skill = text((usage as Record<string, unknown>)["skill"]) ?? "(prompt)";
-    const held = bySkill.get(skill) ?? fresh();
-    add(held, spent);
-    bySkill.set(skill, held);
   }
+  const head = entries.find((entry) => "workflow" in entry && "params" in entry);
   if (head === undefined) return undefined;
+  const own = fresh();
+  const by = grouped();
+  for (const turn of turnsOf(entries)) {
+    const spent = spendOf(turn.usage, turn.calls);
+    add(own, spent);
+    into(by.skill, text(turn.usage["skill"]) ?? "(prompt)", spent);
+    into(by.adapter, text(turn.usage["adapter"]) ?? "(unknown)", spent);
+    into(by.model, text(turn.usage["model"]) ?? "(unknown)", spent);
+  }
   const workflow = text(head["workflow"]) ?? "";
   return {
     id,
@@ -93,18 +81,22 @@ function read(id: string): RunRecord | undefined {
     workflow: path.basename(workflow).replace(/\.ts$/, ""),
     parent: text(head["parent"]),
     own,
-    bySkill,
+    by,
   };
 }
 
 function tokens(count: number): string {
-  if (count < 1000) return `${count}`;
+  if (count < 1000) return `${Math.round(count)}`;
   if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
 function dollars(spend: Spend): string {
   return spend.priced ? `$${spend.usd.toFixed(2)}` : "-";
+}
+
+function perTurn(spend: Spend): string {
+  return callsPerTurn(spend).toFixed(1);
 }
 
 function row(cells: string[], widths: number[]): string {
@@ -118,6 +110,7 @@ function argOf(flag: string): string | undefined {
 
 const since = argOf("--since") ?? "";
 const only = argOf("--workflow");
+const onlyAdapter = argOf("--adapter");
 const showSkills = process.argv.includes("--skills");
 
 const records = new Map<string, RunRecord>();
@@ -136,39 +129,41 @@ for (const record of records.values()) {
   list.push(record);
   children.set(record.parent, list);
 }
-function treeSpend(record: RunRecord, skills: Map<string, Spend>): Spend {
+function treeSpend(record: RunRecord, totals: Grouped): Spend {
   const total = fresh();
   add(total, record.own);
-  for (const [skill, spend] of record.bySkill) {
-    const held = skills.get(skill) ?? fresh();
-    add(held, spend);
-    skills.set(skill, held);
-  }
-  for (const child of children.get(record.id) ?? []) add(total, treeSpend(child, skills));
+  merge(totals, record.by);
+  for (const child of children.get(record.id) ?? []) add(total, treeSpend(child, totals));
   return total;
+}
+
+function usesAdapter(record: RunRecord, adapter: string): boolean {
+  if (record.by.adapter.has(adapter)) return true;
+  return (children.get(record.id) ?? []).some((child) => usesAdapter(child, adapter));
 }
 
 const roots = [...records.values()]
   .filter((record) => record.parent === undefined || !records.has(record.parent))
   .filter((record) => record.at >= since)
   .filter((record) => only === undefined || record.workflow === only)
+  .filter((record) => onlyAdapter === undefined || usesAdapter(record, onlyAdapter))
   .sort((a, b) => a.at.localeCompare(b.at));
 
 const byWorkflow = new Map<string, Spend>();
-const bySkill = new Map<string, Spend>();
+const totals = grouped();
 const all = fresh();
 const lines: string[][] = [];
 for (const record of roots) {
-  const total = treeSpend(record, bySkill);
+  const total = treeSpend(record, totals);
   if (total.turns === 0) continue;
-  const held = byWorkflow.get(record.workflow) ?? fresh();
-  add(held, total);
-  byWorkflow.set(record.workflow, held);
+  into(byWorkflow, record.workflow, total);
   add(all, total);
   lines.push([
     record.at.slice(0, 16),
     record.workflow,
     `${total.turns}`,
+    `${total.calls}`,
+    tokens(contextPerCall(total)),
     tokens(total.input),
     tokens(total.cacheRead),
     tokens(total.cacheWrite),
@@ -178,7 +173,19 @@ for (const record of roots) {
   ]);
 }
 
-const header = ["started", "workflow", "turns", "input", "cache read", "cache write", "output", "usd", "run"];
+const header = [
+  "started",
+  "workflow",
+  "turns",
+  "calls",
+  "ctx/call",
+  "input",
+  "cache rd",
+  "cache wr",
+  "output",
+  "usd",
+  "run",
+];
 const widths = header.map((cell, index) =>
   Math.max(cell.length, ...lines.map((line) => line[index]?.length ?? 0)),
 );
@@ -197,10 +204,12 @@ function table(title: string, groups: Map<string, Spend>): void {
     .map(([name, spend]) => [
       name,
       `${spend.turns}`,
+      perTurn(spend),
+      tokens(contextPerCall(spend)),
       tokens(spend.input + spend.cacheRead + spend.cacheWrite + spend.output),
       dollars(spend),
     ]);
-  const head = ["", "turns", "tokens", "usd"];
+  const head = ["", "turns", "calls/turn", "ctx/call", "tokens", "usd"];
   const wide = head.map((cell, index) =>
     Math.max(cell.length, ...rows.map((line) => line[index]?.length ?? 0)),
   );
@@ -209,7 +218,11 @@ function table(title: string, groups: Map<string, Spend>): void {
 }
 
 table("by workflow", byWorkflow);
-if (showSkills) table("by skill", bySkill);
+table("by adapter", totals.adapter);
+table("by model", totals.model);
+if (showSkills) table("by skill", totals.skill);
 out.write(
-  `\ntotal: ${all.turns} turns, ${tokens(all.input + all.cacheRead + all.cacheWrite + all.output)} tokens, ${dollars(all)}\n`,
+  `\ntotal: ${all.turns} turns, ${all.calls} tool calls, ${perTurn(all)} per turn, ` +
+    `${tokens(contextPerCall(all))} context per call, ` +
+    `${tokens(all.input + all.cacheRead + all.cacheWrite + all.output)} tokens, ${dollars(all)}\n`,
 );

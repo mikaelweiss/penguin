@@ -10,6 +10,15 @@ type Change = { status: string; path: string };
 /** How much diff one read hands back. A prompt has to hold it, so a huge change is cut, not sent whole. */
 const DIFF_LIMIT = 60000;
 
+/** How much of a file one read hands back, for the same reason. */
+const FILE_LIMIT = 20000;
+
+/** `truncated` says the tail was cut, so a reader knows it has not seen all of it. */
+function capped(text: string, limit: number): { text: string; truncated: boolean } {
+  if (text.length <= limit) return { text, truncated: false };
+  return { text: text.slice(0, limit), truncated: true };
+}
+
 type Sync =
   | { conflicted: true; files: string[] }
   | { conflicted: false; sha: string; baseSha: string; same: boolean };
@@ -235,15 +244,50 @@ export default adapter({
             parts.push(await untrackedDiff(change.path, cwd));
           }
         }
-        const text = parts.join("");
-        if (text.length <= limit) return { text, truncated: false };
-        return { text: text.slice(0, limit), truncated: true };
+        return capped(parts.join(""), limit);
+      },
+      /**
+       * What HEAD changed against base, as text. The three-dot range reads from
+       * where the two parted, so commits base gained since are not read as the
+       * branch's work. `stat` asks for the summary instead of the patch.
+       */
+      async against(
+        base: string,
+        options?: { cwd?: string; stat?: boolean; limit?: number },
+      ): Promise<{ text: string; truncated: boolean }> {
+        const how = options?.stat === true ? ["--stat"] : [];
+        const done = await git(["diff", ...how, `${base}...HEAD`], options?.cwd);
+        if (done.code !== 0) throw new Fault(done.stderr.trim());
+        return capped(done.stdout, options?.limit ?? DIFF_LIMIT);
+      },
+      /**
+       * What the working tree holds at file, conflict markers and all. `there` is
+       * false when nothing stands at the path, which one side of a conflict deleting
+       * a file leaves behind.
+       */
+      async read(
+        file: string,
+        options?: { cwd?: string; limit?: number },
+      ): Promise<{ there: boolean; text: string; truncated: boolean }> {
+        const where = path.resolve(host.cwd, options?.cwd ?? ".", file);
+        if (!fs.existsSync(where)) return { there: false, text: "", truncated: false };
+        const text = fs.readFileSync(where, "utf8");
+        return { there: true, ...capped(text, options?.limit ?? FILE_LIMIT) };
       },
       /** The newest subject lines, which are the only record of how this repository writes them. */
-      async subjects(count: number, options?: { cwd?: string }): Promise<{ subjects: string[] }> {
-        const done = await git(["log", `-${count}`, "--format=%s"], options?.cwd);
+      async subjects(
+        count: number,
+        options?: { cwd?: string; range?: string },
+      ): Promise<{ subjects: string[] }> {
+        const range = options?.range === undefined ? [] : [options.range];
+        const done = await git(["log", `-${count}`, "--format=%s", ...range], options?.cwd);
         if (done.code !== 0) return { subjects: [] };
         return { subjects: done.stdout.split("\n").filter((line) => line.trim() !== "") };
+      },
+      /** The newest commits as git prints them, message and all. Empty when git prints none. */
+      async log(count: number, options?: { cwd?: string }): Promise<{ text: string }> {
+        const done = await git(["log", `-${count}`], options?.cwd);
+        return { text: done.code === 0 ? done.stdout.trim() : "" };
       },
       async head(
         options?: { cwd?: string },
@@ -362,6 +406,18 @@ export default adapter({
         async abort(options?: { cwd?: string }): Promise<void> {
           const done = await git(["rebase", "--abort"], options?.cwd);
           if (done.code !== 0) throw new Fault(done.stderr.trim());
+        },
+        /** The commit the open rebase is replaying, message and patch. Empty when git prints none. */
+        async patch(
+          options?: { cwd?: string; limit?: number },
+        ): Promise<{ text: string; truncated: boolean }> {
+          const done = await git(["rebase", "--show-current-patch"], options?.cwd);
+          if (done.code !== 0) return { text: "", truncated: false };
+          return capped(done.stdout, options?.limit ?? DIFF_LIMIT);
+        },
+        /** The paths the open rebase stopped on, as git reports them unmerged. */
+        async conflicts(options?: { cwd?: string }): Promise<{ files: string[] }> {
+          return { files: await unmerged(options?.cwd) };
         },
         /** Whether a rebase is open in the worktree, read off the state folder git keeps for one. */
         async pending(options?: { cwd?: string }): Promise<boolean> {

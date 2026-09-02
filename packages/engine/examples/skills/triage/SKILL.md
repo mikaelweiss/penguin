@@ -1,14 +1,14 @@
 ---
 name: triage
-description: Decides if a ticket is ready to work on and splits it into the tasks to build. Use before any planning, when a ticket needs a go or no-go.
+description: Decides if a ticket is ready to work on, splits it into the tasks to build, and names the branch they go on. Use before any planning, when a ticket needs a go or no-go.
 ---
 
 # Triage a ticket
 
-Decide if the ticket is ready to work on, and return the tasks that build it. Do not write code.
+Decide if the ticket is ready to work on, return the tasks that build it, and name the branch they go on. Do not write code.
 
 1. Read the ticket. The input is an identifier, a URL, or the ticket text itself. For an identifier, use the CLI that owns it, for example `gh issue view <id>`.
-2. Read the parts of the repository the ticket points at.
+2. Read the parts of the repository the ticket points at, and the branch names it already uses: `git branch -a --sort=-committerdate --format='%(refname:short)' | head -20`.
 3. Answer two questions:
    - Is the goal clear enough to build?
    - Does the repository hold the code the ticket names?
@@ -16,6 +16,7 @@ Decide if the ticket is ready to work on, and return the tasks that build it. Do
 5. Set `actionable` to true only if both answers are yes. Put the deciding fact in `reason`. Name the file, the missing detail, or the conflict. One or two sentences.
 6. When the ticket is actionable, return the work as `tasks`.
 7. Return what your reading found as `context`: each file you read, what it holds, and the line numbers that matter. The planner starts from this instead of reading the repository a second time. Facts only, no plan.
+8. Name the branch the work goes on as `branch`. Match the style the repository's own names are built in, and how much they say. Say what the work does, not what the ticket is called: three to five words, lowercase letters, digits, and dashes, under 50 characters. Do not create the branch or a worktree. penguin does both after you answer.
 
 ## The split
 

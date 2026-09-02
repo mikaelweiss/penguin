@@ -1,9 +1,17 @@
-import { call, isWithdrawn, workflow } from "penguin";
+import { call, isWithdrawn, workflow, type Adapters } from "penguin";
 import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
 import { narrated } from "../helpers/turns.ts";
 import commit from "./commit.ts";
 import rebase from "./rebase.ts";
+
+/** Enough merged titles to read a repository's style off, few enough to stay cheap. */
+const STYLE_DEPTH = 20;
+
+/** A branch longer than this tells its story in the diff, not in more subject lines. */
+const COMMIT_DEPTH = 100;
+
+type Thread = Awaited<ReturnType<Adapters["github"]["pr"]["threads"]>>[number];
 
 const Confirm = z.enum(["ok", "stop"]);
 const Go = z.union([z.enum(["go", "skip"]), z.string()]);
@@ -42,6 +50,19 @@ const Assessment = z.object({
 
 type Assessment = z.infer<typeof Assessment>;
 
+const Replies = z.object({
+  replies: z
+    .array(
+      z.object({
+        thread: z
+          .string()
+          .describe("the id of the thread the reply goes on, as the open threads spell it"),
+        body: z.string().describe("what the reply says on that thread, markdown"),
+      }),
+    )
+    .describe("one entry per thread the plan answers in words, empty when it only changes code"),
+});
+
 const REVIEWS: Record<string, string> = {
   APPROVED: "approved it",
   CHANGES_REQUESTED: "asked for changes",
@@ -51,6 +72,19 @@ const REVIEWS: Record<string, string> = {
 
 function worded(state: string): string {
   return REVIEWS[state] ?? `left a ${state.toLowerCase().replace(/_/g, " ")} review`;
+}
+
+/** The open threads as a turn reads them: the id to answer on, where it sits, and who said what. */
+function threaded(threads: Thread[]): string {
+  if (threads.length === 0) return "None open.";
+  return threads
+    .map((thread) => {
+      const line = thread.line === null ? "" : `:${thread.line}`;
+      const at = thread.path === "" ? "" : ` on ${thread.path}${line}`;
+      const said = thread.comments.map((one) => `${one.author} said:\n\n${one.body}`).join("\n\n");
+      return `## ${thread.id}${at}\n\n${said}`;
+    })
+    .join("\n\n");
 }
 
 /** The assessment as the person reads it, so the gate shows the same thing the agent will do. */
@@ -125,19 +159,34 @@ export default workflow({
 
     if (!(await delivered())) return nowhere;
 
-    const writer = await agent.open();
+    // The turn reads the branch from the prompt. Left to fetch it, an agent spends a
+    // round trip per command, and the description costs minutes instead of seconds.
+    const onto = `origin/${base}`;
+    const [commits, stat, diff, titles] = await Promise.all([
+      vcs.subjects(COMMIT_DEPTH, { range: `${onto}..HEAD` }),
+      vcs.against(onto, { stat: true }),
+      vcs.against(onto),
+      github.pr.titles(STYLE_DEPTH),
+    ]);
+    const work = [
+      `# Base branch\n\n${base}`,
+      ...(params.ticket === "" ? [] : [`# Ticket\n\n${params.ticket}`]),
+      `# Commits\n\n${commits.subjects.join("\n")}`,
+      `# Diff stat\n\n${stat.text.trim()}`,
+      `# Diff\n\n${
+        diff.truncated
+          ? `${diff.text}\n\n… cut here. The stat above is the whole change.`
+          : diff.text
+      }`,
+      `# Merged titles\n\n${titles.join("\n")}`,
+    ].join("\n\n");
+
+    // The branch is in the prompt, so this turn only answers. No tools and none of the
+    // person's own CLI setup means no tool definitions to send and no MCP servers to
+    // wait on. Low effort suits the job: naming a branch is judgment, not deliberation.
+    const writer = await agent.open({ model: "small", tools: [], settings: [], effort: "low" });
     const written = await narrated(view, () =>
-      agent.turn(
-        writer,
-        {
-          skill: "open-pr",
-          prompt:
-            params.ticket === ""
-              ? `# Base branch\n\n${base}`
-              : `# Base branch\n\n${base}\n\n# Ticket\n\n${params.ticket}`,
-        },
-        { result: Description },
-      ),
+      agent.turn(writer, { skill: "open-pr", prompt: work }, { result: Description }),
     );
     // The note is the caller's, so it goes under a body the agent wrote knowing nothing of it.
     const body = params.note === "" ? written.body : `${written.body}\n\n${params.note}`;
@@ -288,18 +337,47 @@ export default workflow({
       return verdict.asks;
     };
 
-    const assessed = async (who: string, prompt: string): Promise<Assessment> =>
-      narrated(view, () =>
+    /**
+     * What both turns start from, fetched once for each of them: the pull request
+     * and every thread still open on it. An agent that reads the threads itself
+     * spends a round trip on a list the workflow is one command away from.
+     */
+    const standing = async (): Promise<{ threads: Thread[]; text: string }> => {
+      const threads = await github.pr.threads(pr.url);
+      const text = `# Pull request\n\n${pr.url}\n\n# Open threads\n\n${threaded(threads)}`;
+      return { threads, text };
+    };
+
+    const assessed = async (who: string, said: string): Promise<Assessment> => {
+      const prompt = `${(await standing()).text}\n\n${said}`;
+      return narrated(view, () =>
         agent.turn(who, { skill: "assess-feedback", prompt }, { result: Assessment }),
       );
+    };
 
     const applied = async (who: string, heading: string, what: string): Promise<void> => {
-      await narrated(view, () =>
-        agent.turn(who, {
-          skill: "address-feedback",
-          prompt: `# Pull request\n\n${pr.url}\n\n# ${heading}\n\n${what}`,
-        }),
+      const now = await standing();
+      const answered = await narrated(view, () =>
+        agent.turn(
+          who,
+          { skill: "address-feedback", prompt: `${now.text}\n\n# ${heading}\n\n${what}` },
+          { result: Replies },
+        ),
       );
+      const open = new Set(now.threads.map((thread) => thread.id));
+      let posted = 0;
+      for (const reply of answered.replies) {
+        // An id no open thread carries reaches nobody, so a wrong one costs a line, not the round.
+        if (!open.has(reply.thread)) {
+          await view.show(`No thread ${reply.thread} is open, so its reply is not posted`);
+          continue;
+        }
+        await github.pr.reply(reply.thread, reply.body);
+        posted += 1;
+      }
+      if (posted > 0) {
+        await view.show(posted === 1 ? "replied on one thread" : `replied on ${posted} threads`);
+      }
     };
 
     /** The branch back onto a base that moved under it. Nothing here ends the watch. */
@@ -327,10 +405,7 @@ export default workflow({
     /** One round: assess, gate the plan, apply it, commit, gate the push. */
     const round = async (asks: string[]): Promise<void> => {
       const who = await opened();
-      let plan = await assessed(
-        who,
-        `# Pull request\n\n${pr.url}\n\n# What arrived\n\n${asks.join("\n\n")}`,
-      );
+      let plan = await assessed(who, `# What arrived\n\n${asks.join("\n\n")}`);
 
       for (;;) {
         if (plan.issues.length === 0) {

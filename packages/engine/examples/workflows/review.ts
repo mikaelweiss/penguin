@@ -14,6 +14,7 @@ export type Brief = {
   acceptance: string;
   blocking?: string;
   baseline?: string;
+  gates?: string;
   base?: string;
 };
 
@@ -27,6 +28,10 @@ export function checklist(brief: Brief): string {
   if (brief.baseline !== undefined && brief.baseline !== "")
     parts.push(
       `# What the gates said before this change\n\nA gate that already failed here is not this change's defect. Do not re-derive it, and do not block on it.\n\n${brief.baseline}`,
+    );
+  if (brief.gates !== undefined && brief.gates !== "")
+    parts.push(
+      `# What the gates say now\n\npenguin ran them on this tree after the change. Read them here, and do not run one yourself.\n\n${brief.gates}`,
     );
   if (brief.blocking !== undefined && brief.blocking !== "")
     parts.push(
@@ -47,10 +52,17 @@ export default workflow({
     base: z.string().default("").meta({ internal: true }),
   }),
 
-  async run({ params, agent, view }) {
+  async run({ params, agent, gates, view }) {
+    // The gates run here, once, so the reviewer reads a verdict instead of producing one.
+    const ran = await gates.run({ since: params.base === "" ? undefined : params.base });
+    await view.show(ran.green ? "gates: green" : "gates: red");
     const session = await agent.open();
     const review = await narrated(view, () =>
-      agent.turn(session, { skill: "review", prompt: checklist(params) }, { result: Review }),
+      agent.turn(
+        session,
+        { skill: "review", prompt: checklist({ ...params, gates: ran.report }) },
+        { result: Review },
+      ),
     );
     await view.show(`verdict: ${review.verdict}`);
     return review;

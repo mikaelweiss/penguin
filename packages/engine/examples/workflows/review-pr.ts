@@ -5,6 +5,16 @@ import { openWorktree } from "../helpers/worktree.ts";
 
 const DIFF_LINES = 500;
 
+/** How many times one judgment may send the gatherer back for code it cannot read itself. */
+const QUESTIONS = 2;
+
+/** Room for a claim and the file and line it rests on, and no room for a paragraph. */
+const LINE = 300;
+
+function line(about: string): z.ZodString {
+  return z.string().max(LINE).describe(about);
+}
+
 const Triage = z.object({
   eyeball: z
     .boolean()
@@ -21,7 +31,75 @@ const Findings = z.object({
     .describe("the improvements the author may take or leave"),
 });
 
+/** What the reader hands the judge: everything the tree says that the diff does not. */
+const Dossier = z.object({
+  files: z
+    .array(
+      z.object({
+        path: line("the changed file, spelled as the diff spells it"),
+        tier: z
+          .enum(["ignore", "skim", "deep"])
+          .describe(
+            "ignore when a command checks it better, skim when a mistake there is cheap, deep when the review turns on it",
+          ),
+        change: line("what the diff does to this file"),
+        read: z
+          .array(line("one thing read about this file and what it says, with file:line"))
+          .describe(
+            "the callers, the called, the contracts, and the config that decide whether the change is right",
+          ),
+      }),
+    )
+    .describe("every changed file, in the order the diff names them"),
+  flows: z
+    .array(
+      z.object({
+        name: line("what the flow does"),
+        entry: line("where execution enters it, with file:line"),
+        steps: z.array(line("one step of the flow, with file:line")),
+        exits: z.array(line("one way it can end, success, error, or early return, with file:line")),
+        effects: z.array(line("one thing it writes, with file:line")),
+      }),
+    )
+    .describe("the end to end paths the change sits in"),
+  state: z
+    .array(
+      z.object({
+        name: line("the state, with the file:line that holds it"),
+        writers: z.array(line("one writer, with file:line")),
+        readers: z.array(line("one reader, with file:line")),
+      }),
+    )
+    .describe("every piece of state the change introduces or touches"),
+  facts: z
+    .array(line("one fact, with file:line"))
+    .describe("what the diff does not show and a reader of the diff alone would have to guess"),
+});
+
+/** What the reader answers when the judge asks for code the dossier does not hold. */
+const Answers = z.object({
+  answers: z.array(
+    z.object({
+      question: line("the question, as it was asked"),
+      answer: z.string().describe("what the code says, in a few lines, or that it does not say"),
+      refs: z.array(line("a file:line the answer rests on")),
+    }),
+  ),
+});
+
+/** The findings, plus what the judge could not settle without reading code. */
+const Verdict = Findings.extend({
+  questions: z
+    .array(line("one question about the code, answerable by reading it"))
+    .describe(
+      "what the tree must answer before these findings are final, empty when the dossier answers them",
+    ),
+});
+
 type Findings = z.infer<typeof Findings>;
+type Dossier = z.infer<typeof Dossier>;
+type Answers = z.infer<typeof Answers>;
+type Verdict = z.infer<typeof Verdict>;
 type Note = { author: string; at: string; body: string };
 
 function listed(items: string[]): string {
@@ -30,6 +108,10 @@ function listed(items: string[]): string {
 
 function report(findings: Findings): string {
   return `### Blockers\n\n${listed(findings.blockers)}\n\n### Non-blockers\n\n${listed(findings.nonBlockers)}`;
+}
+
+function verdictOf(judged: Verdict): Findings {
+  return { blockers: judged.blockers, nonBlockers: judged.nonBlockers };
 }
 
 function cut(diff: string): string {
@@ -59,6 +141,22 @@ function changed(base: string, diff: string): string {
   const files = touched(diff);
   const listed = files.length === 0 ? "none read" : files.map((file) => `- ${file}`).join("\n");
   return `# Base\n\norigin/${base}\n\n# Changed files\n\n${listed}\n\n# Diff\n\n${diff}`;
+}
+
+/** The tree, as the only shape the judge ever sees it in. */
+function dossierOf(found: Dossier): string {
+  return `# Dossier\n\nAnother session read the working tree and reports this. It is all you get of the code.\n\n\`\`\`json\n${JSON.stringify(found, null, 2)}\n\`\`\``;
+}
+
+function asking(questions: string[]): string {
+  return `The judge cannot read the tree and needs these answered from it. Read what each one needs, answer it from the code, and cite the file and line. Facts only, no verdicts.\n\n${listed(questions)}`;
+}
+
+function answering(found: Answers): string {
+  const said = found.answers
+    .map((one) => `## ${one.question}\n\n${one.answer}\n\n${listed(one.refs)}`)
+    .join("\n\n");
+  return `The reader answered your questions from the tree:\n\n${said}\n\nJudge again with these facts and return the full findings.`;
 }
 
 export default workflow({
@@ -104,10 +202,10 @@ export default workflow({
 
     // The triage reads the diff over the wire, so a PR the user takes costs no worktree.
     let diff = await github.pr.diff(params.pr);
-    const judge = await agent.open();
+    const triager = await agent.open();
     const triaged = await narrated(view, () =>
       agent.turn(
-        judge,
+        triager,
         { skill: "triage-pr", prompt: `${briefing()}\n\n# Diff\n\n${cut(diff)}` },
         { result: Triage },
       ),
@@ -140,10 +238,25 @@ export default workflow({
     let posted = 0;
     let head = "";
 
-    const opening = (): string =>
+    type Change = Awaited<ReturnType<typeof changes.next>>;
+    /** The changes that are context for a running turn rather than a reason to stop. */
+    type News = Extract<Change, { kind: "commits" | "description" | "comments" }>;
+    type Phase = "gather" | "judge";
+    type Stop = "approved" | "closed" | "draft" | "queued";
+    type Ran<T> = { stop: Stop } | { value: T };
+
+    // The reader holds the tree it read across the rounds, so a second round reads only what changed.
+    const reader = await agent.open({ model: "small", cwd: dir });
+
+    const gathering = (): string =>
       previous === undefined
-        ? `Review this pull request. The working tree holds its code.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`
-        : `New code arrived since the last review, and the working tree holds it. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, review what changed, and return the full updated findings.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`;
+        ? `Gather the dossier for this pull request. The working tree holds its code.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`
+        : `New code arrived since the last round, and the working tree holds it. The last round found:\n\n${report(previous)}\n\nRead what changed and the code those findings name, then return the dossier for the code the tree holds now.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`;
+
+    const judging = (found: Dossier): string =>
+      previous === undefined
+        ? `Judge this pull request.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}\n\n${dossierOf(found)}`
+        : `New code arrived since the last review. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, judge what changed, and return the full updated findings.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}\n\n${dossierOf(found)}`;
 
     // The worktree only mirrors the PR head, so a force-push is a reset, not a merge.
     const synced = async (): Promise<void> => {
@@ -188,15 +301,36 @@ export default workflow({
       posted += 1;
     };
 
-    const review = async (): Promise<
-      "approved" | "sent" | "closed" | "draft" | "queued" | "stale"
-    > => {
-      await synced();
-      const reviewer = await agent.open({ cwd: dir });
-      let turn = agent.turn(reviewer, { skill: "review-pr", prompt: opening() }, { result: Findings });
+    /** What news that lands mid-turn tells the session that was running. */
+    const update = async (change: News, phase: Phase): Promise<string> => {
+      if (change.kind === "commits") {
+        await synced();
+        const carry =
+          phase === "gather"
+            ? "Read what changed and return the dossier for the code the tree holds now."
+            : "Your dossier covers the code before this push. Judge the current diff, and ask for whatever the dossier no longer answers.";
+        return `New code was pushed to the PR. The working tree now holds it. ${carry}\n\n${changed(pr.baseRefName, diff)}`;
+      }
+      if (change.kind === "description") {
+        description = change.body;
+        return `The PR description changed. The new description:\n\n${change.body}\n\nTake it as added context and continue.`;
+      }
+      notes = notes.concat(change.comments);
+      return `New comments arrived on the PR:\n\n${noted(change.comments)}\n\nTake them as added context and continue.`;
+    };
+
+    /** One turn run against the changes watch: news re-asks the same session, an outcome ends the round. */
+    const raced = async <Shape extends z.ZodObject>(
+      phase: Phase,
+      session: string,
+      skill: string,
+      prompt: string,
+      result: Shape,
+    ): Promise<Ran<z.infer<Shape>>> => {
+      let turn = agent.turn(session, { skill, prompt }, { result });
       let shown = narrate(view, turn.output);
       const stopTurn = async (): Promise<void> => {
-        await agent.stop(reviewer);
+        await agent.stop(session);
         await turn.value.catch(() => {});
         await shown;
       };
@@ -214,22 +348,22 @@ export default workflow({
         if (change.kind === "closed") {
           await stopTurn();
           await view.show(`PR #${pr.number} is ${change.state}, the review stops`);
-          return "closed";
+          return { stop: "closed" };
         }
         if (change.kind === "approved") {
           await stopTurn();
           await view.show(`You approved PR #${pr.number}, the review stops`);
-          return "approved";
+          return { stop: "approved" };
         }
         if (change.kind === "draft") {
           await stopTurn();
           await view.show(`PR #${pr.number} went to draft, the review waits`);
-          return "draft";
+          return { stop: "draft" };
         }
         if (change.kind === "queued") {
           await stopTurn();
           await view.show(`PR #${pr.number} is queued to merge, the review waits`);
-          return "queued";
+          return { stop: "queued" };
         }
         if (change.kind === "ready") continue;
         if (change.kind === "dequeued") continue;
@@ -237,35 +371,62 @@ export default workflow({
         // A stale round syncs before the watch reports, so a push the tree holds already is not news.
         if (change.kind === "commits" && (await since()) !== "moved") continue;
         await stopTurn();
-        let update: string;
-        if (change.kind === "commits") {
-          await synced();
-          update = `New code was pushed to the PR. The working tree now holds it. Continue the review over the current code.\n\n${changed(pr.baseRefName, diff)}`;
-        } else if (change.kind === "description") {
-          description = change.body;
-          update = `The PR description changed. The new description:\n\n${change.body}\n\nTake it as added context and continue the review.`;
-        } else {
-          notes = notes.concat(change.comments);
-          update = `New comments arrived on the PR:\n\n${noted(change.comments)}\n\nTake them as added context and continue the review.`;
-        }
-        turn = agent.turn(reviewer, { skill: "review-pr", prompt: update }, { result: Findings });
+        turn = agent.turn(session, { skill, prompt: await update(change, phase) }, { result });
         shown = narrate(view, turn.output);
       }
 
       // A turn that will not finish is the person's to clear. The review does not end on it.
-      let findings: z.infer<typeof Findings>;
       for (;;) {
         try {
-          findings = await turn.value;
+          const value = await turn.value;
           await shown;
-          break;
+          return { value };
         } catch (error) {
           await shown;
           await retried(view, error);
-          turn = agent.turn(reviewer, { skill: "review-pr", prompt: opening() }, { result: Findings });
+          turn = agent.turn(session, { skill, prompt }, { result });
           shown = narrate(view, turn.output);
         }
       }
+    };
+
+    /**
+     * One judgment. The judge holds no tools, so what it cannot settle from the dossier it
+     * asks for, and the reader answers. The trips are bounded: a judge that keeps asking
+     * has to decide on what it holds.
+     */
+    const settle = async (judge: string, prompt: string): Promise<Ran<Verdict>> => {
+      let ran = await raced("judge", judge, "review-judge", prompt, Verdict);
+      for (let round = 0; round < QUESTIONS; round++) {
+        if ("stop" in ran) return ran;
+        if (ran.value.questions.length === 0) return ran;
+        const answered = await raced(
+          "gather",
+          reader,
+          "review-gather",
+          asking(ran.value.questions),
+          Answers,
+        );
+        if ("stop" in answered) return answered;
+        ran = await raced("judge", judge, "review-judge", answering(answered.value), Verdict);
+      }
+      return ran;
+    };
+
+    const review = async (): Promise<
+      "approved" | "sent" | "closed" | "draft" | "queued" | "stale"
+    > => {
+      await synced();
+      const gathered = await raced("gather", reader, "review-gather", gathering(), Dossier);
+      if ("stop" in gathered) return gathered.stop;
+
+      // The prompt carries the whole case, so the judge runs on the best model with nothing
+      // to call: no tools to define, no MCP servers to wait on, and a context that stays flat.
+      const judge = await agent.open({ tools: [], settings: [] });
+      const judged = await settle(judge, judging(gathered.value));
+      if ("stop" in judged) return judged.stop;
+
+      let findings = verdictOf(judged.value);
       previous = findings;
       while (findings.blockers.length > 0) {
         const answer = await view.ask(
@@ -278,16 +439,12 @@ export default workflow({
           await view.show(`Posted feedback on PR #${pr.number} without approving`);
           return "sent";
         }
-        findings = await narrated(view, () =>
-          agent.turn(
-            reviewer,
-            {
-              skill: "review-pr",
-              prompt: `The user says:\n\n${answer}\n\nAnswer it, adjust the findings where the user is right, and return the full updated findings.`,
-            },
-            { result: Findings },
-          ),
+        const said = await settle(
+          judge,
+          `The user says:\n\n${answer}\n\nAnswer it, adjust the findings where the user is right, and return the full updated findings. When the answer turns on code your dossier does not hold, ask for it in questions rather than guess.`,
         );
+        if ("stop" in said) return said.stop;
+        findings = verdictOf(said.value);
         previous = findings;
       }
       if (await overtaken()) return "stale";

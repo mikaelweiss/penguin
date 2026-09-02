@@ -5,11 +5,11 @@ description: Reviews a working tree against its acceptance checks and reports ea
 
 # Review the change
 
-Review the working tree against the acceptance checks. The input holds the checks, and it may also name the base commit, what the gates said before this change, and the blocking findings of the last round.
+Review the working tree against the acceptance checks. The input holds the checks, and it may also name the base commit, what the gates said before this change, what they say now, and the blocking findings of the last round.
 
 1. Read the checks. A task in the input is the checks.
 2. Read the diff against the base commit the input names: `git diff <base>..HEAD`. With no base named, use `git diff main...HEAD`. Never diff against a branch that moves while you read it.
-3. Run the quality gates yourself. Do not trust the report of the last step.
+3. Read what the gates say now. The input holds their output.
 4. Test each check against the diff. A check you cannot confirm is a failed check.
 5. Look for the defects tests miss. Check each invariant, each error path, each pair of writers, and each secret.
 6. Split what you found. A defect this change introduced goes in `blocking`, one line each: the file, the line, and the failure. Everything else goes in `notes`: a risk, a smaller cleanup, a thing the next reader should know.
@@ -17,9 +17,7 @@ Review the working tree against the acceptance checks. The input holds the check
 
 ## The gates
 
-Take the gate commands from the repository: `package.json` scripts, `AGENTS.md`, `CLAUDE.md`, `Makefile`, the CI workflow. Never guess a command.
-
-Run each gate once. Send the output to a file, for example `bun test > /tmp/review-test.log 2>&1`. Read the file. To see the output a second way, read the file again. Never run a gate twice for the same output.
+penguin ran the gates on this tree after the change, and their output is in the input. Trust it. Do not run a gate yourself, do not go looking for the commands, and do not ask for one to be run again.
 
 ## The baseline
 

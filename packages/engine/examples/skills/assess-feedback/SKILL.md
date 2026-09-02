@@ -5,23 +5,17 @@ description: Verifies each piece of pull request feedback against the code and w
 
 # Assess the pull request feedback
 
-The input names the pull request and says what arrived: a review, comments, or a direction from the user. Work out what is true and what you would do about it. Change nothing.
+The input names the pull request, lists every thread still open on it under `# Open threads`, and says what arrived: a review, comments, or a direction from the user. Work out what is true and what you would do about it. Change nothing.
 
 A person reads your answer and decides. They have not read the threads and they may not know the code. Write for them.
 
 ## Step 1 - Collect
 
-Read the owner, the repo, and the number out of the pull request url.
-
-Read the open threads:
-
-    gh api graphql -f query='{ repository(owner: "OWNER", name: "REPO") { pullRequest(number: N) { reviewThreads(first: 50) { nodes { isResolved comments(first: 10) { nodes { body path line author { login } } } } } } } }'
-
-Skip the resolved ones. A thread someone already closed is not yours to reopen.
+The threads are in the input. Never fetch them. A thread someone already resolved is not there, and reopening it is not yours to do.
 
 A direction from the user in the input is an issue too. Treat it the same as a thread from here on.
 
-Group what you collected. One code change often answers several threads, and one issue is one entry in your answer, not one per comment.
+Group what you have. One code change often answers several threads, and one issue is one entry in your answer, not one per comment.
 
 ## Step 2 - Verify
 

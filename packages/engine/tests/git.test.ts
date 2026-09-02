@@ -654,3 +654,76 @@ test("onto with from carries only the branch's own commits over a parent that wa
   const log = await git(host, ["log", "--format=%s", `${base}..child`]);
   expect(log.split("\n")).toEqual(["child"]);
 });
+
+test("against reads what the branch holds over the base, and stat says it in one block", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "base.txt", "base");
+  const base = (await vcs.head()).branch;
+  await git(host, ["checkout", "-q", "-b", "feature"]);
+  await commitFile({ dir, host }, "feature.txt", "feat: the work");
+  // The base moves under the branch, and the three-dot range leaves that out.
+  await git(host, ["checkout", "-q", base]);
+  await commitFile({ dir, host }, "other.txt", "other");
+  await git(host, ["checkout", "-q", "feature"]);
+
+  const patch = await vcs.against(base);
+  expect(patch.text).toContain("feature.txt");
+  expect(patch.text).not.toContain("other.txt");
+  expect(patch.truncated).toBe(false);
+  const stat = await vcs.against(base, { stat: true });
+  expect(stat.text).toContain("1 file changed");
+  expect((await vcs.subjects(20, { range: `${base}..HEAD` })).subjects).toEqual(["feat: the work"]);
+});
+
+test("a diff larger than the limit comes back cut, and says so", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "base.txt", "base");
+  const base = (await vcs.head()).branch;
+  await git(host, ["checkout", "-q", "-b", "feature"]);
+  fs.writeFileSync(path.join(dir, "big.txt"), "line\n".repeat(2000));
+  await git(host, ["add", "big.txt"]);
+  await git(host, ["commit", "-q", "-m", "feat: a lot"]);
+
+  const cut = await vcs.against(base, { limit: 500 });
+  expect(cut.truncated).toBe(true);
+  expect(cut.text.length).toBe(500);
+});
+
+test("read hands back the file whole, and answers for a path holding nothing", async () => {
+  const { dir, host, vcs } = await repo();
+  await commitFile({ dir, host }, "a.txt", "test: first");
+
+  expect(await vcs.read("a.txt")).toEqual({ there: true, text: "a.txt\n", truncated: false });
+  expect(await vcs.read("a.txt", { limit: 3 })).toEqual({
+    there: true,
+    text: "a.t",
+    truncated: true,
+  });
+  expect(await vcs.read("gone.txt")).toEqual({ there: false, text: "", truncated: false });
+  expect((await vcs.log(1)).text).toContain("test: first");
+});
+
+test("a stopped rebase names its conflicted files and the patch it is replaying", async () => {
+  const { dir, host, vcs } = await repo();
+  fs.writeFileSync(path.join(dir, "same.txt"), "base\n");
+  await git(host, ["add", "same.txt"]);
+  await git(host, ["commit", "-q", "-m", "base"]);
+  const base = (await vcs.head()).branch;
+  await git(host, ["checkout", "-q", "-b", "feature"]);
+  fs.writeFileSync(path.join(dir, "same.txt"), "theirs\n");
+  await git(host, ["add", "same.txt"]);
+  await git(host, ["commit", "-q", "-m", "feat: theirs"]);
+  await git(host, ["checkout", "-q", base]);
+  fs.writeFileSync(path.join(dir, "same.txt"), "ours\n");
+  await git(host, ["add", "same.txt"]);
+  await git(host, ["commit", "-q", "-m", "ours"]);
+  await git(host, ["checkout", "-q", "feature"]);
+
+  const landed = await vcs.rebase.onto(base);
+  expect(landed.conflicted).toBe(true);
+  expect((await vcs.rebase.conflicts()).files).toEqual(["same.txt"]);
+  expect((await vcs.rebase.patch()).text).toContain("feat: theirs");
+  expect((await vcs.read("same.txt")).text).toContain("<<<<<<<");
+  await vcs.rebase.abort();
+  expect((await vcs.rebase.patch()).text).toBe("");
+});

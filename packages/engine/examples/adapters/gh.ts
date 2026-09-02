@@ -6,6 +6,11 @@ const WATCHED_FIELDS = "state,isDraft,body,headRefOid,url,comments,reviews";
 const QUEUE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){isInMergeQueue}}}";
 const QUEUE_PATH = ".data.repository.pullRequest.isInMergeQueue";
+const THREADS_QUERY =
+  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:50){nodes{id isResolved path line comments(first:20){nodes{body author{login}}}}}}}}";
+const THREADS_PATH = ".data.repository.pullRequest.reviewThreads.nodes";
+const REPLY_QUERY =
+  "mutation($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{id}}}";
 const OPENED_FIELDS = "number,baseRefName,url";
 const REQUESTED_FIELDS = "number,title,url";
 const REQUESTED_LIMIT = 100;
@@ -37,6 +42,15 @@ type Comment = {
   body: string;
 };
 
+/** One review conversation on a line of the diff, in the order it was said. */
+type Thread = {
+  id: string;
+  path: string;
+  /** null when the line the thread sits on is gone from the diff. */
+  line: number | null;
+  comments: { author: string; body: string }[];
+};
+
 type Opened = {
   number: number;
   baseRefName: string;
@@ -50,6 +64,14 @@ type Requested = {
 };
 
 type Written = { author?: { login?: string }; createdAt?: string; body?: string };
+
+type Reviewed = {
+  id?: string;
+  isResolved?: boolean;
+  path?: string;
+  line?: number | null;
+  comments?: { nodes?: { body?: string; author?: { login?: string } }[] };
+};
 
 type Judged = { author?: { login?: string }; state?: string; body?: string };
 
@@ -91,18 +113,34 @@ function commentsOf(stdout: string): Comment[] {
   return (parsed.comments ?? []).map(written);
 }
 
+/** Threads someone resolved are settled, so only the open ones come back. */
+function openThreads(stdout: string): Thread[] {
+  const nodes = JSON.parse(stdout) as Reviewed[];
+  return nodes
+    .filter((node) => node.isResolved !== true)
+    .map((node) => ({
+      id: node.id ?? "",
+      path: node.path ?? "",
+      line: node.line ?? null,
+      comments: (node.comments?.nodes ?? []).map((one) => ({
+        author: one.author?.login ?? "",
+        body: (one.body ?? "").trim(),
+      })),
+    }));
+}
+
 function placeOf(url: string): Place | undefined {
   const found = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url);
   if (found === null) return undefined;
   return { owner: found[1] ?? "", repo: found[2] ?? "", number: found[3] ?? "" };
 }
 
-function queueRead(place: Place): string[] {
+function graphql(query: string, place: Place, path: string): string[] {
   return [
     "api",
     "graphql",
     "-f",
-    `query=${QUEUE_QUERY}`,
+    `query=${query}`,
     "-f",
     `owner=${place.owner}`,
     "-f",
@@ -110,8 +148,12 @@ function queueRead(place: Place): string[] {
     "-F",
     `number=${place.number}`,
     "-q",
-    QUEUE_PATH,
+    path,
   ];
+}
+
+function queueRead(place: Place): string[] {
+  return graphql(QUEUE_QUERY, place, QUEUE_PATH);
 }
 
 /** Yours and theirs part ways here: your approval ends a review, theirs is feedback to answer. */
@@ -216,6 +258,18 @@ export default adapter({
       }
     }
 
+    /** graphql wants the owner, the repo, and the number, which a url carries and a ref does not. */
+    async function placeFor(ref: string): Promise<Place> {
+      const known = placeOf(ref);
+      if (known !== undefined) return known;
+      const done = await gh(["pr", "view", ref, "--json", "url", "-q", ".url"]);
+      if (done.code !== 0) throw new Fault(reasonOf(done));
+      const url = done.stdout.trim();
+      const found = placeOf(url);
+      if (found === undefined) throw new Fault(`the PR url did not read: ${url}`);
+      return found;
+    }
+
     /** The whole pull request, or null when the ref names none. Anything else is a fault. */
     async function prOf(ref: string): Promise<Pr | null> {
       const done = await gh(["pr", "view", ref, "--json", PR_FIELDS]);
@@ -278,6 +332,27 @@ export default adapter({
           const done = await gh(["pr", "view", pr, "--json", "comments"]);
           if (done.code !== 0) throw new Fault(reasonOf(done));
           return commentsOf(done.stdout);
+        },
+        /** The review threads still open, each with what was said on it. None is an answer. */
+        async threads(pr: string): Promise<Thread[]> {
+          const done = await gh(graphql(THREADS_QUERY, await placeFor(pr), THREADS_PATH));
+          if (done.code !== 0) throw new Fault(reasonOf(done));
+          return openThreads(done.stdout);
+        },
+        /** The newest merged titles, which are the only record of how this repository writes them. */
+        async titles(count: number): Promise<string[]> {
+          const done = await gh([
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--limit",
+            String(count),
+            "--json",
+            "title",
+          ]);
+          if (done.code !== 0) throw new Fault(reasonOf(done));
+          return (JSON.parse(done.stdout) as { title: string }[]).map((one) => one.title);
         },
         /** What the branch already has open, with the base each one lands on. None is an answer. */
         async of(branch: string): Promise<Opened[]> {
@@ -375,6 +450,20 @@ export default adapter({
             "body" in options
               ? await gh(["pr", "comment", pr, "--body-file", "-"], { stdin: options.body })
               : await gh(["pr", "comment", pr, "--body-file", options.bodyFile]);
+          if (done.code !== 0) throw new Fault(reasonOf(done));
+        },
+        /** Answers one review thread. Resolving it stays with whoever opened it. */
+        async reply(thread: string, body: string): Promise<void> {
+          const done = await gh([
+            "api",
+            "graphql",
+            "-f",
+            `query=${REPLY_QUERY}`,
+            "-f",
+            `thread=${thread}`,
+            "-f",
+            `body=${body}`,
+          ]);
           if (done.code !== 0) throw new Fault(reasonOf(done));
         },
         async approve(pr: string): Promise<void> {

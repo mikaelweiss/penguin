@@ -1,25 +1,45 @@
-import { call, workflow } from "penguin";
+import { call, workflow, type Ctx } from "penguin";
 import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
+import { resolveTicket } from "../helpers/ticket.ts";
 import { narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
-import baseline from "./baseline.ts";
 import commit from "./commit.ts";
 import implement from "./implement.ts";
-import plan from "./plan.ts";
-import triage from "./triage.ts";
+import { planOn } from "./plan.ts";
+import { triageOn } from "./triage.ts";
 
 const Ack = z.enum(["ok"]);
 const Tried = z.union([z.enum(["done"]), z.string()]);
-const Named = z.object({
-  branch: z.string().describe("the branch name, lowercase words with dashes between them"),
-});
 
 /** What git takes as a branch name, whatever the agent answered. */
 function slug(name: string): string {
   const cut = name.trim().toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").slice(0, 50);
   const trimmed = cut.replaceAll(/^-+|-+$/g, "");
   return trimmed === "" ? "work" : trimmed;
+}
+
+const Lines = z.object({
+  lines: z.array(z.string()).describe("one gate per line, in the syntax the gates skill describes"),
+});
+const Approved = z.union([z.enum(["approve"]), z.string()]);
+
+/**
+ * The project's gate file, found once and kept. A project that already lists its
+ * gates costs no turn, and every run after the first reads what the person approved.
+ */
+async function settleGates(ctx: Ctx<unknown>): Promise<void> {
+  if ((await ctx.gates.read()) !== undefined) return;
+  const session = await ctx.agent.open();
+  const found = await narrated(ctx.view, () =>
+    ctx.agent.turn(session, { skill: "gates" }, { result: Lines }),
+  );
+  const proposed = found.lines.join("\n");
+  const answer = await ctx.view.ask(
+    `The quality gates for this project:\n\n${proposed}\n\nType approve, or the lines to keep instead.`,
+    Approved,
+  );
+  await ctx.gates.write(answer === "approve" ? proposed : answer);
 }
 
 export default workflow({
@@ -58,41 +78,31 @@ export default workflow({
     if (base === "") return nothing;
     await vcs.fetch(base);
 
-    const triaged = await call(ctx, triage, { ticket: ctx.params.ticket });
+    // One session carries triage and every plan. The files triage read stay in the conversation,
+    // so no plan reads them again and the second plan knows the first.
+    // The session works in this run's checkout: the worktree has no name until triage answers.
+    const session = await agent.open();
+    const triaged = await triageOn(ctx, session, await resolveTicket(ctx, params.ticket));
     if (!triaged.actionable) {
       await view.ask(`Not actionable: ${triaged.reason}`, Ack);
       return nothing;
     }
 
-    const namer = await agent.open();
-    const named = await narrated(view, () =>
-      agent.turn(
-        namer,
-        {
-          skill: "branch",
-          prompt: `# Ticket\n\n${params.ticket}\n\n# What triage read\n\n${triaged.context}`,
-        },
-        { result: Named },
-      ),
-    );
-    const branch = slug(named.branch);
+    const branch = slug(triaged.branch);
     const dir = await openWorktree(ctx, branch, { from: `origin/${base}` });
     if (dir === "") return nothing;
 
     // The fresh worktree is the base, so what the gates say here is what every review compares against.
     const head = await vcs.head({ cwd: dir });
-    const before = await call(ctx, baseline, {}, { cwd: dir });
+    await settleGates(ctx);
+    const before = await ctx.gates.run({ cwd: dir });
+    await view.show(before.green ? "baseline: green" : "baseline: already red");
 
     const checks: string[] = [];
     const total = triaged.tasks.length;
     for (const [index, task] of triaged.tasks.entries()) {
       await view.show(`task ${index + 1} of ${total}`);
-      const planned = await call(
-        ctx,
-        plan,
-        { ticket: task, context: triaged.context },
-        { cwd: dir },
-      );
+      const planned = await planOn(ctx, session, task);
       checks.push(planned.acceptance);
       const built = await call(
         ctx,
@@ -100,7 +110,7 @@ export default workflow({
         {
           task: planned.plan,
           acceptance: planned.acceptance,
-          baseline: before.gates,
+          baseline: before.report,
           base: head.sha,
           rounds: params.rounds,
         },
@@ -125,7 +135,7 @@ export default workflow({
           {
             task: answer,
             acceptance: planned.acceptance,
-            baseline: before.gates,
+            baseline: before.report,
             base: head.sha,
             rounds: params.rounds,
           },
@@ -140,7 +150,7 @@ export default workflow({
       path: dir,
       branch,
       acceptance: checks.join("\n\n"),
-      gates: before.gates,
+      gates: before.report,
       from: head.sha,
       base,
     };

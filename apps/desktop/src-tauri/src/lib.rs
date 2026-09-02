@@ -458,6 +458,40 @@ fn project_root(dir: String) -> String {
     }
 }
 
+/// The quality gates a project lists, in the project root a run resolves from dir.
+fn gates_file(dir: String) -> PathBuf {
+    PathBuf::from(project_root(dir))
+        .join(".penguin")
+        .join("gates")
+}
+
+/// A gate is a whole line, so the last one needs its newline to stay one.
+fn ended(text: &str) -> String {
+    if text.ends_with('\n') {
+        text.to_string()
+    } else {
+        format!("{text}\n")
+    }
+}
+
+/// The gate file as a person wrote it, none when the project has no file yet.
+#[tauri::command]
+fn read_gates(dir: String) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(gates_file(dir)) {
+        Ok(text) => Ok(Some(text)),
+        Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(cause) => Err(cause.to_string()),
+    }
+}
+
+#[tauri::command]
+fn write_gates(dir: String, text: String) -> Result<(), String> {
+    let file = gates_file(dir);
+    let home = file.parent().ok_or("the gate file has no folder")?;
+    std::fs::create_dir_all(home).map_err(|cause| cause.to_string())?;
+    std::fs::write(&file, ended(&text)).map_err(|cause| cause.to_string())
+}
+
 /// A byte ceiling on one run's patch. One committed lockfile should not drown the panel.
 const DIFF_MAX_BYTES: usize = 2 * 1024 * 1024;
 
@@ -1050,6 +1084,8 @@ pub fn run() {
             read_hidden,
             write_hidden,
             project_root,
+            read_gates,
+            write_gates,
             run_diff,
             describe,
             claim_run,
@@ -1360,6 +1396,40 @@ mod tests {
         let gitdir = repo.join(".git").join("worktrees").join("side");
         std::fs::write(tree.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
         assert_eq!(project_root(text_of(tree)), real(&repo));
+    }
+
+    #[test]
+    fn a_project_with_no_gate_file_reads_as_none() {
+        let dir = temp("gates-none");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(read_gates(text_of(dir)).unwrap(), None);
+    }
+
+    #[test]
+    fn a_written_gate_file_ends_in_one_newline() {
+        let dir = temp("gates-newline");
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = text_of(dir);
+        write_gates(at.clone(), "bun run check".into()).unwrap();
+        assert_eq!(read_gates(at.clone()).unwrap().unwrap(), "bun run check\n");
+        write_gates(at.clone(), "bun run check\n".into()).unwrap();
+        assert_eq!(read_gates(at).unwrap().unwrap(), "bun run check\n");
+    }
+
+    #[test]
+    fn a_worktree_keeps_its_gates_in_the_repository_it_was_cut_from() {
+        let repo = temp("gates-main");
+        std::fs::create_dir_all(repo.join(".git").join("worktrees").join("side")).unwrap();
+        let tree = temp("gates-side");
+        std::fs::create_dir_all(&tree).unwrap();
+        let gitdir = repo.join(".git").join("worktrees").join("side");
+        std::fs::write(tree.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+        write_gates(text_of(tree.clone()), "bun test".into()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.join(".penguin").join("gates")).unwrap(),
+            "bun test\n"
+        );
+        assert_eq!(read_gates(text_of(tree)).unwrap().unwrap(), "bun test\n");
     }
 
     #[test]

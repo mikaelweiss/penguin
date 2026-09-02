@@ -14,6 +14,7 @@ type Options = {
 function harness(options: Options) {
   const asked: string[] = [];
   const shown: string[] = [];
+  const prompts: string[] = [];
   let fetches = 0;
   let aborts = 0;
   let turns = 0;
@@ -33,10 +34,15 @@ function harness(options: Options) {
       fetches += 1;
       return Promise.resolve();
     },
+    log: () => Promise.resolve({ text: "commit f00d" }),
+    read: (file: string) =>
+      Promise.resolve({ there: true, text: `<<<<<<< HEAD in ${file}`, truncated: false }),
     rebase: {
       onto: rebasing,
       continue: () => Promise.resolve({ conflicted: false, files: [] }),
       pending: () => Promise.resolve(pending),
+      patch: () => Promise.resolve({ text: "the patch", truncated: false }),
+      conflicts: () => Promise.resolve({ files: ["same.txt"] }),
       abort: () => {
         aborts += 1;
         pending = false;
@@ -47,8 +53,9 @@ function harness(options: Options) {
 
   const agent = {
     open: () => Promise.resolve("session"),
-    turn: () => {
+    turn: (_session: string, ask: { prompt: string }) => {
       turns += 1;
+      prompts.push(ask.prompt);
       return {
         output: (async function* () {})(),
         value: Promise.resolve({ resolved: true, notes: "" }),
@@ -72,6 +79,7 @@ function harness(options: Options) {
   return {
     asked,
     shown,
+    prompts,
     fetches: () => fetches,
     aborts: () => aborts,
     turns: () => turns,
@@ -111,4 +119,15 @@ test("the rebase a dead run left open is dropped without asking anyone", async (
   expect(run.aborts()).toBe(1);
   expect(run.asked).toHaveLength(0);
   expect(run.shown.some((line) => line.includes("unfinished rebase"))).toBe(true);
+});
+
+test("the resolver is handed the tree: the landed commit, the patch, and every conflicted file", async () => {
+  const run = harness({ conflicts: 1 });
+
+  await run.run();
+
+  const prompt = run.prompts[0] ?? "";
+  expect(prompt).toContain("# HEAD\n\ncommit f00d");
+  expect(prompt).toContain("# Replaying\n\nthe patch");
+  expect(prompt).toContain("## same.txt\n\n<<<<<<< HEAD in same.txt");
 });

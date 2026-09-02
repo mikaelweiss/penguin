@@ -250,3 +250,60 @@ test("ensure answers landed for a branch with nothing over the base", async () =
   const made = await gh.pr.ensure({ head: "feature", base: "main", title: "t", body: "b" });
   expect(made).toEqual({ landed: true, pr: null, created: false });
 });
+
+test("only the threads still open come back, with the id a reply goes on", async () => {
+  const nodes = [
+    {
+      id: "T_one",
+      isResolved: false,
+      path: "src/a.ts",
+      line: 12,
+      comments: { nodes: [{ body: "  this leaks  ", author: { login: "reviewer" } }] },
+    },
+    {
+      id: "T_two",
+      isResolved: true,
+      path: "src/b.ts",
+      line: 3,
+      comments: { nodes: [{ body: "settled", author: { login: "reviewer" } }] },
+    },
+  ];
+  const { gh, args } = fakeGh({ code: 0, stdout: JSON.stringify(nodes), stderr: "" });
+  expect(await gh.pr.threads(PR_URL)).toEqual([
+    {
+      id: "T_one",
+      path: "src/a.ts",
+      line: 12,
+      comments: [{ author: "reviewer", body: "this leaks" }],
+    },
+  ]);
+  expect(args[0]).toContain("graphql");
+});
+
+test("a thread whose line is gone from the diff still comes back, with no line", async () => {
+  const nodes = [
+    { id: "T_one", isResolved: false, path: "src/a.ts", line: null, comments: { nodes: [] } },
+  ];
+  const { gh } = fakeGh({ code: 0, stdout: JSON.stringify(nodes), stderr: "" });
+  expect((await gh.pr.threads(PR_URL))[0]?.line).toBe(null);
+});
+
+test("the merged titles come back in the order gh lists them", async () => {
+  const listed = [{ title: "feat: one" }, { title: "fix: two" }];
+  const { gh, args } = fakeGh({ code: 0, stdout: JSON.stringify(listed), stderr: "" });
+  expect(await gh.pr.titles(20)).toEqual(["feat: one", "fix: two"]);
+  expect(args[0]).toContain("merged");
+  expect(args[0]).toContain("20");
+});
+
+test("a reply carries the thread and the body to the mutation", async () => {
+  const { gh, args } = fakeGh({ code: 0, stdout: "{}", stderr: "" });
+  await gh.pr.reply("T_one", "the code already covers this");
+  expect(args[0]).toContain("thread=T_one");
+  expect(args[0]).toContain("body=the code already covers this");
+});
+
+test("a graphql call that fails is a fault, not an empty list", async () => {
+  const { gh } = fakeGh({ code: 1, stdout: "", stderr: "gh: not found" });
+  expect(gh.pr.threads(PR_URL)).rejects.toThrow("gh: not found");
+});

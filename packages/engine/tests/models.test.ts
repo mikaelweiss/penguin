@@ -25,7 +25,11 @@ test("an exact provider model passes through unchanged", () => {
   expect(modelFor("provider-special", "test", models, () => undefined)).toBe(
     "provider-special",
   );
-  expect(modelFor(undefined, "test", models, () => undefined)).toBeUndefined();
+});
+
+test("a session that names no model runs on best", () => {
+  expect(modelFor(undefined, "test", models, () => undefined)).toBe("provider-best");
+  expect(modelFor(undefined, "test", {}, () => undefined)).toBeUndefined();
 });
 
 test("an unmapped neutral choice falls back to the adapter's default model", () => {

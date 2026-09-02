@@ -43,8 +43,37 @@ export default workflow({
     let turns = 0;
     let fixer = "";
 
+    /**
+     * What the resolver reads instead of fetching it: what the rebase has landed,
+     * what it is replaying now, and every conflicted file as the tree holds it. A
+     * file too large for the prompt is cut, and the resolver reads that one itself.
+     */
+    const tree = async (): Promise<string> => {
+      const [landed, patch, open] = await Promise.all([
+        vcs.log(1, { cwd }),
+        vcs.rebase.patch({ cwd }),
+        vcs.rebase.conflicts({ cwd }),
+      ]);
+      const held = await Promise.all(
+        open.files.map(async (file) => {
+          const found = await vcs.read(file, { cwd });
+          if (!found.there) return `## ${file}\n\nNothing stands at this path.`;
+          const text = found.truncated
+            ? `${found.text}\n\n… cut here. Read ${file} for the rest.`
+            : found.text;
+          return `## ${file}\n\n${text}`;
+        }),
+      );
+      return [
+        `# HEAD\n\n${landed.text}`,
+        `# Replaying\n\n${patch.truncated ? `${patch.text}\n\n… cut here.` : patch.text}`,
+        `# Conflicted files\n\n${held.length === 0 ? "None left." : held.join("\n\n")}`,
+      ].join("\n\n");
+    };
+
     // One session across the passes, so the resolver keeps what it already learned about the tree.
-    const resolving = async (prompt: string): Promise<z.infer<typeof Resolved>> => {
+    const resolving = async (said: string): Promise<z.infer<typeof Resolved>> => {
+      const prompt = `${await tree()}\n\n${said}`;
       try {
         if (fixer === "") fixer = await agent.open({ cwd });
         return await narrated(view, () =>
