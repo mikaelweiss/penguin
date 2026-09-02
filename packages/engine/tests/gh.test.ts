@@ -12,6 +12,7 @@ function snapshot(over: Partial<Watched> = {}): Watched {
     isDraft: false,
     body: "why this change",
     headRefOid: "abc123",
+    baseRefName: "main",
     url: "https://github.com/mikaelweiss/penguin/pull/7",
     isInMergeQueue: false,
     comments: [],
@@ -19,6 +20,12 @@ function snapshot(over: Partial<Watched> = {}): Watched {
     ...over,
   };
 }
+
+test("a pull request moved onto another base arrives as retargeted, naming the base", () => {
+  const before = snapshot({ baseRefName: "stack-below" });
+  const after = snapshot({ baseRefName: "main" });
+  expect(changedBetween(before, after, ME)).toEqual([{ kind: "retargeted", base: "main" }]);
+});
 
 test("a review by someone else arrives as reviewed, with its author, state, and body", () => {
   const before = snapshot();
@@ -194,6 +201,12 @@ test("the base an open pull request lands on comes back with it", async () => {
   const { gh, args } = fakeGh({ code: 0, stdout: JSON.stringify(listed), stderr: "" });
   expect(await gh.pr.of("feature")).toEqual(listed);
   expect(args[0]).toContain("feature");
+});
+
+test("retarget edits the pull request's base and nothing else", async () => {
+  const { gh, args } = fakeGh({ code: 0, stdout: "", stderr: "" });
+  await gh.pr.retarget(PR_URL, "main");
+  expect(args[0]).toEqual(["gh", "pr", "edit", PR_URL, "--base", "main"]);
 });
 
 test("ensure opens a pull request when the branch has neither an open nor a merged one", async () => {

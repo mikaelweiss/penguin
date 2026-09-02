@@ -368,6 +368,8 @@ export default workflow({
         if (change.kind === "ready") continue;
         if (change.kind === "dequeued") continue;
         if (change.kind === "reviewed") continue;
+        // The base a stacked pull request moves onto holds the same work, so its diff stands.
+        if (change.kind === "retargeted") continue;
         // A stale round syncs before the watch reports, so a push the tree holds already is not news.
         if (change.kind === "commits" && (await since()) !== "moved") continue;
         await stopTurn();

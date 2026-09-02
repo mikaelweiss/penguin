@@ -727,3 +727,40 @@ test("a stopped rebase names its conflicted files and the patch it is replaying"
   await vcs.rebase.abort();
   expect((await vcs.rebase.patch()).text).toBe("");
 });
+
+test("sync rebases through the commit the branch sat on, so a base squashed under it is not replayed", async () => {
+  const bare = tempDir("penguin-bare-");
+  await git(hostFor(bare), ["init", "-q", "--bare"]);
+
+  const ours = await repo();
+  await commitFile(ours, "base.txt", "base");
+  await git(ours.host, ["remote", "add", "origin", bare]);
+  const main = (await ours.vcs.head()).branch;
+  await git(ours.host, ["push", "-q", "-u", "origin", main]);
+
+  await git(ours.host, ["checkout", "-q", "-b", "below"]);
+  await commitFile(ours, "below.txt", "below");
+  const belowTip = await git(ours.host, ["rev-parse", "HEAD"]);
+  await git(ours.host, ["push", "-q", "-u", "origin", "below"]);
+
+  await git(ours.host, ["checkout", "-q", "-b", "above"]);
+  await commitFile(ours, "above.txt", "above");
+  await git(ours.host, ["push", "-q", "-u", "origin", "above"]);
+
+  // The squash lands below's work as one new commit, touched up, so replaying below's own commit would conflict.
+  await git(ours.host, ["checkout", "-q", main]);
+  await git(ours.host, ["merge", "--squash", "below"]);
+  fs.writeFileSync(path.join(ours.dir, "below.txt"), "below, squashed\n");
+  await git(ours.host, ["add", "below.txt"]);
+  await git(ours.host, ["commit", "-q", "-m", "squash below"]);
+  await git(ours.host, ["push", "-q"]);
+  await git(ours.host, ["checkout", "-q", "above"]);
+
+  const synced = await ours.vcs.sync("above", main, { from: belowTip });
+  expect(synced.conflicted).toBe(false);
+  expect(await git(ours.host, ["rev-list", "--count", `origin/${main}..above`])).toBe("1");
+  expect(await git(ours.host, ["rev-parse", "origin/above"])).toBe(
+    await git(ours.host, ["rev-parse", "above"]),
+  );
+  expect(fs.readFileSync(path.join(ours.dir, "below.txt"), "utf8")).toBe("below, squashed\n");
+});

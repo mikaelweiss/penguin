@@ -142,19 +142,36 @@ export default workflow({
     }
 
     /**
+     * The commit the branch last sat on. Every rebase goes through it, so a base
+     * rewritten or squashed under the branch replays none of its old commits.
+     */
+    let cut = "";
+
+    /**
+     * The branch onto its base and onto origin. Conflicts go to the rebase
+     * workflow, whose agent resolves them in the open tree. Null means the
+     * person dropped the rebase.
+     */
+    const converged = async (): Promise<{ same: boolean } | null> => {
+      for (;;) {
+        const synced = await vcs.sync(head.branch, base, { from: cut || undefined });
+        if (!synced.conflicted) {
+          cut = synced.baseSha;
+          return { same: synced.same };
+        }
+        const landed = await call(ctx, rebase, { base, from: cut });
+        if (!landed.rebased) return null;
+        cut = landed.base;
+      }
+    };
+
+    /**
      * The one way anything reaches origin: commit what the tree holds, then
-     * converge the branch onto its base and onto origin. Conflicts go to the
-     * rebase workflow, whose agent resolves them in the open tree. False means
-     * the person dropped the rebase, which ends the run.
+     * converge. False means the person dropped the rebase, which ends the run.
      */
     const delivered = async (): Promise<boolean> => {
       await call(ctx, commit, { ticket: params.ticket });
-      for (;;) {
-        const synced = await vcs.sync(head.branch, base);
-        if (!synced.conflicted) return true;
-        const landed = await call(ctx, rebase, { base });
-        if (!landed.rebased) return false;
-      }
+      return (await converged()) !== null;
     };
 
     if (!(await delivered())) return nowhere;
@@ -227,6 +244,7 @@ export default workflow({
           },
         ];
     let baseMoved = false;
+    let retargeted = "";
     let ended = "";
     let rounds = 0;
 
@@ -292,20 +310,27 @@ export default workflow({
           await view.show(`PR #${pr.number} is queued to merge, the watch holds`);
         }
         if (change.kind === "dequeued") await view.show(`PR #${pr.number} left the merge queue`);
+        if (change.kind === "retargeted") retargeted = change.base;
         poke();
       }
     })();
 
-    const based = head.branch === base ? undefined : github.branch.moved(base);
-    if (based !== undefined) {
+    // One watch per base the pull request has had: a retarget starts the next and retires this one.
+    let watching = 0;
+    const tracked = (branch: string): void => {
+      if (head.branch === branch) return;
+      const mine = ++watching;
+      const moves = github.branch.moved(branch);
       void (async () => {
         for (;;) {
-          await based.next();
+          await moves.next();
+          if (mine !== watching) return;
           baseMoved = true;
           poke();
         }
       })();
-    }
+    };
+    tracked(base);
 
     const typed = view.listen()[Symbol.asyncIterator]();
     void (async () => {
@@ -382,18 +407,10 @@ export default workflow({
 
     /** The branch back onto a base that moved under it. Nothing here ends the watch. */
     const followed = async (): Promise<void> => {
-      let synced = await vcs.sync(head.branch, base);
-      if (synced.conflicted) {
-        const landed = await call(ctx, rebase, { base });
-        if (!landed.rebased) {
-          await view.show(`The rebase onto the new ${base} was dropped, so the branch stays put`);
-          return;
-        }
-        synced = await vcs.sync(head.branch, base);
-        if (synced.conflicted) {
-          await view.show(`${base} conflicts again already, so the branch stays put`);
-          return;
-        }
+      const synced = await converged();
+      if (synced === null) {
+        await view.show(`The rebase onto the new ${base} was dropped, so the branch stays put`);
+        return;
       }
       await view.show(
         synced.same
@@ -456,7 +473,7 @@ export default workflow({
           break;
         }
 
-        if (baseMoved || feedback.length > 0) {
+        if (retargeted !== "" || baseMoved || feedback.length > 0) {
           // The move or the feedback is news about a world that kept moving while
           // it queued, so the pull request is read again before anything acts.
           const now = await github.pr.get(pr.url);
@@ -469,6 +486,15 @@ export default workflow({
           } else if (now.isInMergeQueue) {
             // The queue merges or kicks back, and either way the watch hears it.
             await view.status(`PR #${pr.number} is queued to merge, the watch holds`, { idle: true });
+          } else if (retargeted !== "") {
+            // The branch it stacked on merged, so the pull request now lands where that one did.
+            base = retargeted;
+            retargeted = "";
+            baseMoved = false;
+            await view.show(`PR #${pr.number} now lands on ${base}`);
+            tracked(base);
+            await followed();
+            continue;
           } else if (baseMoved) {
             baseMoved = false;
             await followed();

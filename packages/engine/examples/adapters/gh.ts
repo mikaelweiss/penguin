@@ -2,7 +2,7 @@ import { adapter, Fault, messageOf, type CommandResult } from "penguin";
 
 const ISSUE_FIELDS = "number,title,body,state,url";
 const PR_FIELDS = "number,title,body,state,isDraft,headRefOid,baseRefName,url";
-const WATCHED_FIELDS = "state,isDraft,body,headRefOid,url,comments,reviews";
+const WATCHED_FIELDS = "state,isDraft,body,headRefOid,baseRefName,url,comments,reviews";
 const QUEUE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){isInMergeQueue}}}";
 const QUEUE_PATH = ".data.repository.pullRequest.isInMergeQueue";
@@ -80,6 +80,7 @@ type Watched = {
   isDraft: boolean;
   body: string;
   headRefOid: string;
+  baseRefName: string;
   url: string;
   isInMergeQueue: boolean;
   comments?: Written[];
@@ -97,6 +98,7 @@ type Change =
   | { kind: "queued" }
   | { kind: "dequeued" }
   | { kind: "commits" }
+  | { kind: "retargeted"; base: string }
   | { kind: "description"; body: string }
   | { kind: "comments"; comments: Comment[] };
 
@@ -180,6 +182,9 @@ export function changedBetween(last: Watched, snap: Watched, me: string): Change
   if (snap.isInMergeQueue && !last.isInMergeQueue) found.push({ kind: "queued" });
   if (!snap.isInMergeQueue && last.isInMergeQueue) found.push({ kind: "dequeued" });
   if (snap.headRefOid !== last.headRefOid) found.push({ kind: "commits" });
+  if (snap.baseRefName !== last.baseRefName) {
+    found.push({ kind: "retargeted", base: snap.baseRefName });
+  }
   if (snap.body !== last.body) found.push({ kind: "description", body: snap.body });
   // What the run itself writes is not news to it.
   const fresh = (snap.comments ?? [])
@@ -353,6 +358,11 @@ export default adapter({
           ]);
           if (done.code !== 0) throw new Fault(reasonOf(done));
           return (JSON.parse(done.stdout) as { title: string }[]).map((one) => one.title);
+        },
+        /** The pull request onto another base, as when the branch it stacked on has merged. */
+        async retarget(pr: string, base: string): Promise<void> {
+          const done = await gh(["pr", "edit", pr, "--base", base]);
+          if (done.code !== 0) throw new Fault(reasonOf(done));
         },
         /** What the branch already has open, with the base each one lands on. None is an answer. */
         async of(branch: string): Promise<Opened[]> {

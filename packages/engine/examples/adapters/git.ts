@@ -328,14 +328,18 @@ export default adapter({
        * lease, and again when the base or the remote moved meanwhile. Conflicts
        * come back as the answer with the rebase dropped, so the tree is clean for
        * whoever resolves them. `same` means the branch has nothing over the base.
+       * `from` names the commit the branch was cut from, so a base rewritten or
+       * squashed under it replays none of its old commits.
        */
       async sync(
         branch: string,
         base: string,
-        options?: { cwd?: string; local?: boolean },
+        options?: { cwd?: string; local?: boolean; from?: string },
       ): Promise<Sync> {
         const cwd = options?.cwd;
         const onto = options?.local === true ? base : `origin/${base}`;
+        const replay =
+          options?.from === undefined ? ["rebase", onto] : ["rebase", "--onto", onto, options.from];
         for (let pass = 1; pass <= 5; pass++) {
           // A rebase a dead run left open is dropped; this pass replays it whole.
           if (await pendingRebase(cwd)) await git(["rebase", "--abort"], cwd);
@@ -348,7 +352,7 @@ export default adapter({
             throw new Fault(`${branch} has uncommitted changes. Commit or drop them first.`);
           }
           if (options?.local !== true) await fetching(base, cwd);
-          const landed = await rebased(git(["rebase", onto], cwd), cwd, onto);
+          const landed = await rebased(git(replay, cwd), cwd, onto);
           if (landed.conflicted) {
             await git(["rebase", "--abort"], cwd);
             return { conflicted: true, files: landed.files };
