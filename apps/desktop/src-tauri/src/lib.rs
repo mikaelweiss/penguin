@@ -56,22 +56,39 @@ fn head_pid(path: &PathBuf) -> Option<i32> {
     head.get("pid")?.as_i64().map(|pid| pid as i32)
 }
 
-fn update(id: String, path: PathBuf, from: u64) -> Option<RunUpdate> {
+/// The most run text one read hands the frontend. A runaway run file arrives over many polls
+/// instead of stalling the window on one.
+const READ_BUDGET: usize = 4 << 20;
+
+/// Whole lines from `from`, up to about `budget` bytes. The offset lands after the last line
+/// read, so a half written line waits for the next read and a long line always makes progress.
+fn update(id: String, path: PathBuf, from: u64, budget: usize) -> Option<RunUpdate> {
     let mut file = File::open(&path).ok()?;
     let len = file.metadata().ok()?.len();
     let from = if from > len { 0 } else { from };
-    let mut text = String::new();
     file.seek(SeekFrom::Start(from)).ok()?;
-    file.read_to_string(&mut text).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut bytes = Vec::new();
+    let mut line = Vec::new();
+    while bytes.len() < budget {
+        line.clear();
+        reader.read_until(b'\n', &mut line).ok()?;
+        if line.last() != Some(&b'\n') {
+            break;
+        }
+        bytes.extend_from_slice(&line);
+    }
+    let text = String::from_utf8(bytes).ok()?;
     Some(RunUpdate {
         id,
+        offset: from + text.len() as u64,
         text,
-        offset: len,
         alive: head_pid(&path).is_some_and(pid_alive),
     })
 }
 
-/// Every run's new run.jsonl bytes since the caller's offset. A run whose folder is gone drops out.
+/// Every run's new run.jsonl lines since the caller's offset, within one read's budget.
+/// A run whose folder is gone drops out.
 #[tauri::command]
 fn read_runs(app: tauri::AppHandle, offsets: HashMap<String, u64>) -> Vec<RunUpdate> {
     let Some(dir) = runs_dir(&app) else {
@@ -80,13 +97,16 @@ fn read_runs(app: tauri::AppHandle, offsets: HashMap<String, u64>) -> Vec<RunUpd
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
+    let mut budget = READ_BUDGET;
     entries
         .flatten()
         .filter_map(|entry| {
             let id = entry.file_name().into_string().ok()?;
             let path = entry.path().join("run.jsonl");
             let from = offsets.get(&id).copied().unwrap_or(0);
-            update(id, path, from)
+            let found = update(id, path, from, budget)?;
+            budget = budget.saturating_sub(found.text.len());
+            Some(found)
         })
         .collect()
 }
@@ -1276,7 +1296,7 @@ mod tests {
     fn reads_the_whole_file_from_zero() {
         let dir = temp("whole");
         let path = run_file(&dir, std::process::id() as i32, &["{\"a\":1}"]);
-        let update = update("r".into(), path, 0).unwrap();
+        let update = update("r".into(), path, 0, READ_BUDGET).unwrap();
         assert_eq!(update.text.lines().count(), 2);
         assert_eq!(update.offset, update.text.len() as u64);
     }
@@ -1285,7 +1305,7 @@ mod tests {
     fn reads_only_what_grew() {
         let dir = temp("grew");
         let path = run_file(&dir, std::process::id() as i32, &[]);
-        let first = update("r".into(), path.clone(), 0).unwrap();
+        let first = update("r".into(), path.clone(), 0, READ_BUDGET).unwrap();
 
         writeln!(
             File::options().append(true).open(&path).unwrap(),
@@ -1293,15 +1313,44 @@ mod tests {
         )
         .unwrap();
 
-        let second = update("r".into(), path, first.offset).unwrap();
+        let second = update("r".into(), path, first.offset, READ_BUDGET).unwrap();
         assert_eq!(second.text, "{\"outcome\":null}\n");
+    }
+
+    #[test]
+    fn a_big_file_arrives_in_whole_lines_over_several_reads() {
+        let dir = temp("budget");
+        let path = run_file(&dir, std::process::id() as i32, &["{\"a\":1}", "{\"a\":2}", "{\"a\":3}"]);
+        let first = update("r".into(), path.clone(), 0, 1).unwrap();
+        assert_eq!(first.text.lines().count(), 1);
+        assert!(first.text.ends_with('\n'));
+
+        let second = update("r".into(), path.clone(), first.offset, 9).unwrap();
+        assert_eq!(second.text, "{\"a\":1}\n{\"a\":2}\n");
+
+        let rest = update("r".into(), path, second.offset, READ_BUDGET).unwrap();
+        assert_eq!(rest.text, "{\"a\":3}\n");
+    }
+
+    #[test]
+    fn a_half_written_line_waits_for_the_next_read() {
+        let dir = temp("half");
+        let path = run_file(&dir, std::process::id() as i32, &[]);
+        let mut file = File::options().append(true).open(&path).unwrap();
+        write!(file, "{{\"a\":").unwrap();
+        let first = update("r".into(), path.clone(), 0, READ_BUDGET).unwrap();
+        assert_eq!(first.text.lines().count(), 1);
+
+        writeln!(file, "1}}").unwrap();
+        let second = update("r".into(), path, first.offset, READ_BUDGET).unwrap();
+        assert_eq!(second.text, "{\"a\":1}\n");
     }
 
     #[test]
     fn rereads_a_file_that_shrank() {
         let dir = temp("shrank");
         let path = run_file(&dir, std::process::id() as i32, &["{\"a\":1}", "{\"a\":2}"]);
-        let update = update("r".into(), path, 9_000).unwrap();
+        let update = update("r".into(), path, 9_000, READ_BUDGET).unwrap();
         assert_eq!(update.text.lines().count(), 3);
     }
 
@@ -1309,18 +1358,18 @@ mod tests {
     fn a_live_pid_is_alive_and_a_missing_one_is_not() {
         let dir = temp("alive");
         let mine = run_file(&dir, std::process::id() as i32, &[]);
-        assert!(update("r".into(), mine, 0).unwrap().alive);
+        assert!(update("r".into(), mine, 0, READ_BUDGET).unwrap().alive);
 
         let gone = temp("dead");
         let path = run_file(&gone, 0x7FFF_FFFE, &[]);
-        assert!(!update("r".into(), path, 0).unwrap().alive);
+        assert!(!update("r".into(), path, 0, READ_BUDGET).unwrap().alive);
     }
 
     #[test]
     fn a_folder_without_a_run_file_drops_out() {
         let dir = temp("empty");
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(update("r".into(), dir.join("run.jsonl"), 0).is_none());
+        assert!(update("r".into(), dir.join("run.jsonl"), 0, READ_BUDGET).is_none());
     }
 
     #[test]

@@ -2,8 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type RunUpdate = {
   id: string;
-  /** The run file's bytes past the offset that was asked for. */
+  /** Whole lines past the offset that was asked for. A big file arrives over several reads. */
   text: string;
+  /** Where the next read starts: after the last line in `text`. */
   offset: number;
   alive: boolean;
 };
