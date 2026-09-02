@@ -202,10 +202,8 @@ test("the review gate belongs to the judge, and carries the PR head the review r
   expect(found[0]?.artifact).toBe("### Blockers\n\n- one");
 });
 
-test("the assess-feedback gate splits go, skip, and a change", () => {
-  const gate =
-    "\n\nReply go to do this, skip to leave it, or say what to change about the plan.";
-  const runs = digested([
+function assessTree(gate: string): Map<string, Digest> {
+  return digested([
     [
       "a",
       [
@@ -217,10 +215,25 @@ test("the assess-feedback gate splits go, skip, and a change", () => {
       ],
     ],
   ]);
+}
+
+test("the assess-feedback gate splits go, skip, and a change", () => {
+  const runs = assessTree(
+    "\n\ngo does this, skip leaves it. Anything else says what to change about the plan.",
+  );
 
   const found = only(casesOf(runs, NO_REPO, "claude"), "assess-feedback");
   expect(found.map((one) => one.verdict)).toEqual(["accepted", "rejected", "edited"]);
   expect(found.map((one) => one.accepted)).toEqual([true, false, false]);
+});
+
+test("an assess-feedback gate recorded with the old wording scores the same", () => {
+  const runs = assessTree(
+    "\n\nReply go to do this, skip to leave it, or say what to change about the plan.",
+  );
+
+  const found = only(casesOf(runs, NO_REPO, "claude"), "assess-feedback");
+  expect(found.map((one) => one.verdict)).toEqual(["accepted", "rejected", "edited"]);
 });
 
 /** A work run with one implement child, the child's own verdicts, and the gate that judged it. */
@@ -228,7 +241,9 @@ function workTree(options: {
   verdicts: string[];
   answer: string;
   branch: string;
+  gate?: string;
 }): Map<string, Digest> {
+  const gate = options.gate ?? "done accepts it. Anything else says what to change.";
   return digested([
     [
       "parent",
@@ -244,7 +259,7 @@ function workTree(options: {
         { at: "t", call: "vcs.head", args: [{ cwd: "/wt" }], id: "c2", outcome: { sha: "base1" } },
         { at: "t", child: "child", workflow: "/w/examples/workflows/implement.ts" },
         ask(
-          `Task 1 of 1 is in /wt. Try it.\n\nthe acceptance\n\nReply done, or say what to change.`,
+          `Task 1 of 1 is in /wt. Try it.\n\nthe acceptance\n\n${gate}`,
           options.answer,
         ),
       ],
@@ -279,6 +294,20 @@ test("an implement run is judged by the person who tried it, over the reviewer's
     head: "base1",
     merged: true,
   });
+});
+
+test("a done gate recorded with the old wording judges the run the same", () => {
+  const repo = repoWith([], ["feature"], ["feature"]);
+  const runs = workTree({
+    verdicts: ["approved"],
+    answer: "done",
+    branch: "feature",
+    gate: "Reply done, or say what to change.",
+  });
+
+  const found = only(casesOf(runs, repo, "claude"), "implement");
+  expect(found).toHaveLength(1);
+  expect(found[0]).toMatchObject({ verdict: "accepted", answer: "done", artifact: "the acceptance" });
 });
 
 test("an unjudged implement run is scored by the round its review approved on", () => {

@@ -212,7 +212,7 @@ export default workflow({
     );
     if (triaged.eyeball) {
       const choice = await view.ask(
-        `PR #${pr.number} is small enough to read yourself: ${triaged.reason}\n\n${pr.url}\n\nType review to run the full review, or mine to leave it to you.`,
+        `PR #${pr.number} is small enough to read yourself: ${triaged.reason}\n\n${pr.url}\n\nreview runs the full review, mine leaves it to you.`,
         z.enum(["review", "mine"]),
       );
       if (choice === "mine") {

@@ -138,7 +138,7 @@ async function preflight(
       throw new Fault(`the run cannot start:\n${listed}`);
     }
     const answer = await view.ask(
-      `These block the run:\n\n${listed}\n\nFix them and type retry, skip to run anyway, or stop.`,
+      `These block the run:\n\n${listed}\n\nretry runs the checks again once they are fixed, skip runs the workflow anyway, stop ends the run.`,
       Preflight,
     );
     if (answer === "skip") return;

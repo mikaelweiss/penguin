@@ -103,7 +103,7 @@ export function createRescue(world: World): <A>(role: string, api: A) => A {
     for (;;) {
       const extra = agent === undefined ? "" : " Anything else goes to a fixer agent.";
       const answer = await view.ask(
-        `${name} failed:\n\n${said}\n\nClear what stopped it and type retry to run it again, or stop to end the run.${extra}`,
+        `${name} failed:\n\n${said}\n\nClear what stopped it. retry runs it again, stop ends the run.${extra}`,
         agent === undefined ? Bare : Gate,
       );
       if (answer === "stop") return false;

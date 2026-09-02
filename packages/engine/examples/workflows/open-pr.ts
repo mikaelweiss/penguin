@@ -135,7 +135,7 @@ export default workflow({
     if (base === "") return nowhere;
     if (head.branch === base) {
       const answer = await view.ask(
-        `The checkout is on ${base}, the branch the pull request would land on. Reply ok to open it from ${base} onto itself anyway, or stop.`,
+        `The checkout is on ${base}, the branch the pull request would land on. ok opens it from ${base} onto itself anyway, stop ends the run.`,
         Confirm,
       );
       if (answer === "stop") return nowhere;
@@ -223,7 +223,7 @@ export default workflow({
       // A branch with an open pull request lands where that pull request says. Rebasing it
       // anywhere else force-pushes a stacked branch out from under the one it was opened on.
       const answer = await view.ask(
-        `PR #${pr.number} is open from ${head.branch} onto ${pr.baseRefName}, not ${base}. Reply ok to land it on ${pr.baseRefName}, or stop.`,
+        `PR #${pr.number} is open from ${head.branch} onto ${pr.baseRefName}, not ${base}. ok lands it on ${pr.baseRefName}, stop ends the run.`,
         Confirm,
       );
       if (answer === "stop") return nowhere;
@@ -430,7 +430,7 @@ export default workflow({
           return;
         }
         const answer = await view.ask(
-          `${proposal(plan)}\n\nReply go to do this, skip to leave it, or say what to change about the plan.`,
+          `${proposal(plan)}\n\ngo does this, skip leaves it. Anything else says what to change about the plan.`,
           Go,
           { until: closed },
         );

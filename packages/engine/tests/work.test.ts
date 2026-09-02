@@ -20,7 +20,7 @@ function reply(question: string): string {
   if (question.includes("Approve the split?")) return "approve";
   if (question.includes("Approve the plan?")) return "approve";
   if (question.includes("Try it.")) return "done";
-  if (question.includes("Type approve, or the lines")) return "approve";
+  if (question.includes("approve keeps them")) return "approve";
   return "ok";
 }
 

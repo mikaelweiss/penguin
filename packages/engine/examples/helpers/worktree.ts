@@ -16,7 +16,7 @@ export async function openWorktree(
     const ws = await ctx.vcs.worktree.add(name, options);
     if (!ws.existed) return ws.path;
     const choice = await ctx.view.ask(
-      `A worktree already sits at ${ws.path}. Type use to work in it, replace to delete it and cut a fresh one, or exit to stop.`,
+      `A worktree already sits at ${ws.path}. use works in it, replace deletes it and cuts a fresh one, exit stops.`,
       Choice,
     );
     if (choice === "exit") return "";

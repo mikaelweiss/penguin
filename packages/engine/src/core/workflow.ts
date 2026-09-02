@@ -121,7 +121,7 @@ async function spawned<R>(
       // A person who stopped the child meant to stop it, and a run with no view has nobody to ask.
       if (view === undefined || error instanceof RunStopped) throw error;
       const answer = await view.ask(
-        `${name} did not finish: ${messageOf(error)}\n\nClear what stopped it and type again to run it once more, or stop to end this run.`,
+        `${name} did not finish: ${messageOf(error)}\n\nClear what stopped it. again runs it once more, stop ends this run.`,
         Again,
       );
       if (answer === "stop") throw error;

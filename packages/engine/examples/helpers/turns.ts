@@ -279,7 +279,7 @@ const Again = z.enum(["again", "stop"]);
  */
 export async function retried(view: View, error: unknown): Promise<void> {
   const answer = await view.ask(
-    `The turn did not finish: ${messageOf(error)}\n\nClear what stopped it and type again to run it once more, or stop to end this run.`,
+    `The turn did not finish: ${messageOf(error)}\n\nClear what stopped it. again runs it once more, stop ends this run.`,
     Again,
   );
   if (answer === "stop") throw error;

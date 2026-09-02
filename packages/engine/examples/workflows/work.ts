@@ -36,7 +36,7 @@ async function settleGates(ctx: Ctx<unknown>): Promise<void> {
   );
   const proposed = found.lines.join("\n");
   const answer = await ctx.view.ask(
-    `The quality gates for this project:\n\n${proposed}\n\nType approve, or the lines to keep instead.`,
+    `The quality gates for this project:\n\n${proposed}\n\napprove keeps them. Anything else is the lines to keep instead.`,
     Approved,
   );
   await ctx.gates.write(answer === "approve" ? proposed : answer);
@@ -125,7 +125,7 @@ export default workflow({
 
       for (;;) {
         const answer = await view.ask(
-          `Task ${index + 1} of ${total} is in ${dir}. Try it.\n\n${planned.acceptance}\n\nReply done, or say what to change.`,
+          `Task ${index + 1} of ${total} is in ${dir}. Try it.\n\n${planned.acceptance}\n\ndone accepts it. Anything else says what to change.`,
           Tried,
         );
         if (answer === "done") break;

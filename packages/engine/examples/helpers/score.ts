@@ -38,11 +38,11 @@
  * plan             the "Approve the plan?" gate: approve is as-is, any text is an edit
  * triage           the "Approve the split?" gate, the same two answers
  * review-pr        the "Post this without approving?" gate: send is as-is, text is an edit
- * assess-feedback  the "Reply go ... skip ..." gate: go as-is, skip dropped, text an edit
- * implement        work's "Reply done, or say what to change" gate when one judged the
- *                  run, else the reviewer's own rounds: approved first round is as-is,
- *                  approved later is an edit, never approved is dropped. A run stopped
- *                  before any verdict, with nobody's word on it, is no case at all
+ * assess-feedback  the go/skip gate: go as-is, skip dropped, text an edit
+ * implement        work's done gate when one judged the run, else the reviewer's own
+ *                  rounds: approved first round is as-is, approved later is an edit,
+ *                  never approved is dropped. A run stopped before any verdict, with
+ *                  nobody's word on it, is no case at all
  * commit           the message went into a commit, so it stood unless open-pr's
  *                  "reply push" gate held it back
  *
@@ -135,9 +135,15 @@ const TRIAGE_GATE = "\n\nApprove the split?";
 const TRIAGE_START = "The ticket splits into ";
 const REVIEW_GATE = "\n\nPost this without approving?";
 const REVIEW_START = "### Blockers";
-const ASSESS_GATE = "\n\nReply go to do this, skip to leave it, or say what to change about the plan.";
+const ASSESS_GATE = [
+  "\n\ngo does this, skip leaves it. Anything else says what to change about the plan.",
+  "\n\nReply go to do this, skip to leave it, or say what to change about the plan.",
+];
 const ASSESS_START = "### 1.";
-const TRIED_GATE = "\n\nReply done, or say what to change.";
+const TRIED_GATE = [
+  "\n\ndone accepts it. Anything else says what to change.",
+  "\n\nReply done, or say what to change.",
+];
 const TRIED_START = "Try it.\n\n";
 const PUSH_START = "Committed: ";
 const PUSH_GATE = "reply push to send it to PR";
@@ -164,8 +170,9 @@ function args(entry: Entry): unknown[] {
   return Array.isArray(list) ? list : [];
 }
 
-function ended(whole: string, suffix: string): string | undefined {
-  return whole.endsWith(suffix) ? whole.slice(0, whole.length - suffix.length) : undefined;
+function ended(whole: string, ...suffixes: string[]): string | undefined {
+  const suffix = suffixes.find((one) => whole.endsWith(one));
+  return suffix === undefined ? undefined : whole.slice(0, whole.length - suffix.length);
 }
 
 export function workflowName(file: string): string {
@@ -388,7 +395,7 @@ function judgmentsOf(runs: Map<string, Digest>): Map<string, Judgment> {
   const judgments = new Map<string, Judgment>();
   for (const run of runs.values()) {
     for (const gate of run.gates) {
-      const acceptance = ended(gate.question, TRIED_GATE);
+      const acceptance = ended(gate.question, ...TRIED_GATE);
       if (acceptance !== undefined && gate.question.startsWith("Task ")) {
         const child = childBefore(run, gate.index, "implement", runs);
         if (child === undefined) continue;
@@ -449,7 +456,7 @@ function gateCases(run: Digest, adapter: string): Case[] {
       continue;
     }
 
-    const proposal = ended(gate.question, ASSESS_GATE);
+    const proposal = ended(gate.question, ...ASSESS_GATE);
     if (proposal !== undefined && gate.question.startsWith(ASSESS_START)) {
       const turn = turnBefore(run, gate.index, ["assess-feedback"]);
       if (turn === undefined) continue;

@@ -93,7 +93,7 @@ export default workflow({
       let said = notes;
       for (;;) {
         const answer = await view.ask(
-          `The conflicts are still open: ${said}\n\nResolve them and stage the files, then type continue. Type abort to drop the rebase. Anything else goes to the resolver.`,
+          `The conflicts are still open: ${said}\n\nResolve them and stage the files. continue goes on with what is staged, abort drops the rebase. Anything else goes to the resolver.`,
           Fixing,
         );
         if (answer === "abort") return false;
@@ -146,7 +146,7 @@ export default workflow({
 
       if (clean) break;
       const answer = await view.ask(
-        `${params.passes} rebase passes, and ${base} keeps moving.\n\nType continue to keep going, or abort to drop the rebase.`,
+        `${params.passes} rebase passes, and ${base} keeps moving.\n\ncontinue keeps going, abort drops the rebase.`,
         Answer,
       );
       if (answer === "abort") return dropped;
