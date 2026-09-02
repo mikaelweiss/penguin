@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Workflows · penguin</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><span class="mark">🐧</span> penguin</a>
+    <div class="nav-links">
+      <a href="index.html">Overview</a>
+      <a href="workflows.html" class="active">Workflows</a>
+      <a href="adapters.html">Adapters</a>
+      <a href="engine.html">Engine</a>
+      <a href="data-flow.html">Data flow</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <p class="eyebrow">Concept 1</p>
+  <h1>Workflows</h1>
+  <p class="lede">A pure script that orchestrates adapters and decides what people see. The only orchestrator, the only narrator.</p>
+
+  <h2>The shape</h2>
+  <p class="section-note">A workflow is a plain object: a description, a Zod params schema, and <code>run(ctx)</code>.</p>
+
+  <pre><code><span class="tok-com">// packages/engine/src/core/workflow.ts</span>
+<span class="tok-key">export type</span> Workflow&lt;Schema, R&gt; = {
+  description: <span class="tok-fn">string</span>;
+  params: Schema;                <span class="tok-com">// a Zod object</span>
+  <span class="tok-fn">run</span>(ctx: Ctx&lt;z.infer&lt;Schema&gt;&gt;): Promise&lt;R&gt;;
+};
+
+<span class="tok-key">export type</span> Ctx&lt;Params&gt; = { params: Params } &amp; Adapters;</code></pre>
+
+  <p>The <code>workflow()</code> helper does one thing at definition time: it rejects a workflow with no description. Everything else about a run is just the function you wrote.</p>
+
+  <h2>ctx is the whole world</h2>
+  <p class="section-note">The validated params, plus one entry per installed adapter role. That is all it is.</p>
+
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 900 300" role="img" aria-label="ctx is params plus one entry per installed adapter role; the run function reads from it and returns a typed result.">
+        <!-- run signature -->
+        <rect x="40" y="120" width="200" height="60" rx="12" class="s-node-accent" stroke-width="1.5"/>
+        <text x="140" y="146" text-anchor="middle" class="s-mono s-ink" font-size="14" font-weight="700">run(ctx)</text>
+        <text x="140" y="167" text-anchor="middle" class="s-sans s-soft" font-size="11.5">your function</text>
+
+        <!-- ctx object -->
+        <rect x="330" y="40" width="290" height="220" rx="14" class="s-node" stroke-width="1.5"/>
+        <text x="350" y="68" class="s-mono s-accentink" font-size="12">ctx</text>
+        <line x1="330" y1="80" x2="620" y2="80" class="s-line" stroke-width="1"/>
+        <text x="356" y="108" class="s-mono s-soft" font-size="12.5">params</text>
+        <text x="600" y="108" text-anchor="end" class="s-sans s-faint" font-size="11">validated by Zod</text>
+        <text x="356" y="140" class="s-mono s-soft" font-size="12.5">view</text>
+        <text x="600" y="140" text-anchor="end" class="s-sans s-faint" font-size="11">role → implementation</text>
+        <text x="356" y="172" class="s-mono s-soft" font-size="12.5">vcs</text>
+        <text x="600" y="172" text-anchor="end" class="s-sans s-faint" font-size="11">role → implementation</text>
+        <text x="356" y="204" class="s-mono s-soft" font-size="12.5">agent</text>
+        <text x="600" y="204" text-anchor="end" class="s-sans s-faint" font-size="11">role → implementation</text>
+        <text x="356" y="238" class="s-sans s-faint" font-size="11.5">…one per installed role</text>
+
+        <!-- outside things -->
+        <rect x="710" y="120" width="150" height="60" rx="12" class="s-node-sunk" stroke-width="1.5"/>
+        <text x="785" y="146" text-anchor="middle" class="s-sans s-soft" font-size="13">outside things</text>
+        <text x="785" y="166" text-anchor="middle" class="s-sans s-faint" font-size="11">repo · human · CLI</text>
+
+        <path d="M240 150 L328 150" class="s-accentline" stroke-width="1.6" marker-end="url(#w1)"/>
+        <path d="M620 150 L708 150" class="s-line" stroke-width="1.4" marker-end="url(#w2)"/>
+
+        <defs>
+          <marker id="w1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+          <marker id="w2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--line-strong)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption>A workflow reaches the world only through <code>ctx</code>. It never prints, never parses argv, never spawns a process, never reads a file on its own.</figcaption>
+  </figure>
+
+  <div class="callout">
+    <span class="tag">Invariant</span>
+    <p>Nothing shows a person anything unless workflow code sent it. The workflow calls adapter functions, consumes the streams they return, and decides what reaches <code>view</code>.</p>
+  </div>
+
+  <h2>Composition is a function call</h2>
+  <p class="section-note"><code>call</code> parses the child's params and runs it with the same ctx. Parallel children are <code>Promise.all</code> over <code>call</code>.</p>
+
+  <pre><code><span class="tok-com">// commit-all.ts - run one child workflow per folder, all at once</span>
+<span class="tok-key">import</span> { call, workflow } <span class="tok-key">from</span> <span class="tok-str">"penguin"</span>;
+<span class="tok-key">import</span> commit <span class="tok-key">from</span> <span class="tok-str">"./commit.ts"</span>;
+
+<span class="tok-key">export default</span> <span class="tok-fn">workflow</span>({
+  description: <span class="tok-str">"commit every listed folder, all at once"</span>,
+  params: z.object({ dirs: z.array(z.string()).min(1) }),
+
+  <span class="tok-key">async</span> <span class="tok-fn">run</span>(ctx) {
+    <span class="tok-key">const</span> results = <span class="tok-key">await</span> Promise.all(
+      ctx.params.dirs.map(<span class="tok-key">async</span> (dir) =&gt; ({
+        dir, done: <span class="tok-key">await</span> <span class="tok-fn">call</span>(ctx, commit, { dir }),
+      })),
+    );
+    <span class="tok-key">await</span> ctx.view.<span class="tok-fn">show</span>(<span class="tok-str">`committed ${results.length} folders`</span>);
+    <span class="tok-key">return</span> results;
+  },
+});</code></pre>
+
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 900 250" role="img" aria-label="A parent workflow calls the same child workflow three times in parallel, each with different params, sharing the same ctx.">
+        <rect x="350" y="24" width="200" height="60" rx="12" class="s-node-accent" stroke-width="1.5"/>
+        <text x="450" y="49" text-anchor="middle" class="s-sans s-ink" font-size="14" font-weight="700">commit-all</text>
+        <text x="450" y="69" text-anchor="middle" class="s-mono s-soft" font-size="11">Promise.all( call ×N )</text>
+
+        <g>
+          <rect x="90" y="150" width="180" height="58" rx="12" class="s-node" stroke-width="1.5"/>
+          <text x="180" y="175" text-anchor="middle" class="s-sans s-ink" font-size="13.5" font-weight="650">commit</text>
+          <text x="180" y="194" text-anchor="middle" class="s-mono s-faint" font-size="11">{ dir: "app" }</text>
+
+          <rect x="360" y="150" width="180" height="58" rx="12" class="s-node" stroke-width="1.5"/>
+          <text x="450" y="175" text-anchor="middle" class="s-sans s-ink" font-size="13.5" font-weight="650">commit</text>
+          <text x="450" y="194" text-anchor="middle" class="s-mono s-faint" font-size="11">{ dir: "lib" }</text>
+
+          <rect x="630" y="150" width="180" height="58" rx="12" class="s-node" stroke-width="1.5"/>
+          <text x="720" y="175" text-anchor="middle" class="s-sans s-ink" font-size="13.5" font-weight="650">commit</text>
+          <text x="720" y="194" text-anchor="middle" class="s-mono s-faint" font-size="11">{ dir: "docs" }</text>
+        </g>
+
+        <path d="M410 84 C 330 110, 240 120, 180 148" class="s-accentline" stroke-width="1.5" marker-end="url(#c1)"/>
+        <path d="M450 84 L450 148" class="s-accentline" stroke-width="1.5" marker-end="url(#c1)"/>
+        <path d="M490 84 C 570 110, 660 120, 720 148" class="s-accentline" stroke-width="1.5" marker-end="url(#c1)"/>
+        <text x="450" y="126" text-anchor="middle" class="s-mono s-faint" font-size="10.5">call(ctx, commit, params) · same ctx, child params validated</text>
+        <defs>
+          <marker id="c1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption>Workflows compose by function call. No engine machinery is involved: it is <code>Promise.all</code> over an ordinary function.</figcaption>
+  </figure>
+
+  <h2>Workflows are reconcilers</h2>
+  <p class="section-note">They inspect the world through adapters before acting, and act only on what is missing.</p>
+
+  <p>Because a workflow checks the world first, <strong>resuming an interrupted run is running the workflow again</strong>. Its own checks skip what is already done. The world is the state store: there is no journal and no replay.</p>
+
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 900 210" role="img" aria-label="The reconciler loop: read the world through an adapter, act only on what is missing, then read again.">
+        <rect x="60" y="80" width="180" height="60" rx="12" class="s-node" stroke-width="1.5"/>
+        <text x="150" y="106" text-anchor="middle" class="s-sans s-ink" font-size="13.5" font-weight="650">read the world</text>
+        <text x="150" y="125" text-anchor="middle" class="s-mono s-faint" font-size="10.5">vcs.dirty()</text>
+
+        <rect x="360" y="80" width="180" height="60" rx="12" class="s-node" stroke-width="1.5"/>
+        <text x="450" y="106" text-anchor="middle" class="s-sans s-ink" font-size="13.5" font-weight="650">is it missing?</text>
+        <text x="450" y="125" text-anchor="middle" class="s-mono s-faint" font-size="10.5">branch on the data</text>
+
+        <rect x="660" y="80" width="180" height="60" rx="12" class="s-node-accent" stroke-width="1.5"/>
+        <text x="750" y="106" text-anchor="middle" class="s-sans s-ink" font-size="13.5" font-weight="650">act</text>
+        <text x="750" y="125" text-anchor="middle" class="s-mono s-soft" font-size="10.5">stage · commit</text>
+
+        <path d="M240 110 L358 110" class="s-line" stroke-width="1.4" marker-end="url(#r1)"/>
+        <path d="M540 110 L658 110" class="s-accentline" stroke-width="1.5" marker-end="url(#r2)"/>
+        <path d="M450 140 C 450 185, 150 185, 150 142" class="s-line" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#r1)"/>
+        <text x="300" y="178" text-anchor="middle" class="s-mono s-faint" font-size="10.5">already done → skip, read again</text>
+        <defs>
+          <marker id="r1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--line-strong)"/></marker>
+          <marker id="r2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption>The <code>commit</code> workflow checks <code>vcs.dirty()</code> before touching anything. Run it twice and the second run finds a clean tree and stops.</figcaption>
+  </figure>
+
+  <h2>Pausing on a person</h2>
+  <p>When a workflow needs a decision, it awaits <code>view.ask</code> and does not move until the answer arrives. When it does not, it keeps running on its own. The distinction is built into the code, not something you scroll to discover.</p>
+
+  <pre><code><span class="tok-com">// ship.ts - commit, then pause for a yes/no before pushing</span>
+<span class="tok-key">const</span> answer = <span class="tok-key">await</span> view.<span class="tok-fn">ask</span>(<span class="tok-str">`Push ${head.branch} to origin? (yes/no)`</span>, z.enum([<span class="tok-str">"yes"</span>, <span class="tok-str">"no"</span>]));
+<span class="tok-key">if</span> (answer === <span class="tok-str">"no"</span>) <span class="tok-key">return</span> { ...done, pushed: <span class="tok-key">false</span> };
+<span class="tok-key">const</span> pushed = <span class="tok-key">await</span> vcs.<span class="tok-fn">push</span>(head.branch, { cwd: params.dir });</code></pre>
+
+  <div class="next">
+    <a href="index.html">
+      <div class="dir">← back</div>
+      <div class="ttl">Overview</div>
+    </a>
+    <a class="fwd" href="adapters.html">
+      <div class="dir">next →</div>
+      <div class="ttl">Adapters</div>
+    </a>
+  </div>
+</main>
+
+<footer class="footer">
+  <span>penguin · architecture docs</span>
+  <span><a href="https://github.com/mikaelweiss/penguin">github.com/mikaelweiss/penguin</a></span>
+</footer>
+</body>
+</html>

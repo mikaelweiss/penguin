@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>penguin architecture</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><span class="mark">🐧</span> penguin</a>
+    <div class="nav-links">
+      <a href="index.html" class="active">Overview</a>
+      <a href="workflows.html">Workflows</a>
+      <a href="adapters.html">Adapters</a>
+      <a href="engine.html">Engine</a>
+      <a href="data-flow.html">Data flow</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <p class="eyebrow">Architecture</p>
+  <h1>Two definitions, and values passing between them</h1>
+  <p class="lede">penguin is a way to run one workflow file as a live process, with any coding agent CLI. The whole model is a workflow, an adapter, and the engine that connects them.</p>
+
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 900 500" role="img" aria-label="penguin big picture: a workflow calls adapters through ctx; adapters bridge to outside things; the engine sits underneath.">
+        <!-- WORKFLOW -->
+        <rect x="250" y="24" width="400" height="74" rx="14" class="s-node-accent" stroke-width="1.5"/>
+        <text x="450" y="55" text-anchor="middle" class="s-sans s-ink" font-size="18" font-weight="700">Workflow</text>
+        <text x="450" y="78" text-anchor="middle" class="s-sans s-soft" font-size="12.5">the only orchestrator · the only narrator</text>
+
+        <!-- ctx bar -->
+        <rect x="200" y="132" width="500" height="40" rx="9" class="s-node-sunk" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="450" y="157" text-anchor="middle" class="s-mono s-soft" font-size="12.5">ctx = &#123; params, view, vcs, agent &#125;</text>
+
+        <!-- arrow workflow -> ctx -->
+        <path d="M450 98 L450 130" class="s-accentline" stroke-width="1.6" marker-end="url(#ah)"/>
+
+        <!-- adapters row -->
+        <g>
+          <rect x="70" y="222" width="220" height="78" rx="12" class="s-node" stroke-width="1.5"/>
+          <text x="86" y="248" class="s-mono s-accentink" font-size="11.5">role: view</text>
+          <text x="86" y="270" class="s-sans s-ink" font-size="15" font-weight="650">terminal</text>
+          <text x="86" y="290" class="s-sans s-faint" font-size="11.5">show() · ask()</text>
+
+          <rect x="340" y="222" width="220" height="78" rx="12" class="s-node" stroke-width="1.5"/>
+          <text x="356" y="248" class="s-mono s-accentink" font-size="11.5">role: vcs</text>
+          <text x="356" y="270" class="s-sans s-ink" font-size="15" font-weight="650">git</text>
+          <text x="356" y="290" class="s-sans s-faint" font-size="11.5">commit() · push() · rebase()</text>
+
+          <rect x="610" y="222" width="220" height="78" rx="12" class="s-node" stroke-width="1.5"/>
+          <text x="626" y="248" class="s-mono s-accentink" font-size="11.5">role: agent</text>
+          <text x="626" y="270" class="s-sans s-ink" font-size="15" font-weight="650">claude</text>
+          <text x="626" y="290" class="s-sans s-faint" font-size="11.5">open() · turn()</text>
+        </g>
+
+        <!-- arrows ctx -> adapters -->
+        <path d="M300 172 C 240 195, 200 200, 180 220" class="s-line" stroke-width="1.4" marker-end="url(#ah2)"/>
+        <path d="M450 172 L450 220" class="s-line" stroke-width="1.4" marker-end="url(#ah2)"/>
+        <path d="M600 172 C 660 195, 700 200, 720 220" class="s-line" stroke-width="1.4" marker-end="url(#ah2)"/>
+        <text x="500" y="200" class="s-mono s-faint" font-size="11">calls ctx.&lt;role&gt;(…)</text>
+
+        <!-- outside things -->
+        <g>
+          <rect x="90" y="352" width="180" height="52" rx="26" class="s-node-sunk" stroke-width="1.5"/>
+          <text x="180" y="384" text-anchor="middle" class="s-sans s-soft" font-size="14">👤 the human</text>
+
+          <rect x="360" y="352" width="180" height="52" rx="26" class="s-node-sunk" stroke-width="1.5"/>
+          <text x="450" y="384" text-anchor="middle" class="s-sans s-soft" font-size="14">📁 the repo</text>
+
+          <rect x="630" y="352" width="180" height="52" rx="26" class="s-node-sunk" stroke-width="1.5"/>
+          <text x="720" y="384" text-anchor="middle" class="s-sans s-soft" font-size="14">🤖 agent CLI</text>
+        </g>
+        <path d="M180 300 L180 350" class="s-line" stroke-width="1.4" marker-end="url(#ah2)"/>
+        <path d="M450 300 L450 350" class="s-line" stroke-width="1.4" marker-end="url(#ah2)"/>
+        <path d="M720 300 L720 350" class="s-line" stroke-width="1.4" marker-end="url(#ah2)"/>
+        <text x="255" y="332" class="s-mono s-faint" font-size="11">build(host) · shell / exec</text>
+
+        <!-- engine base -->
+        <rect x="70" y="440" width="760" height="46" rx="11" class="s-node" stroke-width="1.5"/>
+        <text x="86" y="468" class="s-mono s-accentink" font-size="11.5">engine</text>
+        <text x="450" y="468" text-anchor="middle" class="s-sans s-soft" font-size="13">catalog · ctx · process · trace</text>
+
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--line-strong)"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption>The workflow calls adapters through <code>ctx</code>. Each adapter bridges to one outside thing. The engine finds, wires, and runs.</figcaption>
+  </figure>
+
+  <h2>The two concepts</h2>
+  <p class="section-note">There is no third. A message stream is a return value, not a definition. The view is an adapter. Agents are adapters.</p>
+
+  <div class="grid two">
+    <div class="card">
+      <h3><span class="ic">🧩</span> Workflow</h3>
+      <p>A plain TypeScript function. It orchestrates adapters, composes other workflows, and decides what the human sees. It never prints, spawns, or reads a file on its own: it touches the world only through <code>ctx</code>.</p>
+    </div>
+    <div class="card">
+      <h3><span class="ic">🔌</span> Adapter</h3>
+      <p>A workflow's bridge to one outside thing: git, GitHub, an agent CLI, the person watching. A role, a name, and <code>build(host)</code> returning plain functions over plain data.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="tag">The core claim</span>
+    <p><strong>You decide the workflow.</strong> Loops, retries, conditions, and composition are already in TypeScript, so that is what workflows are written in. When a person is needed the workflow pauses on a question; when nothing needs them it keeps moving on its own.</p>
+  </div>
+
+  <h2>Read in this order</h2>
+  <div class="grid two">
+    <a class="card" href="workflows.html">
+      <h3><span class="ic">🧩</span> Workflows</h3>
+      <p>The <code>ctx</code> object, composition with <code>call</code>, and the reconciler model that makes resume free.</p>
+      <p class="go">Open →</p>
+    </a>
+    <a class="card" href="adapters.html">
+      <h3><span class="ic">🔌</span> Adapters</h3>
+      <p>Roles and names, the <code>host</code> they build against, and the two rules that keep them honest. View and agents as adapters.</p>
+      <p class="go">Open →</p>
+    </a>
+    <a class="card" href="engine.html">
+      <h3><span class="ic">⚙️</span> Engine</h3>
+      <p>The four jobs: catalog discovery, ctx wiring, process ownership, tracing. Plus the loader's virtual modules.</p>
+      <p class="go">Open →</p>
+    </a>
+    <a class="card" href="data-flow.html">
+      <h3><span class="ic">🔀</span> Data flow</h3>
+      <p>One run end to end: <code>commit</code> from invocation through agent turn to a committed tree.</p>
+      <p class="go">Open →</p>
+    </a>
+  </div>
+
+  <div class="next">
+    <span></span>
+    <a class="fwd" href="workflows.html">
+      <div class="dir">next →</div>
+      <div class="ttl">Workflows</div>
+    </a>
+  </div>
+</main>
+
+<footer class="footer">
+  <span>penguin · architecture docs</span>
+  <span><a href="https://github.com/mikaelweiss/penguin">github.com/mikaelweiss/penguin</a></span>
+</footer>
+</body>
+</html>

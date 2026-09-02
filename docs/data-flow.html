@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Data flow · penguin</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><span class="mark">🐧</span> penguin</a>
+    <div class="nav-links">
+      <a href="index.html">Overview</a>
+      <a href="workflows.html">Workflows</a>
+      <a href="adapters.html">Adapters</a>
+      <a href="engine.html">Engine</a>
+      <a href="data-flow.html" class="active">Data flow</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <p class="eyebrow">One run, end to end</p>
+  <h1>Data flow</h1>
+  <p class="lede">The <code>commit</code> workflow from invocation to a committed tree. Watch where each value comes from and who narrates.</p>
+
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 900 560" role="img" aria-label="Sequence diagram of the commit workflow: it checks the tree with vcs, opens an agent turn and streams its output to the view, receives a typed result, stages and commits through vcs, and reports to the view.">
+        <!-- headers -->
+        <g>
+          <rect x="35" y="20" width="150" height="40" rx="10" class="s-node-accent" stroke-width="1.5"/>
+          <text x="110" y="45" text-anchor="middle" class="s-sans s-ink" font-size="13" font-weight="700">commit</text>
+          <rect x="275" y="20" width="150" height="40" rx="10" class="s-node" stroke-width="1.5"/>
+          <text x="350" y="45" text-anchor="middle" class="s-sans s-ink" font-size="13" font-weight="650">vcs · git</text>
+          <rect x="515" y="20" width="150" height="40" rx="10" class="s-node" stroke-width="1.5"/>
+          <text x="590" y="45" text-anchor="middle" class="s-sans s-ink" font-size="13" font-weight="650">agent · claude</text>
+          <rect x="740" y="20" width="150" height="40" rx="10" class="s-node-sunk" stroke-width="1.5"/>
+          <text x="815" y="45" text-anchor="middle" class="s-sans s-ink" font-size="13" font-weight="650">view · human</text>
+        </g>
+
+        <!-- lifelines -->
+        <line x1="110" y1="60" x2="110" y2="540" class="s-line" stroke-width="1.2" stroke-dasharray="3 4"/>
+        <line x1="350" y1="60" x2="350" y2="540" class="s-line" stroke-width="1.2" stroke-dasharray="3 4"/>
+        <line x1="590" y1="60" x2="590" y2="540" class="s-line" stroke-width="1.2" stroke-dasharray="3 4"/>
+        <line x1="815" y1="60" x2="815" y2="540" class="s-line" stroke-width="1.2" stroke-dasharray="3 4"/>
+
+        <!-- 1 dirty -->
+        <text x="230" y="92" text-anchor="middle" class="s-mono s-soft" font-size="11">vcs.dirty()</text>
+        <path d="M110 100 L348 100" class="s-line" stroke-width="1.4" marker-end="url(#f1)"/>
+        <text x="230" y="124" text-anchor="middle" class="s-mono s-faint" font-size="10.5">{ dirty: true }</text>
+        <path d="M350 132 L112 132" class="s-line" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#f2)"/>
+
+        <!-- 2 open + turn -->
+        <text x="350" y="170" text-anchor="middle" class="s-mono s-soft" font-size="11">agent.open() · agent.turn(PICK, { result: Commit })</text>
+        <path d="M110 178 L588 178" class="s-accentline" stroke-width="1.5" marker-end="url(#f3)"/>
+
+        <!-- 3 output stream -->
+        <text x="350" y="210" text-anchor="middle" class="s-mono s-accentink" font-size="11">turn.output → text · tool chunks (streaming)</text>
+        <path d="M590 218 L112 218" class="s-accentline" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#f4)"/>
+
+        <!-- 4 workflow forwards to view -->
+        <text x="462" y="250" text-anchor="middle" class="s-mono s-soft" font-size="11">view.show(chunk)   - the workflow chooses to forward</text>
+        <path d="M110 258 L813 258" class="s-line" stroke-width="1.4" marker-end="url(#f1)"/>
+
+        <!-- 5 value -->
+        <text x="350" y="292" text-anchor="middle" class="s-mono s-accentink" font-size="11">await turn.value → { files, message }  (typed, validated)</text>
+        <path d="M590 300 L112 300" class="s-accentline" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f4)"/>
+
+        <!-- 6 stage -->
+        <text x="230" y="338" text-anchor="middle" class="s-mono s-soft" font-size="11">vcs.stage(files)</text>
+        <path d="M110 346 L348 346" class="s-line" stroke-width="1.4" marker-end="url(#f1)"/>
+        <path d="M350 372 L112 372" class="s-line" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#f2)"/>
+        <text x="230" y="368" text-anchor="middle" class="s-mono s-faint" font-size="10.5">{ ok: true }</text>
+
+        <!-- 7 commit -->
+        <text x="230" y="406" text-anchor="middle" class="s-mono s-soft" font-size="11">vcs.commit(message)</text>
+        <path d="M110 414 L348 414" class="s-line" stroke-width="1.4" marker-end="url(#f1)"/>
+        <path d="M350 440 L112 440" class="s-line" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#f2)"/>
+        <text x="230" y="436" text-anchor="middle" class="s-mono s-faint" font-size="10.5">{ ok: true }</text>
+
+        <!-- 8 report -->
+        <text x="462" y="474" text-anchor="middle" class="s-mono s-soft" font-size="11">view.show("committed: …")</text>
+        <path d="M110 482 L813 482" class="s-line" stroke-width="1.4" marker-end="url(#f1)"/>
+
+        <text x="110" y="520" text-anchor="middle" class="s-sans s-faint" font-size="11">return { ok, committed, message }</text>
+
+        <defs>
+          <marker id="f1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--line-strong)"/></marker>
+          <marker id="f2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--line-strong)"/></marker>
+          <marker id="f3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+          <marker id="f4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption>Solid lines are calls, dashed are returns. Accent lines are the agent turn: a stream in, a typed value out. Only <code>commit</code> ever talks to <code>view</code>.</figcaption>
+  </figure>
+
+  <h2>Step by step</h2>
+
+  <h3>1 · Check the world first</h3>
+  <p>The workflow asks <code>vcs.dirty()</code> before anything else. A clean tree ends the run right there with <code>committed: false</code>. This is the reconciler check that makes a re-run safe.</p>
+  <pre><code><span class="tok-key">const</span> state = <span class="tok-key">await</span> vcs.<span class="tok-fn">dirty</span>({ cwd: params.dir });
+<span class="tok-key">if</span> (!state.dirty) { <span class="tok-key">await</span> view.<span class="tok-fn">show</span>(<span class="tok-str">"nothing to commit"</span>); <span class="tok-key">return</span> …; }</code></pre>
+
+  <h3>2 · Open a session, start a turn</h3>
+  <p><code>agent.open</code> returns a session id; <code>agent.turn</code> sends the PICK prompt and asks for a result shaped like <code>Commit</code>. The turn handle is returned immediately: the work has started, but nothing is awaited yet.</p>
+
+  <h3>3 · Stream, and choose what to narrate</h3>
+  <p>The workflow reads <code>turn.output</code> and decides, chunk by chunk, what the person sees. Text becomes a line; a tool call becomes an indented note. Thinking chunks are dropped here. <strong>The engine never made this choice; the workflow did.</strong></p>
+  <pre><code><span class="tok-key">for await</span> (<span class="tok-key">const</span> chunk <span class="tok-key">of</span> turn.output) {
+  <span class="tok-key">if</span> (chunk.kind === <span class="tok-str">"text"</span>) <span class="tok-key">await</span> view.<span class="tok-fn">show</span>(chunk.text);
+  <span class="tok-key">if</span> (chunk.kind === <span class="tok-str">"tool"</span>) <span class="tok-key">await</span> view.<span class="tok-fn">show</span>(<span class="tok-str">`  ${chunk.text}: ${chunk.detail ?? ""}`</span>);
+}</code></pre>
+
+  <h3>4 · Take the typed result</h3>
+  <p><code>await turn.value</code> gives back <code>{ files, message }</code>, already validated against the <code>Commit</code> schema. If the agent returned nothing usable, the adapter retried the turn once with a correction before this promise resolved. An empty <code>files</code> list is a real answer: nothing belongs in a commit, so the workflow stops.</p>
+
+  <h3>5 · Act, through vcs</h3>
+  <p><code>vcs.stage(files)</code> then <code>vcs.commit(message)</code>. Each returns <code>{ ok, reason }</code>. A failure is data: the workflow reports the reason to the view and returns a result saying what happened. Nothing throws in the ordinary path.</p>
+
+  <h3>6 · Report</h3>
+  <p>The workflow narrates the outcome to the view and returns a plain object. A parent workflow like <code>ship</code> or <code>commit-all</code> reads that object and decides what comes next: push, or move to the next folder.</p>
+
+  <div class="callout">
+    <span class="tag">The pattern, in one line</span>
+    <p>Read the world → open a turn → forward what matters → branch on the typed result → act → report. Every penguin workflow is a variation on this, and the same shape is what makes an interrupted run safe to start over.</p>
+  </div>
+
+  <h2>Running it</h2>
+  <p>The starter <code>run.ts</code> wires this up in the foreground: load the workflow, validate params, build the starter adapters against a host, and call <code>run(ctx)</code>.</p>
+  <pre><code>bun examples/run.ts examples/workflows/commit.ts <span class="tok-str">'{"dir":"."}'</span></code></pre>
+
+  <div class="next">
+    <a href="engine.html">
+      <div class="dir">← back</div>
+      <div class="ttl">Engine</div>
+    </a>
+    <a class="fwd" href="index.html">
+      <div class="dir">↺ start over</div>
+      <div class="ttl">Overview</div>
+    </a>
+  </div>
+</main>
+
+<footer class="footer">
+  <span>penguin · architecture docs</span>
+  <span><a href="https://github.com/mikaelweiss/penguin">github.com/mikaelweiss/penguin</a></span>
+</footer>
+</body>
+</html>

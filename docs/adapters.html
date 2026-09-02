@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Adapters · penguin</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><span class="mark">🐧</span> penguin</a>
+    <div class="nav-links">
+      <a href="index.html">Overview</a>
+      <a href="workflows.html">Workflows</a>
+      <a href="adapters.html" class="active">Adapters</a>
+      <a href="engine.html">Engine</a>
+      <a href="data-flow.html">Data flow</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <p class="eyebrow">Concept 2</p>
+  <h1>Adapters</h1>
+  <p class="lede">A workflow's bridge to one outside thing. Plain functions over plain data, and nothing more.</p>
+
+  <h2>The anatomy</h2>
+  <p class="section-note">A role, a name, a description, and <code>build(host)</code>, which returns the functions a workflow calls through <code>ctx.&lt;role&gt;</code>.</p>
+
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 900 320" role="img" aria-label="An adapter has a role, a name, a description, and a build function; build receives the host and returns the API a workflow calls.">
+        <rect x="40" y="40" width="360" height="240" rx="14" class="s-node" stroke-width="1.5"/>
+        <text x="60" y="70" class="s-mono s-accentink" font-size="12">adapter(</text>
+
+        <text x="76" y="104" class="s-mono s-soft" font-size="12.5">role:</text>
+        <text x="150" y="104" class="s-mono s-ink" font-size="12.5">"vcs"</text>
+        <text x="380" y="104" text-anchor="end" class="s-sans s-faint" font-size="11">what it is on ctx</text>
+
+        <text x="76" y="134" class="s-mono s-soft" font-size="12.5">name:</text>
+        <text x="150" y="134" class="s-mono s-ink" font-size="12.5">"git"</text>
+        <text x="380" y="134" text-anchor="end" class="s-sans s-faint" font-size="11">which implementation</text>
+
+        <text x="76" y="164" class="s-mono s-soft" font-size="12.5">description:</text>
+        <text x="380" y="164" text-anchor="end" class="s-sans s-faint" font-size="11">one line</text>
+
+        <text x="76" y="200" class="s-mono s-soft" font-size="12.5">build:</text>
+        <text x="150" y="200" class="s-mono s-accentink" font-size="12.5">(host) =&gt; ({ … })</text>
+        <text x="380" y="222" text-anchor="end" class="s-sans s-faint" font-size="11">returns the API</text>
+        <text x="60" y="256" class="s-mono s-accentink" font-size="12">)</text>
+
+        <!-- API -->
+        <rect x="500" y="40" width="360" height="130" rx="12" class="s-node-accent" stroke-width="1.5"/>
+        <text x="520" y="68" class="s-mono s-ink" font-size="12" font-weight="700">ctx.vcs</text>
+        <text x="520" y="98" class="s-mono s-soft" font-size="12">commit(msg) → { ok, reason }</text>
+        <text x="520" y="122" class="s-mono s-soft" font-size="12">push(branch) → { ok, reason }</text>
+        <text x="520" y="146" class="s-mono s-soft" font-size="12">dirty() → { ok, dirty }</text>
+
+        <!-- host -->
+        <rect x="500" y="200" width="360" height="80" rx="12" class="s-node-sunk" stroke-width="1.5"/>
+        <text x="520" y="228" class="s-mono s-accentink" font-size="12">host</text>
+        <text x="520" y="252" class="s-mono s-soft" font-size="11.5">cwd · state · shell() · exec()</text>
+        <text x="520" y="271" class="s-sans s-faint" font-size="11">everything an adapter can touch</text>
+
+        <path d="M400 150 L498 105" class="s-accentline" stroke-width="1.5" marker-end="url(#a1)"/>
+        <path d="M500 240 C 440 240, 420 190, 300 195" class="s-line" stroke-width="1.4" marker-end="url(#a2)"/>
+        <text x="450" y="120" class="s-mono s-faint" font-size="10">returns</text>
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+          <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--line-strong)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption><code>build(host)</code> closes over the host and returns the plain-data API. <code>host</code> is the adapter's entire surface to the outside: <code>cwd</code>, <code>state</code>, <code>shell</code>, <code>exec</code>.</figcaption>
+  </figure>
+
+  <h2>One role, many implementations</h2>
+  <p class="section-note">A workflow calls <code>ctx.vcs.commit(...)</code> and does not care whether git or jj answers.</p>
+
+  <p>The <strong>role</strong> is the slot on <code>ctx</code>: <code>vcs</code>, <code>agent</code>, <code>view</code>. The <strong>name</strong> is which implementation fills it: <code>git</code>, <code>claude</code>, <code>terminal</code>. When more than one implementation of a role is installed, the user picks a default in <code>~/.penguin/defaults</code>.</p>
+
+  <table>
+    <thead><tr><th>Role</th><th>Starter name</th><th>What it bridges to</th></tr></thead>
+    <tbody>
+      <tr><td><code>vcs</code></td><td><code>git</code></td><td>Working copies: staging, commits, pushes, worktrees, rebases</td></tr>
+      <tr><td><code>agent</code></td><td><code>claude</code></td><td>The claude CLI: a session is a conversation, a turn streams output</td></tr>
+      <tr><td><code>view</code></td><td><code>terminal</code></td><td>The person watching: stdout and stdin</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Two rules keep adapters honest</h2>
+  <div class="grid two">
+    <div class="card">
+      <h3><span class="ic">📦</span> Functions carry plain data</h3>
+      <p>An adapter function takes and returns JSON-serializable values, or an async stream of them. Never functions, never objects with methods.</p>
+    </div>
+    <div class="card">
+      <h3><span class="ic">⚠️</span> Outcomes are data, throws mean broken</h3>
+      <p>A failed commit returns <code>{ ok: false, reason }</code> for the workflow to handle. A throw means the adapter itself could not do its job at all.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="tag">What an adapter cannot do</span>
+    <p>It cannot write to the view, cannot ask the user anything, and cannot reach another adapter. It bridges to <em>one</em> outside thing through <code>host</code>, and that is all. Orchestration lives in the workflow.</p>
+  </div>
+
+  <h2>The view is an adapter</h2>
+  <p class="section-note">The person watching a run is one outside thing, so they get one adapter: role <code>view</code>.</p>
+
+  <pre><code><span class="tok-key">await</span> view.<span class="tok-fn">show</span>(<span class="tok-str">"staged 3 files"</span>);
+<span class="tok-key">const</span> branch = <span class="tok-key">await</span> view.<span class="tok-fn">ask</span>(<span class="tok-str">"Which branch?"</span>, z.string());</code></pre>
+
+  <p><code>show</code> sends something to whoever is watching. <code>ask</code> sends a question and resolves when a person answers, validated against the shape when one is given. There is <strong>no shared inbox, no queue, no routing</strong>: an answer reaches its asker because the asker is the one awaiting it. Two parallel branches asking at once are two pending questions, each answer flowing back to its own caller.</p>
+
+  <h2>Agents are adapters too</h2>
+  <p class="section-note">An agent CLI is one more outside thing. The engine has no idea agents exist.</p>
+
+  <p>The starter <code>agent</code> role speaks in plain data. <code>open(options)</code> returns a session id. <code>turn(session, prompt)</code> returns a handle with two parts: <code>output</code>, a stream of what the agent is doing, and <code>value</code>, a promise of the result, typed when a result shape is given.</p>
+
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 900 260" role="img" aria-label="agent.turn returns a handle with two parts: an output stream of chunks the workflow can forward to the view, and a value promise that resolves to a typed result.">
+        <rect x="40" y="100" width="200" height="60" rx="12" class="s-node-accent" stroke-width="1.5"/>
+        <text x="140" y="126" text-anchor="middle" class="s-mono s-ink" font-size="13" font-weight="700">agent.turn()</text>
+        <text x="140" y="146" text-anchor="middle" class="s-sans s-soft" font-size="11">one handle, two parts</text>
+
+        <!-- output stream -->
+        <rect x="360" y="30" width="240" height="70" rx="12" class="s-node" stroke-width="1.5"/>
+        <text x="380" y="58" class="s-mono s-accentink" font-size="12">.output</text>
+        <text x="380" y="82" class="s-sans s-soft" font-size="11.5">stream: text · thinking · tool</text>
+
+        <!-- value -->
+        <rect x="360" y="160" width="240" height="70" rx="12" class="s-node" stroke-width="1.5"/>
+        <text x="380" y="188" class="s-mono s-accentink" font-size="12">.value</text>
+        <text x="380" y="212" class="s-sans s-soft" font-size="11.5">Promise&lt;typed result&gt;</text>
+
+        <rect x="700" y="30" width="160" height="70" rx="12" class="s-node-sunk" stroke-width="1.5"/>
+        <text x="780" y="63" text-anchor="middle" class="s-sans s-soft" font-size="12.5">👤 view</text>
+        <text x="780" y="83" text-anchor="middle" class="s-sans s-faint" font-size="10.5">if the workflow forwards</text>
+
+        <rect x="700" y="160" width="160" height="70" rx="12" class="s-node-sunk" stroke-width="1.5"/>
+        <text x="780" y="193" text-anchor="middle" class="s-sans s-soft" font-size="12.5">workflow logic</text>
+        <text x="780" y="213" text-anchor="middle" class="s-sans s-faint" font-size="10.5">branch on the result</text>
+
+        <path d="M240 122 C 300 110, 320 80, 358 68" class="s-accentline" stroke-width="1.5" marker-end="url(#g1)"/>
+        <path d="M240 138 C 300 150, 320 185, 358 195" class="s-accentline" stroke-width="1.5" marker-end="url(#g1)"/>
+        <path d="M600 65 L698 65" class="s-line" stroke-width="1.4" marker-end="url(#g2)"/>
+        <path d="M600 195 L698 195" class="s-line" stroke-width="1.4" marker-end="url(#g2)"/>
+        <defs>
+          <marker id="g1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+          <marker id="g2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--line-strong)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption>The workflow decides whether agent output reaches the view, and how. The typed <code>value</code> is what it branches on.</figcaption>
+  </figure>
+
+  <pre><code><span class="tok-key">const</span> session = <span class="tok-key">await</span> agent.<span class="tok-fn">open</span>({ cwd: params.dir });
+<span class="tok-key">const</span> turn = agent.<span class="tok-fn">turn</span>(session, PROMPT, { result: Commit });
+<span class="tok-key">for await</span> (<span class="tok-key">const</span> chunk <span class="tok-key">of</span> turn.output) <span class="tok-key">await</span> view.<span class="tok-fn">show</span>(chunk.text);
+<span class="tok-key">const</span> commit = <span class="tok-key">await</span> turn.value;   <span class="tok-com">// typed, validated against Commit</span></code></pre>
+
+  <p>The starter claude adapter carries real work behind that plain surface: it drives <code>claude -p --output-format stream-json</code>, parses the event stream into <code>text</code> / <code>thinking</code> / <code>tool</code> chunks, enforces a JSON schema on the result, and retries the turn once with a correction when validation fails. None of that leaks into the workflow: the workflow sees a stream and a typed promise.</p>
+
+  <div class="next">
+    <a href="workflows.html">
+      <div class="dir">← back</div>
+      <div class="ttl">Workflows</div>
+    </a>
+    <a class="fwd" href="engine.html">
+      <div class="dir">next →</div>
+      <div class="ttl">Engine</div>
+    </a>
+  </div>
+</main>
+
+<footer class="footer">
+  <span>penguin · architecture docs</span>
+  <span><a href="https://github.com/mikaelweiss/penguin">github.com/mikaelweiss/penguin</a></span>
+</footer>
+</body>
+</html>
