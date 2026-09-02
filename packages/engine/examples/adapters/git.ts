@@ -284,6 +284,16 @@ export default adapter({
         if (done.code !== 0) return { subjects: [] };
         return { subjects: done.stdout.split("\n").filter((line) => line.trim() !== "") };
       },
+      /** The newest branch names, local and remote, which are the only record of how this repository names them. */
+      async branches(count: number, options?: { cwd?: string }): Promise<{ branches: string[] }> {
+        const done = await git(
+          ["branch", "-a", "--sort=-committerdate", "--format=%(refname:short)"],
+          options?.cwd,
+        );
+        if (done.code !== 0) return { branches: [] };
+        const names = done.stdout.split("\n").filter((line) => line.trim() !== "");
+        return { branches: names.slice(0, count) };
+      },
       /** The newest commits as git prints them, message and all. Empty when git prints none. */
       async log(count: number, options?: { cwd?: string }): Promise<{ text: string }> {
         const done = await git(["log", `-${count}`], options?.cwd);

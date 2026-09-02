@@ -12,7 +12,7 @@ The input carries the design and names the workflow file. Review with fresh eyes
 3. Check the penguin checklist:
    - `description` is one non-empty line, and the file default-exports `workflow({description, params, run})` with the params the design names.
    - The params stay minimal: one required free-text subject, and every further param is one the run cannot start without, no agent turn can derive, and no ask can collect at the moment it matters. No param validates meaning with a pattern.
-   - Every param a person fills reads as a question they can answer, and carries a one-line `.describe()`. Every param only a calling workflow fills carries `.meta({ internal: true })`. A folder a child works in is a `call` option, never a param.
+   - Every param a person fills reads as a question they can answer, and carries a one-line `.describe()`. Every param only a calling workflow fills carries `.meta({ internal: true })`, and a workflow only a calling workflow starts carries `internal: true`. A folder a child works in is a `call` option, never a param.
    - Module top level is side-effect-free.
    - No step needs a shell: every side effect is an adapter method on ctx or an agent turn.
    - Every loop has a bound, and the workflow asks when a bound runs out.

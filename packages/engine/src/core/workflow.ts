@@ -16,6 +16,8 @@ export type RunHooks = {
 
 export type Workflow<Schema extends z.ZodObject = z.ZodObject, R = unknown> = {
   description: string;
+  /** True when only a calling workflow starts it, so a launch list leaves it out. */
+  internal?: boolean;
   params: Schema;
   run(ctx: Ctx<z.infer<Schema>>): Promise<R>;
   /** The definition's own file, so call can spawn it. workflow() fills it in. */

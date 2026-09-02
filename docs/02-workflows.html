@@ -140,6 +140,12 @@ z.object({ title: z.string(), urgent: z.boolean() })  // a form</code></pre>
     </p>
 
     <p>
+      The same word marks a whole workflow. One only a calling workflow ever starts carries
+      <code>internal: true</code> beside its description, and a launch list leaves it out. The
+      engine still starts it by file, so a step runs on its own from the CLI.
+    </p>
+
+    <p>
       A param that holds prose rather than a word carries
       <code>.meta({ multiline: true })</code>. It changes nothing about whether the param is
       shown or what the workflow receives, only how the box is drawn: one that wraps and grows

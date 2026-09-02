@@ -59,6 +59,7 @@ export function ProjectSettingsDialog({
   const workflows: Definition[] = catalogs.workflows.map((workflow) => ({
     key: workflow.file,
     name: workflow.name,
+    ...(workflow.internal === true ? { note: "internal" } : {}),
     detail: workflow.error ?? workflow.description,
     scope: workflow.worktree ?? workflow.scope,
   }));

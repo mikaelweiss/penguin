@@ -11,6 +11,8 @@ import { messageOf } from "./core/errors.ts";
 
 export type WorkflowDescribed = WorkflowFound & {
   description?: string;
+  /** True when only a calling workflow starts it, so a launch list leaves it out. */
+  internal?: boolean;
   /** The params schema as JSON Schema, what a frontend renders the form from. */
   params?: Record<string, unknown>;
   /** Why the file refused to load, when it did. */
@@ -46,6 +48,7 @@ export async function describe(cwd: string): Promise<Described> {
       workflows.push({
         ...entry,
         description: definition.description,
+        ...(definition.internal === true ? { internal: true } : {}),
         params: z.toJSONSchema(definition.params) as Record<string, unknown>,
       });
     } catch (error) {

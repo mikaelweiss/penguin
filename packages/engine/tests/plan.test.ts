@@ -1,13 +1,16 @@
 import { expect, test } from "bun:test";
 import type { Ctx } from "penguin";
-import plan, { planOn } from "../examples/workflows/plan.ts";
+import { bearings, type Bearings } from "../examples/helpers/discover.ts";
+import plan from "../examples/workflows/plan.ts";
 
 type Turn = { session: string; prompt: string };
+type Opened = Record<string, unknown>;
 
+/** The scout answers the first turn, so every list of values starts with what it found. */
 function harness(values: unknown[], answers: string[]) {
   const asked: string[] = [];
   const turns: Turn[] = [];
-  const sessions: string[] = [];
+  const opens: Opened[] = [];
   const view = {
     show: () => Promise.resolve(),
     act: () => Promise.resolve(),
@@ -17,13 +20,12 @@ function harness(values: unknown[], answers: string[]) {
     },
   };
   const agent = {
-    open: () => {
-      const session = `session-${sessions.length + 1}`;
-      sessions.push(session);
-      return Promise.resolve(session);
+    open: (options?: Opened) => {
+      opens.push(options ?? {});
+      return Promise.resolve(`session-${opens.length}`);
     },
-    turn: (session: string, ask: { prompt?: string }) => {
-      turns.push({ session, prompt: ask.prompt ?? "" });
+    turn: (session: string, ask: string | { prompt?: string }) => {
+      turns.push({ session, prompt: typeof ask === "string" ? ask : (ask.prompt ?? "") });
       return {
         output: (async function* () {})(),
         value: Promise.resolve(values[turns.length - 1] ?? {}),
@@ -31,50 +33,61 @@ function harness(values: unknown[], answers: string[]) {
     },
   };
   const ctx = { agent, view } as unknown as Ctx<unknown>;
-  return { asked, turns, sessions, ctx };
+  return {
+    asked,
+    turns,
+    opens,
+    run: (ticket: string) => plan.run({ ...ctx, params: { ticket } } as never),
+  };
 }
 
+const scouted: Bearings = {
+  files: ["src/widget.ts"],
+  found: "the widget builds its own model",
+  missing: "",
+};
+const nothing: Bearings = { files: [], found: "", missing: "" };
 const planned = { result: { plan: "the plan", acceptance: "it works" } };
 
-test("the standalone workflow carries what triage read into its own session", async () => {
-  const bench = harness([planned], []);
+test("the scout finds the files first, and the planner is handed them with the task", async () => {
+  const bench = harness([scouted, planned], []);
 
-  const out = await plan.run({
-    ...bench.ctx,
-    params: { ticket: "build the model", context: "src/widget.ts holds the model" },
-  } as never);
+  const out = await bench.run("build the model");
 
   expect(out.acceptance).toBe("it works");
-  expect(bench.sessions).toEqual(["session-1"]);
-  expect(bench.turns[0]?.prompt).toBe(
-    "build the model\n\n# What triage already read\n\nsrc/widget.ts holds the model",
+  expect(bench.opens[0]).toMatchObject({ model: "small" });
+  expect(bench.opens[1]).toEqual({});
+  expect(bench.turns.map((turn) => turn.session)).toEqual(["session-1", "session-2"]);
+  expect(bench.turns[1]?.prompt).toBe(`build the model\n\n${bearings(scouted)}`);
+});
+
+test("a scout that found nothing leaves the task as the whole prompt", async () => {
+  const bench = harness([nothing, planned], []);
+
+  await bench.run("build the model");
+
+  expect(bench.turns[1]?.prompt).toBe("build the model");
+});
+
+test("blocked questions come back as answers on the planner's session", async () => {
+  const bench = harness(
+    [scouted, { blocked: { questions: ["which store?"] } }, planned],
+    ["the local one"],
   );
-});
 
-test("with no context the ticket is the whole prompt", async () => {
-  const bench = harness([planned], []);
+  await bench.run("build the model");
 
-  await plan.run({ ...bench.ctx, params: { ticket: "build the model", context: "" } } as never);
-
-  expect(bench.turns[0]?.prompt).toBe("build the model");
-});
-
-test("blocked questions come back as answers on the caller's session", async () => {
-  const bench = harness([{ blocked: { questions: ["which store?"] } }, planned], ["the local one"]);
-
-  await planOn(bench.ctx, "session", "build the model");
-
-  expect(bench.turns.map((turn) => turn.session)).toEqual(["session", "session"]);
-  expect(bench.turns[1]?.prompt).toBe("# Answers\n\nwhich store?\nthe local one");
+  expect(bench.turns.slice(1).map((turn) => turn.session)).toEqual(["session-2", "session-2"]);
+  expect(bench.turns[2]?.prompt).toBe("# Answers\n\nwhich store?\nthe local one");
 });
 
 test("a plan the person will not approve goes back as a revision", async () => {
-  const bench = harness([planned, planned], ["keep the migration out of it"]);
+  const bench = harness([scouted, planned, planned], ["keep the migration out of it"]);
 
-  const out = await planOn(bench.ctx, "session", "build the model");
+  const out = await bench.run("build the model");
 
   expect(out.plan).toBe("the plan");
-  expect(bench.turns[1]?.prompt).toBe(
+  expect(bench.turns[2]?.prompt).toBe(
     "# The revision the user asks for\n\nkeep the migration out of it",
   );
 });

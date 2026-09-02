@@ -18,6 +18,7 @@ File rules:
 
 - The file default-exports `workflow({description, params, run})`. `description` is one non-empty line.
 - Every param a person fills carries a one-line `.describe()`. A param only a calling workflow fills carries `.meta({ internal: true })` instead. A param that is neither refuses to load.
+- A workflow only a calling workflow starts carries `internal: true` beside its description, so the launch list leaves it out.
 - A child workflow's folder is a `call` option, not a param: `call(ctx, child, params, { cwd })`.
 - Module top level is side-effect-free: schema constants and pure helpers only.
 - Import `penguin`, `zod`, other workflow files, and shared TypeScript files by relative path. Nothing else.

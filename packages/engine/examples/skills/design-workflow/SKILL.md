@@ -29,7 +29,7 @@ The default schema is one required free-text param: the subject the user types a
 - No agent turn can derive it.
 - No ask can collect it at the moment it matters.
 
-A param a person fills carries a one-line `.describe()`, because that line is the only label the launch form shows. A param only a calling workflow fills carries `.meta({ internal: true })` instead, which keeps it out of the form. Design each param as one or the other.
+A param a person fills carries a one-line `.describe()`, because that line is the only label the launch form shows. A param only a calling workflow fills carries `.meta({ internal: true })` instead, which keeps it out of the form. Design each param as one or the other. A workflow only a calling workflow starts carries `internal: true` beside its description, which keeps it out of the launch list the same way.
 
 The folder a child workflow works in is never a param. `call` takes it as a `cwd` option, so design the child to work where it is run.
 

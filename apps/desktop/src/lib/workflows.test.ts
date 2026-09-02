@@ -23,3 +23,10 @@ test("worktree workflows get their own shelf, after starter and before builtin",
   expect(found[1]?.title).toBe("worktrees");
   expect(found[1]?.workflows[0]?.worktree).toBe("feature");
 });
+
+test("a workflow only a caller starts is left off every shelf", () => {
+  const step: Workflow = { ...workflow("audit", "project"), internal: true };
+  const found = shelves([step, workflow("ship", "project")]);
+  expect(found.map((shelf) => shelf.workflows.map((one) => one.name))).toEqual([["ship"]]);
+  expect(shelves([step])).toEqual([]);
+});

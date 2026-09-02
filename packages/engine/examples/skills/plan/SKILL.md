@@ -24,9 +24,7 @@ The goal is the documents that govern this change, found by lookup rather than a
 
 Timebox this. When the matched docs and entry points are read, discovery is done; do not re-derive what the docs already state.
 
-You may have triaged this ticket earlier in this conversation, or the input may carry a section of what triage already read. Either way those facts are yours: start from them, and read a file again only to answer a question they leave open.
-
-When you planned an earlier task of the same ticket in this conversation, this task is the next slice. Build on that plan and do not repeat what it already covers.
+The input may carry the files a scout found for this task. Open those before you search for anything: that search is already paid for. A file the scout could not find is unsearched, not absent.
 
 ## 3. Definition of done
 

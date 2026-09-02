@@ -635,6 +635,22 @@ test("subjects reads the newest lines, and a repository with no commit has none"
   expect((await vcs.subjects(2)).subjects).toEqual(["test: third", "test: second"]);
 });
 
+test("branches reads the newest names, and a repository with no commit has none", async () => {
+  const { dir, host, vcs } = await repo();
+  expect((await vcs.branches(20)).branches).toEqual([]);
+
+  await commitFile({ dir, host }, "a.txt", "test: first");
+  await git(host, ["checkout", "-q", "-b", "fix-login-timeout"]);
+  await commitFile({ dir, host }, "b.txt", "test: second");
+  await git(host, ["checkout", "-q", "-b", "add-sidebar-widget"]);
+  await commitFile({ dir, host }, "c.txt", "test: third");
+
+  const first = (await git(host, ["branch", "--show-current"])).trim();
+  expect((await vcs.branches(20)).branches[0]).toBe(first);
+  expect((await vcs.branches(20)).branches).toHaveLength(3);
+  expect((await vcs.branches(2)).branches).toHaveLength(2);
+});
+
 test("onto with from carries only the branch's own commits over a parent that was rewritten", async () => {
   const { dir, host, vcs } = await repo();
   await commitFile({ dir, host }, "base.txt", "base");

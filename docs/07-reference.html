@@ -327,6 +327,7 @@ type Ctx&lt;Params&gt; = { params: Params } &amp; Adapters;
 
 type Workflow&lt;Schema extends z.ZodObject = z.ZodObject, R = unknown&gt; = {
   description: string;
+  internal?: boolean; // only a calling workflow starts it, so a launch list leaves it out
   params: Schema;
   run(ctx: Ctx&lt;z.infer&lt;Schema&gt;&gt;): Promise&lt;R&gt;;
   file?: string; // workflow() fills it in, so call can spawn it

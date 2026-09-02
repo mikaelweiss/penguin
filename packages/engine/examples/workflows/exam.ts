@@ -102,9 +102,6 @@ const TriageOut = z.object({
       tasks: z
         .array(z.string())
         .describe("the tasks that build the ticket, each one a vertical slice"),
-      context: z
-        .string()
-        .describe("the files read and what each one holds, so the planner reads them once, not twice"),
     })
     .optional()
     .describe("fill this or blocked, and never both"),

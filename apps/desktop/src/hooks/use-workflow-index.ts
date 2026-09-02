@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { Project } from "@/lib/runs";
-import { describe } from "@/lib/workflows";
+import { describe, startable } from "@/lib/workflows";
 import type { Workflow } from "@/lib/workflows";
 
 export type Startable = {
@@ -57,7 +57,7 @@ function gather(projects: Project[], byDir: Record<string, Workflow[]>): Startab
   const byFile = new Map<string, Startable>();
 
   for (const project of projects) {
-    for (const workflow of byDir[project.dir] ?? []) {
+    for (const workflow of startable(byDir[project.dir] ?? [])) {
       if (workflow.error !== undefined) continue;
       const found = byFile.get(workflow.file);
       if (found === undefined) byFile.set(workflow.file, { workflow, projects: [project] });

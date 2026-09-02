@@ -1,13 +1,12 @@
 import { call, workflow, type Ctx } from "penguin";
 import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
-import { resolveTicket } from "../helpers/ticket.ts";
 import { narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 import commit from "./commit.ts";
 import implement from "./implement.ts";
-import { planOn } from "./plan.ts";
-import { triageOn } from "./triage.ts";
+import plan from "./plan.ts";
+import triage from "./triage.ts";
 
 const Ack = z.enum(["ok"]);
 const Tried = z.union([z.enum(["done"]), z.string()]);
@@ -62,7 +61,7 @@ export default workflow({
   }),
 
   async run(ctx) {
-    const { params, agent, vcs, view } = ctx;
+    const { params, vcs, view } = ctx;
     const nothing = {
       done: false,
       path: "",
@@ -78,11 +77,7 @@ export default workflow({
     if (base === "") return nothing;
     await vcs.fetch(base);
 
-    // One session carries triage and every plan. The files triage read stay in the conversation,
-    // so no plan reads them again and the second plan knows the first.
-    // The session works in this run's checkout: the worktree has no name until triage answers.
-    const session = await agent.open();
-    const triaged = await triageOn(ctx, session, await resolveTicket(ctx, params.ticket));
+    const triaged = await call(ctx, triage, { ticket: params.ticket });
     if (!triaged.actionable) {
       await view.ask(`Not actionable: ${triaged.reason}`, Ack);
       return nothing;
@@ -102,7 +97,7 @@ export default workflow({
     const total = triaged.tasks.length;
     for (const [index, task] of triaged.tasks.entries()) {
       await view.show(`task ${index + 1} of ${total}`);
-      const planned = await planOn(ctx, session, task);
+      const planned = await call(ctx, plan, { ticket: task }, { cwd: dir });
       checks.push(planned.acceptance);
       const built = await call(
         ctx,

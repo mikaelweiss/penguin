@@ -9,6 +9,8 @@ export type Workflow = {
   /** Which sibling checkout it was found in, on a worktree workflow. */
   worktree?: string;
   description?: string;
+  /** True when only a calling workflow starts it, so the launch list leaves it out. */
+  internal?: boolean;
   /** The params schema as JSON Schema, what the params form is built from. */
   params?: Record<string, unknown>;
   /** Why the file refused to load, when it did. */
@@ -79,11 +81,17 @@ export type Shelf = {
   workflows: Workflow[];
 };
 
-/** The workflows grouped by catalog, nearest catalog first. */
+/** The workflows a person starts: every one but those only a caller starts. */
+export function startable(workflows: Workflow[]): Workflow[] {
+  return workflows.filter((workflow) => workflow.internal !== true);
+}
+
+/** The workflows a person starts, grouped by catalog, nearest catalog first. */
 export function shelves(workflows: Workflow[]): Shelf[] {
+  const shown = startable(workflows);
   return ORDER.map((scope) => ({
     scope,
     title: TITLES[scope],
-    workflows: workflows.filter((workflow) => workflow.scope === scope),
+    workflows: shown.filter((workflow) => workflow.scope === scope),
   })).filter((shelf) => shelf.workflows.length > 0);
 }

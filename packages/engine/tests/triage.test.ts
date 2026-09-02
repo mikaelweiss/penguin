@@ -1,13 +1,14 @@
 import { expect, test } from "bun:test";
 import type { Ctx } from "penguin";
-import triage, { triageOn } from "../examples/workflows/triage.ts";
+import triage from "../examples/workflows/triage.ts";
 
 type Turn = { session: string; prompt: string };
+type Opened = Record<string, unknown>;
 
-function harness(values: unknown[], answers: string[]) {
+function harness(values: unknown[], answers: string[], branches: string[] = []) {
   const asked: string[] = [];
   const turns: Turn[] = [];
-  const sessions: string[] = [];
+  const opens: Opened[] = [];
   const view = {
     show: () => Promise.resolve(),
     act: () => Promise.resolve(),
@@ -17,10 +18,9 @@ function harness(values: unknown[], answers: string[]) {
     },
   };
   const agent = {
-    open: () => {
-      const session = `session-${sessions.length + 1}`;
-      sessions.push(session);
-      return Promise.resolve(session);
+    open: (options?: Opened) => {
+      opens.push(options ?? {});
+      return Promise.resolve(`session-${opens.length}`);
     },
     turn: (session: string, ask: { prompt?: string }) => {
       turns.push({ session, prompt: ask.prompt ?? "" });
@@ -30,28 +30,40 @@ function harness(values: unknown[], answers: string[]) {
       };
     },
   };
-  const ctx = { agent, view } as unknown as Ctx<unknown>;
-  return { asked, turns, sessions, ctx, agent, view };
+  const vcs = { branches: () => Promise.resolve({ branches }) };
+  const ctx = { agent, vcs, view } as unknown as Ctx<unknown>;
+  return {
+    asked,
+    turns,
+    opens,
+    run: (ticket: string) => triage.run({ ...ctx, params: { ticket } } as never),
+  };
 }
 
 const triaged = {
   actionable: true,
-  reason: "src/widget.ts holds it",
+  reason: "the goal is one sentence",
   branch: "widget sidebar toggle",
   tasks: ["build the model"],
-  context: "src/widget.ts holds the model",
 };
 
-test("the standalone workflow triages the ticket in a session of its own", async () => {
-  const bench = harness([{ result: triaged }], []);
+test("the turn reads the ticket and the branch names off the prompt, with no tool", async () => {
+  const bench = harness([{ result: triaged }], [], ["main", "fix-login-timeout"]);
 
-  const out = await triage.run({
-    ...bench.ctx,
-    params: { ticket: "add a widget to the sidebar" },
-  } as never);
+  const out = await bench.run("add a widget to the sidebar");
 
   expect(out.branch).toBe("widget sidebar toggle");
-  expect(bench.sessions).toEqual(["session-1"]);
+  expect(bench.opens).toEqual([{ model: "small", tools: [], settings: [] }]);
+  expect(bench.turns[0]?.prompt).toBe(
+    "add a widget to the sidebar\n\n# Recent branch names\n\nmain\nfix-login-timeout",
+  );
+});
+
+test("a repository with no branch leaves the ticket as the whole prompt", async () => {
+  const bench = harness([{ result: triaged }], []);
+
+  await bench.run("add a widget to the sidebar");
+
   expect(bench.turns[0]?.prompt).toBe("add a widget to the sidebar");
 });
 
@@ -61,10 +73,10 @@ test("blocked questions come back as answers on the same session", async () => {
     ["the left one"],
   );
 
-  await triageOn(bench.ctx, "session", "add a widget to the sidebar");
+  await bench.run("add a widget to the sidebar");
 
   expect(bench.asked).toEqual(["which sidebar?"]);
-  expect(bench.turns.map((turn) => turn.session)).toEqual(["session", "session"]);
+  expect(bench.turns.map((turn) => turn.session)).toEqual(["session-1", "session-1"]);
   expect(bench.turns[1]?.prompt).toBe("# Answers\n\nwhich sidebar?\nthe left one");
 });
 
@@ -72,7 +84,7 @@ test("a split the person will not take goes back as a revision", async () => {
   const split = { ...triaged, tasks: ["build the model", "build the screen"] };
   const bench = harness([{ result: split }, { result: triaged }], ["split it by layer instead"]);
 
-  const out = await triageOn(bench.ctx, "session", "add a widget to the sidebar");
+  const out = await bench.run("add a widget to the sidebar");
 
   expect(out.tasks).toEqual(["build the model"]);
   expect(bench.turns[1]?.prompt).toBe(
@@ -83,7 +95,7 @@ test("a split the person will not take goes back as a revision", async () => {
 test("a ticket nothing can be built from returns without a gate", async () => {
   const bench = harness([{ result: { ...triaged, actionable: false } }], []);
 
-  const out = await triageOn(bench.ctx, "session", "make it better");
+  const out = await bench.run("make it better");
 
   expect(out.actionable).toBe(false);
   expect(bench.asked).toEqual([]);

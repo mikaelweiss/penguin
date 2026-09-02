@@ -91,3 +91,11 @@ test("a workflow written on a branch is described, named by the checkout it came
   expect(ship?.worktree).toBe("feature");
   expect(ship?.description).toBe("greets by echo");
 });
+
+test("a workflow only a caller starts says so, and one that does not carries no flag", async () => {
+  const step = HELLO.replace('description: "greets by echo",', 'description: "greets by echo",\n  internal: true,');
+  fs.writeFileSync(path.join(project, ".penguin", "workflows", "step.ts"), step);
+  const described = await describe(project);
+  expect(described.workflows.find((entry) => entry.name === "step")?.internal).toBe(true);
+  expect(described.workflows.find((entry) => entry.name === "hello")?.internal).toBeUndefined();
+});

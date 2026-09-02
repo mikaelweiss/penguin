@@ -5,18 +5,16 @@ description: Decides if a ticket is ready to work on, splits it into the tasks t
 
 # Triage a ticket
 
-Decide if the ticket is ready to work on, return the tasks that build it, and name the branch they go on. Do not write code.
+Decide if the ticket is ready to work on, return the tasks that build it, and name the branch they go on. Do not write code, and do not read the repository. The planner reads the code. You read the ticket.
 
-1. Read the ticket. The input is an identifier, a URL, or the ticket text itself. For an identifier, use the CLI that owns it, for example `gh issue view <id>`.
-2. Read the parts of the repository the ticket points at, and the branch names it already uses: `git branch -a --sort=-committerdate --format='%(refname:short)' | head -20`.
-3. Answer two questions:
-   - Is the goal clear enough to build?
-   - Does the repository hold the code the ticket names?
-4. If a question survives your own reading, return `blocked` with the questions and no verdict. The answers arrive in the next turn. Ask only what the repository cannot answer.
-5. Set `actionable` to true only if both answers are yes. Put the deciding fact in `reason`. Name the file, the missing detail, or the conflict. One or two sentences.
-6. When the ticket is actionable, return the work as `tasks`.
-7. Return what your reading found as `context`: each file you read, what it holds, and the line numbers that matter. The planner starts from this instead of reading the repository a second time. Facts only, no plan.
-8. Name the branch the work goes on as `branch`. Match the style the repository's own names are built in, and how much they say. Say what the work does, not what the ticket is called: three to five words, lowercase letters, digits, and dashes, under 50 characters. Do not create the branch or a worktree. penguin does both after you answer.
+The input carries the ticket text and the repository's recent branch names. Everything you need is in the prompt, so answer from it in one pass without a tool call.
+
+1. Read the ticket.
+2. Answer one question: is the goal clear enough to build? A ticket is clear when a planner could start from it without asking what it means.
+3. If the ticket leaves a question the planner could not settle by reading the code, return `blocked` with the questions and no verdict. The answers arrive in the next turn. Ask only what the ticket itself leaves open. Whether the code the ticket names exists is the planner's to find, not yours.
+4. Set `actionable` to true only if the goal is clear. Put the deciding fact in `reason`: the missing detail or the conflict. One or two sentences.
+5. When the ticket is actionable, return the work as `tasks`.
+6. Name the branch the work goes on as `branch`. Match the style and length of the branch names in the prompt. Say what the work does, not what the ticket is called: three to five words, lowercase letters, digits, and dashes, under 50 characters. Do not create the branch or a worktree. penguin does both after you answer.
 
 ## The split
 
