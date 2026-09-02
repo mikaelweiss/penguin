@@ -10,13 +10,12 @@ export type AgentApi = {
   stop(session: string): Promise<void>;
 };
 
-/** ~/.penguin/instructions.md: what every session is told on its first turn, whichever CLI runs it. */
 function instructionsIn(home: string): string {
   const file = path.join(home, "instructions.md");
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
 }
 
-/** The ask with the instructions ahead of its prompt. A skill's own body still comes first. */
+/** The adapter puts a skill's body ahead of the prompt, so the instructions land after it. */
 function instructed(ask: unknown, instructions: string): unknown {
   if (typeof ask === "string") return `${instructions}\n\n${ask}`;
   if (ask === null || typeof ask !== "object") return ask;
@@ -124,7 +123,7 @@ export function routeAgents(host: Host, found: AdapterFound[], chosen: AdapterFo
       const api = owner(session);
       if (instructions === "" || briefed.has(session)) return api.turn(session, ask, ...rest);
       const turn = api.turn(session, instructed(ask, instructions), ...rest);
-      // Briefed once a turn lands. A turn that failed before the CLI read it is sent them again.
+      // A turn that failed before the CLI read the instructions sends them again.
       valueOf(turn)?.then(
         () => briefed.add(session),
         () => {},

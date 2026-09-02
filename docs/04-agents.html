@@ -54,40 +54,10 @@ const commit = await turn.value;</code></pre>
     <h2>Choosing model capacity</h2>
 
     <p>
-      A workflow can open a session with <code>{ model: "small" }</code>,
-      <code>{ model: "normal" }</code>, or <code>{ model: "big" }</code>. These names state how much
-      model the work needs without naming a provider. A session that names none runs on
-      <code>normal</code>, so a workflow spells out only the turns that take more or less than
-      ordinary work. The adapter translates the choice:
-    </p>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Choice</th>
-            <th>claude</th>
-            <th>codex</th>
-            <th>copilot</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td><code>small</code></td><td><code>sonnet</code></td><td><code>gpt-5.6-terra</code></td><td><code>claude-haiku-4.5</code></td></tr>
-          <tr><td><code>normal</code></td><td><code>opus</code></td><td><code>gpt-5.6-sol</code></td><td><code>claude-sonnet-4.6</code></td></tr>
-          <tr><td><code>big</code></td><td><code>fable</code></td><td><code>gpt-5.6-sol</code></td><td><code>gpt-5.3-codex</code></td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <p>
-      Exact model names still pass through unchanged, which is the only way a run reaches a model
-      no tier maps to. No claude tier maps to <code>fable</code>: it costs twice what
-      <code>opus</code> does per token, so it is reached only by name or by a
-      <code>claude-big-model fable</code> config line. A direct-provider adapter has the defaults
-      above. A multi-provider adapter falls back to its own default model unless a config line
-      maps the choice, such as <code>opencode-normal-model openai/gpt-5.6-sol</code>. The key is
-      always <code>&lt;adapter&gt;-&lt;choice&gt;-model</code>. The same key overrides a
-      direct-provider default, so a model update does not require editing a workflow.
+      A workflow opens a session with <code>{ model: "small" }</code>, <code>"normal"</code>, or
+      <code>"big" }</code>, or an exact model name. Each adapter's <code>MODELS</code> constant is
+      the map from tier to model, and a <code>&lt;adapter&gt;-&lt;tier&gt;-model</code> line in
+      <code>~/.penguin/config</code> overrides it, so a model update needs no workflow edit.
     </p>
 
     <h2>Skills</h2>
@@ -181,11 +151,8 @@ const commit = await turn.value;</code></pre>
     <h2>Instructions every session gets</h2>
 
     <p>
-      What every agent should hear, whichever CLI runs it, goes in
-      <code>~/.penguin/instructions.md</code>. The engine sends it ahead of the prompt on each
-      session's first turn, after a skill's own body when the turn runs one. A CLI's own
-      instruction files (a CLAUDE.md, say) reach only that CLI, so this is where a rule for all of
-      them lives. Nothing is sent when the file is absent.
+      A CLI's own instruction files (a CLAUDE.md, say) reach only that CLI.
+      <code>~/.penguin/instructions.md</code> reaches every session, whichever CLI runs it.
     </p>
 
     <h2>A usage limit waits, it does not fail</h2>
