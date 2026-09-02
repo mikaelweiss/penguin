@@ -41,6 +41,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@workspace/ui/components/sidebar";
@@ -105,19 +106,6 @@ function RunRow({
             <span className={cn("size-1.5 rounded-full", statusColor(run))} />
           </span>
 
-          {run.children.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label={`${collapsed ? "Expand" : "Collapse"} ${run.name}`}
-              aria-expanded={!collapsed}
-              onClick={() => onToggle(run.id)}
-              className="absolute top-1/2 left-5 z-10 ms-(--run-indent) -translate-y-1/2 text-sidebar-foreground/50"
-            >
-              <ChevronRightIcon className={cn("transition-transform", !collapsed && "rotate-90")} />
-            </Button>
-          ) : null}
-
           <SidebarMenuButton
             size="sm"
             isActive={selected}
@@ -128,6 +116,17 @@ function RunRow({
             <span className="min-w-0 flex-1 truncate">{run.name}</span>
             <span className="sr-only">{statusLabel(run)}</span>
           </SidebarMenuButton>
+
+          {run.children.length > 0 ? (
+            <SidebarMenuAction
+              aria-label={`${collapsed ? "Expand" : "Collapse"} ${run.name}`}
+              aria-expanded={!collapsed}
+              onClick={() => onToggle(run.id)}
+              className="right-auto left-5.5 ms-(--run-indent) text-sidebar-foreground/50"
+            >
+              <ChevronRightIcon className={cn("transition-transform", !collapsed && "rotate-90")} />
+            </SidebarMenuAction>
+          ) : null}
 
           {needsYou(run) ? (
             <Badge
