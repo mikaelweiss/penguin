@@ -142,3 +142,17 @@ export function candidates(raw: unknown): unknown[] {
   }
   return list;
 }
+
+/** A status set to what it already is changes nothing, so it is not a call worth recording. */
+export function settledStatus(view: View): View {
+  let current: string | undefined;
+  return {
+    ...view,
+    status(text: string, options?: StatusOptions): Promise<void> {
+      const next = JSON.stringify([text, options?.idle === true]);
+      if (next === current) return Promise.resolve();
+      current = next;
+      return view.status(text, options);
+    },
+  };
+}

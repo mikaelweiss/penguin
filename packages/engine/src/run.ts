@@ -9,7 +9,7 @@ import { skillLookup } from "./catalog/skills.ts";
 import { Fault, messageOf, PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
 import { createRescue, worldOf } from "./core/rescue.ts";
 import type { Adapter, Host } from "./core/adapter.ts";
-import type { View } from "./core/view.ts";
+import { settledStatus, type View } from "./core/view.ts";
 import { RUN, type RunHooks } from "./core/workflow.ts";
 import { z } from "zod";
 import { createHost } from "./host.ts";
@@ -65,7 +65,9 @@ export async function run(
       const traced = trace.wrap(role, built);
       // The view asks and the agent turns are how faults get handled, so wrapping
       // them in the same recovery would ask about the asking.
-      ctx[role] = role === "view" || role === "agent" ? traced : rescue(role, traced);
+      if (role === "view") ctx[role] = settledStatus(traced as View);
+      else if (role === "agent") ctx[role] = traced;
+      else ctx[role] = rescue(role, traced);
     }
     ctx[RUN] = hooks(trace, id, cwd, list);
     // A child run works where its parent already checked, so only a root run pays for preflight.
