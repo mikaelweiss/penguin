@@ -105,12 +105,11 @@ function limit(call: Call, kind: string, text: string): void {
 
 const RESETS = "You've hit your session limit · resets 3pm";
 
-test("maps neutral model choices to claude models, and never to fable", async () => {
+test("maps neutral model choices to claude models", async () => {
   for (const [model, expected] of [
     ["small", "sonnet"],
     ["normal", "opus"],
-    ["big", "opus"],
-    // Named outright, it passes straight through: the only way a run reaches it.
+    ["big", "fable"],
     ["fable", "fable"],
   ]) {
     const { host, calls } = fakeHost((call) => emit(call, { type: "result" }));

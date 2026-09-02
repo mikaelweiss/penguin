@@ -32,7 +32,7 @@ type OpenOptions = {
   autocompact?: string;
 };
 
-const MODELS = { small: "sonnet", normal: "opus", big: "opus" } satisfies ModelMap;
+const MODELS = { small: "sonnet", normal: "opus", big: "fable" } satisfies ModelMap;
 
 /** Turns seconds apart hold the 5 minute tier, which writes cheaper than the CLI's 1 hour default. */
 const CACHE_TTL = "5m";
