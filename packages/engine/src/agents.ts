@@ -1,12 +1,34 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { AdapterFound } from "./catalog/adapters.ts";
 import type { Host } from "./core/adapter.ts";
 import { messageOf } from "./core/errors.ts";
 
 export type AgentApi = {
   open(options?: Record<string, unknown>): Promise<string>;
-  turn(session: string, ...rest: unknown[]): unknown;
+  turn(session: string, ask: unknown, ...rest: unknown[]): unknown;
   stop(session: string): Promise<void>;
 };
+
+/** ~/.penguin/instructions.md: what every session is told on its first turn, whichever CLI runs it. */
+function instructionsIn(home: string): string {
+  const file = path.join(home, "instructions.md");
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
+}
+
+/** The ask with the instructions ahead of its prompt. A skill's own body still comes first. */
+function instructed(ask: unknown, instructions: string): unknown {
+  if (typeof ask === "string") return `${instructions}\n\n${ask}`;
+  if (ask === null || typeof ask !== "object") return ask;
+  const prompt = (ask as { prompt?: unknown }).prompt;
+  const said = typeof prompt === "string" && prompt.trim() !== "";
+  return { ...ask, prompt: said ? `${instructions}\n\n${prompt}` : instructions };
+}
+
+function valueOf(turn: unknown): Promise<unknown> | undefined {
+  const value = (turn as { value?: unknown } | null)?.value;
+  return value instanceof Promise ? value : undefined;
+}
 
 function withoutAdapter(
   options: Record<string, unknown> | undefined,
@@ -30,6 +52,8 @@ export function routeAgents(host: Host, found: AdapterFound[], chosen: AdapterFo
   const probes = new Map<string, Promise<string[]>>();
   const told = new Set<string>();
   const owners = new Map<string, AgentApi>();
+  const instructions = instructionsIn(host.home);
+  const briefed = new Set<string>();
 
   function build(entry: AdapterFound): AgentApi {
     const held = built.get(entry.name);
@@ -96,7 +120,17 @@ export function routeAgents(host: Host, found: AdapterFound[], chosen: AdapterFo
       owners.set(session, api);
       return session;
     },
-    turn: (session, ...rest) => owner(session).turn(session, ...rest),
+    turn: (session, ask, ...rest) => {
+      const api = owner(session);
+      if (instructions === "" || briefed.has(session)) return api.turn(session, ask, ...rest);
+      const turn = api.turn(session, instructed(ask, instructions), ...rest);
+      // Briefed once a turn lands. A turn that failed before the CLI read it is sent them again.
+      valueOf(turn)?.then(
+        () => briefed.add(session),
+        () => {},
+      );
+      return turn;
+    },
     stop: (session) => owner(session).stop(session),
   };
 }

@@ -178,6 +178,16 @@ const commit = await turn.value;</code></pre>
       not do its job, which is what a throw is for.
     </p>
 
+    <h2>Instructions every session gets</h2>
+
+    <p>
+      What every agent should hear, whichever CLI runs it, goes in
+      <code>~/.penguin/instructions.md</code>. The engine sends it ahead of the prompt on each
+      session's first turn, after a skill's own body when the turn runs one. A CLI's own
+      instruction files (a CLAUDE.md, say) reach only that CLI, so this is where a rule for all of
+      them lives. Nothing is sent when the file is absent.
+    </p>
+
     <h2>A usage limit waits, it does not fail</h2>
 
     <p>

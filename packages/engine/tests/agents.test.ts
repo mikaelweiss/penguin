@@ -1,14 +1,17 @@
 import { expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { routeAgents } from "../src/agents.ts";
 import type { AdapterFound } from "../src/catalog/adapters.ts";
 import type { Host } from "../src/core/adapter.ts";
 
 type Log = string[];
 
-function fakeHost(notes: Record<string, unknown>[]): Host {
+function fakeHost(notes: Record<string, unknown>[], home = "/tmp"): Host {
   return {
     cwd: "/",
-    home: "/tmp",
+    home,
     state: "/tmp",
     run: { id: "test", dir: "/tmp" },
     config: () => undefined,
@@ -58,8 +61,8 @@ function fake(name: string, log: Log, options?: { check?: string[]; broken?: boo
             return `${name}-${opened}`;
           },
           turn: (session: string, ask: unknown) => {
-            log.push(`${name}.turn ${session} ${String(ask)}`);
-            return { by: name };
+            log.push(`${name}.turn ${session} ${typeof ask === "string" ? ask : JSON.stringify(ask)}`);
+            return { by: name, value: Promise.resolve(null) };
           },
           stop: async (session: string) => {
             log.push(`${name}.stop ${session}`);
@@ -204,3 +207,62 @@ test("only the configured adapter is built until a workflow names another", asyn
 
   expect(two.built()).toBe(1);
 });
+
+test("~/.penguin/instructions.md opens every session's first turn, whichever adapter runs it", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-home-"));
+  fs.writeFileSync(path.join(home, "instructions.md"), "Read in batches.\n");
+  const log: Log = [];
+  const one = fake("one", log);
+  const two = fake("two", log);
+  const agent = routeAgents(fakeHost([], home), [one.entry, two.entry], one.entry);
+
+  const plain = await agent.open();
+  const named = await agent.open({ adapter: "two" });
+  await valueOf(agent.turn(plain, "first"));
+  await valueOf(agent.turn(plain, "second"));
+  await valueOf(agent.turn(named, { skill: "review", prompt: "the diff" }));
+  await valueOf(agent.turn(named, { skill: "review" }));
+
+  expect(log.filter((line) => line.includes(".turn"))).toEqual([
+    "one.turn one-1 Read in batches.\n\nfirst",
+    "one.turn one-1 second",
+    'two.turn two-1 {"skill":"review","prompt":"Read in batches.\\n\\nthe diff"}',
+    'two.turn two-1 {"skill":"review"}',
+  ]);
+});
+
+test("a first turn that fails is briefed again on the next", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-home-"));
+  fs.writeFileSync(path.join(home, "instructions.md"), "Read in batches.");
+  const log: Log = [];
+  const one = fake("one", log);
+  let fail = true;
+  const built = one.entry.definition.build;
+  one.entry.definition.build = (host) => {
+    const api = built(host) as { turn: (session: string, ask: unknown) => unknown };
+    const turn = api.turn;
+    api.turn = (session, ask) => {
+      turn(session, ask);
+      if (!fail) return { value: Promise.resolve(null) };
+      fail = false;
+      return { value: Promise.reject(new Error("the CLI died")) };
+    };
+    return api;
+  };
+  const agent = routeAgents(fakeHost([], home), [one.entry], one.entry);
+
+  const session = await agent.open();
+  await valueOf(agent.turn(session, "go")).catch(() => {});
+  await valueOf(agent.turn(session, "go"));
+  await valueOf(agent.turn(session, "go"));
+
+  expect(log.filter((line) => line.includes(".turn"))).toEqual([
+    "one.turn one-1 Read in batches.\n\ngo",
+    "one.turn one-1 Read in batches.\n\ngo",
+    "one.turn one-1 go",
+  ]);
+});
+
+function valueOf(turn: unknown): Promise<unknown> {
+  return (turn as { value: Promise<unknown> }).value;
+}
