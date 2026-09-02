@@ -26,11 +26,15 @@ type OpenOptions = {
   settings?: string[];
   /** How hard the model works before it answers: low, medium, high, xhigh, or max. */
   effort?: string;
+  /** How long the prompt cache holds between turns: "5m" or "1h". */
+  cacheTtl?: string;
+  /** The context size the session compacts itself at: "auto", or 100k to 1M tokens. */
+  autocompact?: string;
 };
 
-const MODELS = { best: "fable", big: "opus", small: "sonnet" } satisfies ModelMap;
+const MODELS = { small: "sonnet", normal: "opus", big: "opus" } satisfies ModelMap;
 
-/** Turns sit seconds apart, so the 5 minute cache tier holds and costs less to write than the CLI's 1 hour default. */
+/** Turns seconds apart hold the 5 minute tier, which writes cheaper than the CLI's 1 hour default. */
 const CACHE_TTL = "5m";
 
 type ContentBlock = {
@@ -237,6 +241,7 @@ export default adapter({
         argv.push(`--setting-sources=${options.settings.join(",")}`);
       }
       if (options.effort !== undefined) argv.push("--effort", options.effort);
+      if (options.autocompact !== undefined) argv.push("--autocompact", options.autocompact);
       // A run has no one to ask, so any prompt is a denial. `permission` overrides it.
       argv.push("--permission-mode", options.permission ?? "bypassPermissions");
 
@@ -255,7 +260,10 @@ export default adapter({
       live.child = host.spawn(argv, {
         cwd: path.resolve(host.cwd, options.cwd ?? "."),
         signal: controller.signal,
-        env: { CLAUDE_CODE_PROMPT_CACHE_TTL: host.config("claude-cache-ttl") ?? CACHE_TTL },
+        env: {
+          CLAUDE_CODE_PROMPT_CACHE_TTL:
+            options.cacheTtl ?? host.config("claude-cache-ttl") ?? CACHE_TTL,
+        },
         onOutput: (chunk, stream) => {
           if (stream !== "stdout") return;
           buffer += chunk;

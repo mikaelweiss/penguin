@@ -19,6 +19,7 @@ export type {
 } from "./view.ts";
 export type {
   Adapter,
+  AgentChoice,
   CommandResult,
   ExecOptions,
   Host,

@@ -1,5 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { REVIEWER } from "../helpers/models.ts";
 import { narrated } from "../helpers/turns.ts";
 
 const Approval = z.union([z.enum(["approve", "revise"]), z.string()]);
@@ -69,7 +70,7 @@ export default workflow({
         ),
       );
       const draft = written;
-      const reviewer = await agent.open();
+      const reviewer = await agent.open({ adapter: REVIEWER });
       const review = await narrated(view, () =>
         agent.turn(
           reviewer,

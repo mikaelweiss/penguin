@@ -5,7 +5,9 @@ description: Reviews a working tree against its acceptance checks and reports ea
 
 # Review the change
 
-Review the working tree against the acceptance checks. The input holds the checks, and it may also name the base commit, what the gates said before this change, what they say now, and the blocking findings of the last round.
+Review the working tree against the acceptance checks. The input holds the checks, and it may also name the base commit, the files the change touched, what the gates said before this change, what they say now, and the blocking findings of the last round.
+
+A `# The files the change touched` section is read off the tree by penguin, so it is complete. Start from that list. Do not search for what the change altered. Search outward from it instead, for the callers and tests the diff puts at risk.
 
 1. Read the checks. A task in the input is the checks.
 2. Read the diff against the base commit the input names: `git diff <base>..HEAD`. With no base named, use `git diff main...HEAD`. Never diff against a branch that moves while you read it.
@@ -28,7 +30,3 @@ A failure that line already names is not this change's defect. It is not a block
 A gate that is red in a way the baseline does not name is this change's defect. That one blocks.
 
 Report what you confirmed. Do not report style opinions.
-
-## Read in batches
-
-Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

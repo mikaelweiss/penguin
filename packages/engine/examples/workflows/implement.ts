@@ -1,10 +1,25 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { bearings, discover } from "../helpers/discover.ts";
+import { REVIEWER } from "../helpers/models.ts";
 import { narrated } from "../helpers/turns.ts";
 import { checklist, Review } from "./review.ts";
 
-function brief(task: string, blocking: string, baseline: string, report: string): string {
+/**
+ * Every request re-reads what the requests before it grew, so an uncompacted turn pays for its
+ * early reads on every call.
+ */
+const WINDOW = "200000";
+
+function brief(
+  task: string,
+  scouted: string,
+  blocking: string,
+  baseline: string,
+  report: string,
+): string {
   const parts = [task];
+  if (scouted !== "") parts.push(scouted);
   if (baseline !== "")
     parts.push(
       `# What the gates said before this change\n\nLeave these alone. Fix only what this change breaks.\n\n${baseline}`,
@@ -32,10 +47,13 @@ export default workflow({
     base: z.string().default("").meta({ internal: true }),
   }),
 
-  async run({ params, agent, gates, view }) {
-    const implementer = await agent.open();
+  async run(ctx) {
+    const { params, agent, gates, vcs, view } = ctx;
+    // One cheap turn finds the files, so the implementer does not search on the expensive model.
+    const scouted = bearings(await discover(ctx, { task: params.task }));
+    const implementer = await agent.open({ autocompact: WINDOW });
     // One reviewer across the rounds: round two reads the new diff, not the whole tree again.
-    const reviewer = await agent.open();
+    const reviewer = await agent.open({ adapter: REVIEWER, autocompact: WINDOW });
     let blocking = "";
     let notes = "";
     let report = "";
@@ -46,11 +64,20 @@ export default workflow({
       await narrated(view, () =>
         agent.turn(implementer, {
           skill: "implement",
-          prompt: brief(params.task, blocking, params.baseline, report),
+          // The rounds share the session, so the scout's list is sent once and read from there on.
+          prompt: brief(
+            params.task,
+            round === 1 ? scouted : "",
+            blocking,
+            params.baseline,
+            report,
+          ),
         }),
       );
       // One run of the gates a round, between the two agents, so neither spends a turn on them.
       const ran = await gates.run({ since: params.base === "" ? undefined : params.base });
+      // Read off the tree, not asked for: the reviewer never hunts for what the round just changed.
+      const touched = (await vcs.status()).files.map((one) => one.path);
       await view.show(ran.green ? "gates: green" : "gates: red");
       report = ran.report;
       const reviewed = await narrated(view, () =>
@@ -64,6 +91,7 @@ export default workflow({
               baseline: params.baseline,
               gates: report,
               base: params.base,
+              bearings: touched,
             }),
           },
           { result: Review },

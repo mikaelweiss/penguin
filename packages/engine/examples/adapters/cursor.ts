@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { adapter, type Action, type ActionKind } from "penguin";
-import { modelFor } from "../helpers/models.ts";
+import { modelFor, type ModelMap } from "../helpers/models.ts";
 import { priced } from "../helpers/prices.ts";
 import {
   flatten,
@@ -22,10 +22,10 @@ type OpenOptions = {
 type ContentBlock = { type?: string; text?: string };
 type ToolCall = { args?: unknown };
 type TokenUsage = {
-  input_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-  output_tokens?: number;
+  inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
 };
 type StreamLine = {
   type?: string;
@@ -46,12 +46,19 @@ function count(value: number | undefined): number {
 function usageOf(tokens: TokenUsage, model: string): Usage {
   return {
     model,
-    input: count(tokens.input_tokens),
-    cacheRead: count(tokens.cache_read_input_tokens),
-    cacheWrite: count(tokens.cache_creation_input_tokens),
-    output: count(tokens.output_tokens),
+    input: count(tokens.inputTokens),
+    cacheRead: count(tokens.cacheReadTokens),
+    cacheWrite: count(tokens.cacheWriteTokens),
+    output: count(tokens.outputTokens),
   };
 }
+
+/** Every cursor model bills a subscriber the same, so the tiers are one model at three efforts. */
+const MODELS = {
+  small: "cursor-grok-4.6-low",
+  normal: "cursor-grok-4.6-medium",
+  big: "cursor-grok-4.6-high",
+} satisfies ModelMap;
 
 const ASK = "Reply with one JSON object that matches this JSON Schema:";
 
@@ -150,7 +157,7 @@ export default adapter({
       const argv = ["cursor-agent", "-p", "--force", "--output-format", "stream-json", "--trust"];
       const chat = chats.get(session);
       if (chat !== undefined) argv.push("--resume", chat);
-      const model = modelFor(options.model, "cursor", {}, host.config) ?? "grok-4.6";
+      const model = modelFor(options.model, "cursor", MODELS, host.config) ?? MODELS.normal;
       argv.push("--model", model);
       const prompt =
         schema === undefined

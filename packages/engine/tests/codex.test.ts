@@ -36,9 +36,9 @@ function fakeHost(): { host: Host; calls: Call[] } {
 
 test("maps neutral model choices to codex models", async () => {
   for (const [model, expected] of [
-    ["best", "gpt-5.6-sol"],
-    ["big", "gpt-5.6-sol"],
     ["small", "gpt-5.6-terra"],
+    ["normal", "gpt-5.6-sol"],
+    ["big", "gpt-5.6-sol"],
   ]) {
     const { host, calls } = fakeHost();
     const agent = definition.build(host);
@@ -46,4 +46,36 @@ test("maps neutral model choices to codex models", async () => {
     await agent.turn(session, "go").value;
     expect(calls[0]?.argv).toContain(`model="${expected}"`);
   }
+});
+
+test("an autocompact size becomes codex's own auto-compact token limit", async () => {
+  for (const [size, limit] of [
+    ["200000", "200000"],
+    ["200k", "200000"],
+    ["1M", "1000000"],
+  ]) {
+    const { host, calls } = fakeHost();
+    const agent = definition.build(host);
+    const session = await agent.open({ autocompact: size });
+    await agent.turn(session, "go").value;
+    expect(calls[0]?.argv).toContain(`model_auto_compact_token_limit=${limit}`);
+  }
+});
+
+test("an autocompact naming no count leaves codex the limit it chose for the model", async () => {
+  for (const size of ["auto", ""]) {
+    const { host, calls } = fakeHost();
+    const agent = definition.build(host);
+    const session = await agent.open({ autocompact: size });
+    await agent.turn(session, "go").value;
+    expect(calls[0]?.argv.join(" ")).not.toContain("model_auto_compact_token_limit");
+  }
+});
+
+test("a session that asks for no compaction passes no limit", async () => {
+  const { host, calls } = fakeHost();
+  const agent = definition.build(host);
+  const session = await agent.open({});
+  await agent.turn(session, "go").value;
+  expect(calls[0]?.argv.join(" ")).not.toContain("model_auto_compact_token_limit");
 });

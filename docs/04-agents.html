@@ -54,9 +54,11 @@ const commit = await turn.value;</code></pre>
     <h2>Choosing model capacity</h2>
 
     <p>
-      A workflow can open a session with <code>{ model: "best" }</code>,
-      <code>{ model: "big" }</code>, or <code>{ model: "small" }</code>. These names state how much
-      model the work needs without naming a provider. The adapter translates the choice:
+      A workflow can open a session with <code>{ model: "small" }</code>,
+      <code>{ model: "normal" }</code>, or <code>{ model: "big" }</code>. These names state how much
+      model the work needs without naming a provider. A session that names none runs on
+      <code>normal</code>, so a workflow spells out only the turns that take more or less than
+      ordinary work. The adapter translates the choice:
     </p>
 
     <div class="table-wrap">
@@ -70,17 +72,20 @@ const commit = await turn.value;</code></pre>
           </tr>
         </thead>
         <tbody>
-          <tr><td><code>best</code></td><td><code>fable</code></td><td><code>gpt-5.6-sol</code></td><td><code>gpt-5.3-codex</code></td></tr>
-          <tr><td><code>big</code></td><td><code>opus</code></td><td><code>gpt-5.6-sol</code></td><td><code>claude-sonnet-4.6</code></td></tr>
           <tr><td><code>small</code></td><td><code>sonnet</code></td><td><code>gpt-5.6-terra</code></td><td><code>claude-haiku-4.5</code></td></tr>
+          <tr><td><code>normal</code></td><td><code>opus</code></td><td><code>gpt-5.6-sol</code></td><td><code>claude-sonnet-4.6</code></td></tr>
+          <tr><td><code>big</code></td><td><code>opus</code></td><td><code>gpt-5.6-sol</code></td><td><code>gpt-5.3-codex</code></td></tr>
         </tbody>
       </table>
     </div>
 
     <p>
-      Exact model names still pass through unchanged. A direct-provider adapter has the defaults
+      Exact model names still pass through unchanged, which is the only way a run reaches a model
+      no tier maps to. No claude tier maps to <code>fable</code>: it costs twice what
+      <code>opus</code> does per token, so it is reached only by name or by a
+      <code>claude-big-model fable</code> config line. A direct-provider adapter has the defaults
       above. A multi-provider adapter falls back to its own default model unless a config line
-      maps the choice, such as <code>opencode-big-model openai/gpt-5.6-sol</code>. The key is
+      maps the choice, such as <code>opencode-normal-model openai/gpt-5.6-sol</code>. The key is
       always <code>&lt;adapter&gt;-&lt;choice&gt;-model</code>. The same key overrides a
       direct-provider default, so a model update does not require editing a workflow.
     </p>
@@ -300,6 +305,35 @@ const commit = await turn.value;</code></pre>
       opening, retry, schema checks, and stop. Write <code>agent &lt;name&gt;</code> to
       <code>~/.penguin/config</code> to choose one. Your own harness is one more
       <code>runOnce</code>, and no workflow changes.
+    </p>
+
+    <h2>A session on another agent</h2>
+
+    <p>
+      One run is not held to one CLI. A session names the adapter it wants, and
+      <code>ctx.agent</code> routes on that name, remembering which adapter owns the id it handed
+      back so the session's later turns and its <code>stop</code> reach the CLI holding the
+      conversation:
+    </p>
+
+    <pre><code>const reviewer = await agent.open({ adapter: "cursor", model: "big" });</code></pre>
+
+    <p>
+      The starter catalog spends this on code review: <code>review.ts</code>, the reviewer in
+      <code>implement.ts</code>, the gatherer in <code>review-pr.ts</code>, and the reviewer in
+      <code>make-workflow.ts</code> all open on <code>REVIEWER</code> from
+      <code>examples/helpers/models.ts</code>, so the change is read by a CLI other than the one
+      that wrote it. The sessions that write code, and the judge in <code>review-pr.ts</code> whose
+      whole design is that it holds no tools, stay on the configured adapter.
+    </p>
+
+    <p>
+      An adapter nobody installed, one whose <code>check()</code> objects, or one that will not
+      build is not worth ending a run over: the session opens on the configured adapter instead
+      and the run file records a <code>fallback</code> note saying what was wanted, what ran, and
+      why. Only the configured adapter is preflighted, so a <code>cursor</code> nobody logged into
+      never blocks a run that never asks for it. An adapter takes only the options it knows: cursor
+      reads <code>cwd</code> and <code>model</code>, and drops the rest.
     </p>
   </body>
 </html>

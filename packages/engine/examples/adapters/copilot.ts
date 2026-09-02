@@ -11,9 +11,9 @@ type OpenOptions = {
 };
 
 const MODELS = {
-  best: "gpt-5.3-codex",
-  big: "claude-sonnet-4.6",
   small: "claude-haiku-4.5",
+  normal: "claude-sonnet-4.6",
+  big: "gpt-5.3-codex",
 } satisfies ModelMap;
 
 type StreamLine = {

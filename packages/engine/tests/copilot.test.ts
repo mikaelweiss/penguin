@@ -47,9 +47,9 @@ const RESETS = "You've hit your session limit · resets 3pm";
 
 test("maps neutral model choices to copilot models", async () => {
   for (const [model, expected] of [
-    ["best", "gpt-5.3-codex"],
-    ["big", "claude-sonnet-4.6"],
     ["small", "claude-haiku-4.5"],
+    ["normal", "claude-sonnet-4.6"],
+    ["big", "gpt-5.3-codex"],
   ]) {
     const { host, calls } = fakeHost(async () => OK);
     const agent = definition.build(host);

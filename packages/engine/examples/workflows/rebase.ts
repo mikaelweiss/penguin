@@ -75,7 +75,7 @@ export default workflow({
     const resolving = async (said: string): Promise<z.infer<typeof Resolved>> => {
       const prompt = `${await tree()}\n\n${said}`;
       try {
-        if (fixer === "") fixer = await agent.open({ cwd });
+        if (fixer === "") fixer = await agent.open({ cwd, autocompact: "200000" });
         return await narrated(view, () =>
           agent.turn(fixer, { skill: "resolve-conflicts", prompt }, { result: Resolved }),
         );

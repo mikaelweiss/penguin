@@ -1,5 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { REVIEWER } from "../helpers/models.ts";
 import { narrated } from "../helpers/turns.ts";
 
 export const Review = z.object({
@@ -16,6 +17,8 @@ export type Brief = {
   baseline?: string;
   gates?: string;
   base?: string;
+  /** The paths the change touched. */
+  bearings?: string[];
 };
 
 /** Everything the reviewer needs that it cannot read off the tree itself. */
@@ -32,6 +35,10 @@ export function checklist(brief: Brief): string {
   if (brief.gates !== undefined && brief.gates !== "")
     parts.push(
       `# What the gates say now\n\npenguin ran them on this tree after the change. Read them here, and do not run one yourself.\n\n${brief.gates}`,
+    );
+  if (brief.bearings !== undefined && brief.bearings.length > 0)
+    parts.push(
+      `# The files the change touched\n\nStart here rather than searching for them. penguin read this off the tree, so it is complete.\n\n${brief.bearings.map((one) => `- ${one}`).join("\n")}`,
     );
   if (brief.blocking !== undefined && brief.blocking !== "")
     parts.push(
@@ -56,7 +63,7 @@ export default workflow({
     // The gates run here, once, so the reviewer reads a verdict instead of producing one.
     const ran = await gates.run({ since: params.base === "" ? undefined : params.base });
     await view.show(ran.green ? "gates: green" : "gates: red");
-    const session = await agent.open();
+    const session = await agent.open({ adapter: REVIEWER });
     const review = await narrated(view, () =>
       agent.turn(
         session,

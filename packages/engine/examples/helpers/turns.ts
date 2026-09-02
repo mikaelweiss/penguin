@@ -7,6 +7,7 @@ import {
   messageOf,
   PenguinError,
   type Action,
+  type AgentChoice,
   type Host,
   type Skill,
   type View,
@@ -44,7 +45,7 @@ export type TurnFn = {
 };
 
 export type AgentApi<Options> = {
-  open(options?: Options): Promise<string>;
+  open(options?: Options & AgentChoice): Promise<string>;
   turn: TurnFn;
   /** Ends the running turn. The session stays open for the next one. */
   stop(session: string): Promise<void>;
@@ -86,6 +87,15 @@ export function said(value: unknown): value is string {
 
 export function flatten(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** "200000", "200k", or "1M" as a token count. Undefined for "auto" or nothing. */
+export function compactTokens(value: string | undefined): number | undefined {
+  const match = /^(\d+(?:\.\d+)?)([km])?$/i.exec((value ?? "").trim());
+  if (match === null) return undefined;
+  const scale = match[2]?.toLowerCase() === "k" ? 1e3 : match[2]?.toLowerCase() === "m" ? 1e6 : 1;
+  const tokens = Math.round(Number(match[1]) * scale);
+  return tokens > 0 ? tokens : undefined;
 }
 
 /** Caps a tool output so a chatty call cannot flood the run file. */

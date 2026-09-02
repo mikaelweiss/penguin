@@ -56,7 +56,3 @@ Fill the result. One entry per issue.
 An empty list is an answer. Return it when nothing is left open, or when everything the threads raise is already handled.
 
 Do not edit a file. Do not stage, commit, or push. Do not post a comment or resolve a thread. penguin asks the person first.
-
-## Read in batches
-
-Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

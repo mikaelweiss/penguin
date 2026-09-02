@@ -27,7 +27,3 @@ A line opening with a path in brackets is a command that runs only when the chan
 The path is matched by whole segments, so `[apps/desktop]` covers `apps/desktop/src/x.ts` and never `apps/desktop-old/x.ts`.
 
 Each command runs through a shell from the repository root, or from the worktree holding the change. Write it so it works from there.
-
-## Read in batches
-
-Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

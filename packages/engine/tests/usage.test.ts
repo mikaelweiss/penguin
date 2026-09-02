@@ -154,15 +154,16 @@ test("cursor notes the result event's usage, priced from config, and nothing wit
       {
         type: "result",
         result: "ok",
+        // cursor spells these in camelCase, unlike every other CLI here.
         usage: {
-          input_tokens: 400,
-          cache_read_input_tokens: 1000,
-          cache_creation_input_tokens: 100,
-          output_tokens: 50,
+          inputTokens: 400,
+          cacheReadTokens: 1000,
+          cacheWriteTokens: 100,
+          outputTokens: 50,
         },
       },
     ],
-    { "price-grok-4.6": "1,0.1,4" },
+    { "price-cursor-grok-4.6-medium": "1,0.1,4" },
   );
   const agent = cursor.build(host);
   const session = await agent.open();
@@ -172,13 +173,13 @@ test("cursor notes the result event's usage, priced from config, and nothing wit
       usage: {
         adapter: "cursor",
         session,
-        model: "grok-4.6",
+        model: "cursor-grok-4.6-medium",
         input: 400,
         cacheRead: 1000,
         cacheWrite: 100,
         output: 50,
-        // (400 + 100) * 1 + 1000 * 0.1 + 50 * 4, over a million
-        usd: 0.0008,
+        // 400 * 1 + 100 * 1.25 (the cache write's premium) + 1000 * 0.1 + 50 * 4, over a million
+        usd: 0.000825,
       },
     },
   ]);

@@ -7,6 +7,7 @@ import { modelFor, type ModelMap } from "../helpers/models.ts";
 import { priced } from "../helpers/prices.ts";
 import {
   clip,
+  compactTokens,
   flatten,
   said,
   sessions,
@@ -20,12 +21,17 @@ type OpenOptions = {
   cwd?: string;
   model?: string;
   sandbox?: string;
+  /**
+   * The context size the session compacts itself at: "200k", "1M", or a token count. "auto" keeps
+   * codex's own limit.
+   */
+  autocompact?: string;
 };
 
 const MODELS = {
-  best: "gpt-5.6-sol",
-  big: "gpt-5.6-sol",
   small: "gpt-5.6-terra",
+  normal: "gpt-5.6-sol",
+  big: "gpt-5.6-sol",
 } satisfies ModelMap;
 
 type Item = {
@@ -266,6 +272,10 @@ export default adapter({
       if (model !== undefined) argv.push("-c", `model="${model}"`);
       // A run has no one to ask, and workspace-write blocks .git writes and the network.
       argv.push("-c", `sandbox_mode="${options.sandbox ?? "danger-full-access"}"`);
+      const compactAt = compactTokens(options.autocompact);
+      if (compactAt !== undefined) {
+        argv.push("-c", `model_auto_compact_token_limit=${compactAt}`);
+      }
       const dir =
         schema === undefined ? undefined : fs.mkdtempSync(path.join(os.tmpdir(), "penguin-codex-"));
 

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { routeAgents } from "./agents.ts";
 import { installedIn, pick } from "./catalog/adapters.ts";
 import { builtinCatalog, checkoutOf, roots, type Catalog } from "./catalog/catalogs.ts";
 import { load } from "./catalog/loader.ts";
@@ -60,8 +61,12 @@ export async function run(
       const picked = pick(found, role);
       if ("missing" in picked) throw new PenguinError(picked.missing);
       if ("conflict" in picked) throw new PenguinError(picked.conflict);
+      // An adapter a session names is probed when the session opens, not at preflight.
       installed.push(picked.found.definition as Adapter);
-      const built = picked.found.definition.build(host);
+      const built =
+        role === "agent"
+          ? routeAgents(host, found, picked.found)
+          : picked.found.definition.build(host);
       const traced = trace.wrap(role, built);
       // The view asks and the agent turns are how faults get handled, so wrapping
       // them in the same recovery would ask about the asking.

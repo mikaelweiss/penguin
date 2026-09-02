@@ -36,6 +36,8 @@ import { openWorktree } from "../helpers/worktree.ts";
 import { runsDir } from "../../src/paths.ts";
 import { checklist, Review } from "./review.ts";
 
+const WINDOW = "200000";
+
 /** How much of an attempt's detail the table carries. The result file holds all of it. */
 const DETAIL = 60;
 
@@ -44,11 +46,11 @@ const Params = z.object({
   skill: z.string().describe("which <skill>.json of that folder is replayed"),
   model: z
     .string()
-    .default("best")
-    .describe("the tier or model name the turn under test runs on: best, big, small, or an exact name"),
+    .default("big")
+    .describe("the tier or model name the turn under test runs on: small, normal, big, or an exact name"),
   judge: z
     .string()
-    .default("best")
+    .default("big")
     .describe("the tier or model name the grader runs on, never the one under test"),
   limit: z.number().int().min(1).default(20).describe("how many cases to replay, newest first"),
   trials: z.number().int().min(1).default(1).describe("how many times each case runs"),
@@ -354,7 +356,7 @@ async function tryPlan(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
   const { dir } = await scratch(ctx, picked, held.head);
   if (dir === "") return graded(failed("no scratch worktree to run in"), "");
   try {
-    const session = await ctx.agent.open({ model: ctx.params.model, cwd: dir });
+    const session = await ctx.agent.open({ model: ctx.params.model, cwd: dir, autocompact: WINDOW });
     const shape = held.skill === "triage" ? TriageOut : PlanOut;
     const turned = (prompt: string) =>
       narrated(ctx.view, () =>
@@ -383,13 +385,13 @@ async function tryImplement(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
   const { dir, sha } = await scratch(ctx, picked, held.head);
   if (dir === "") return graded(failed("no scratch worktree to run in"), "");
   try {
-    const worker = await ctx.agent.open({ model: ctx.params.model, cwd: dir });
+    const worker = await ctx.agent.open({ model: ctx.params.model, cwd: dir, autocompact: WINDOW });
     await narrated(ctx.view, () =>
       ctx.agent.turn(worker, { skill: "implement", prompt: held.prompt }),
     );
     const ran = await ctx.gates.run({ cwd: dir, since: sha });
     await ctx.view.show(ran.green ? "gates: green" : "gates: red");
-    const reviewer = await ctx.agent.open({ model: ctx.params.judge, cwd: dir });
+    const reviewer = await ctx.agent.open({ model: ctx.params.judge, cwd: dir, autocompact: WINDOW });
     const reviewed = await narrated(ctx.view, () =>
       ctx.agent.turn(
         reviewer,
@@ -416,7 +418,7 @@ async function tryReview(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
     // Both halves of the review run on the model under test: the judge half is the skill's own
     // judgment, and grading it is the exam's judge, which is a different session and model.
     await ctx.view.show(`review-gather and review-judge both run on ${ctx.params.model}`);
-    const reader = await ctx.agent.open({ model: ctx.params.model, cwd: dir });
+    const reader = await ctx.agent.open({ model: ctx.params.model, cwd: dir, autocompact: WINDOW });
     const found = await narrated(ctx.view, () =>
       ctx.agent.turn(reader, { skill: "review-gather", prompt: held.prompt }, { result: Dossier }),
     );
@@ -440,7 +442,7 @@ async function tryAssess(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
   const { dir } = await scratch(ctx, picked, held.head);
   if (dir === "") return graded(failed("no scratch worktree to run in"), "");
   try {
-    const session = await ctx.agent.open({ model: ctx.params.model, cwd: dir });
+    const session = await ctx.agent.open({ model: ctx.params.model, cwd: dir, autocompact: WINDOW });
     const assessed = await narrated(ctx.view, () =>
       ctx.agent.turn(
         session,

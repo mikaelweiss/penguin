@@ -78,7 +78,3 @@ Every entry is one line with a file and line behind it. Short entries, many of t
 ## Answering the judge's questions
 
 A later turn may arrive with the judge's questions instead of a request for a dossier. Then read only what those questions need and answer each from the code: what it says, and the file and line it says it at. Facts only, same as the dossier. When the code does not answer a question, say so plainly rather than filling the gap.
-
-## Read in batches
-
-Every tool call sends the whole conversation to the model again, so ten small reads cost ten times what one read of the same files costs. When you know the next several files or searches you need, run them in one command. One call per question, not one per file.

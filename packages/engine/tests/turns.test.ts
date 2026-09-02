@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
 import type { Host } from "../src/core/adapter.ts";
 import type { View } from "../src/core/view.ts";
-import { narrated, sessions, type Turn, type Usage } from "../examples/helpers/turns.ts";
+import {
+  compactTokens,
+  narrated,
+  sessions,
+  type Turn,
+  type Usage,
+} from "../examples/helpers/turns.ts";
 
 function viewWith(answers: string[]): { view: View; asked: string[] } {
   const asked: string[] = [];
@@ -115,4 +121,15 @@ test("an attempt without usage writes nothing, and a bare prompt names no skill"
   await agent.turn(session, "go").value;
   await agent.turn(session, "go").value;
   expect(notes).toEqual([{ usage: { adapter: "fake", session, ...SPENT } }]);
+});
+
+test("an autocompact option reads as a token count, and rejects what is not one", () => {
+  expect(compactTokens("200000")).toBe(200000);
+  expect(compactTokens("200k")).toBe(200000);
+  expect(compactTokens("1M")).toBe(1000000);
+  expect(compactTokens(" 1.5m ")).toBe(1500000);
+  expect(compactTokens("auto")).toBeUndefined();
+  expect(compactTokens("0")).toBeUndefined();
+  expect(compactTokens("")).toBeUndefined();
+  expect(compactTokens(undefined)).toBeUndefined();
 });

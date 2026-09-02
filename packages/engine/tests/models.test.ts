@@ -2,13 +2,13 @@ import { expect, test } from "bun:test";
 import { modelFor } from "../examples/helpers/models.ts";
 
 const models = {
-  best: "provider-best",
-  big: "provider-big",
   small: "provider-small",
+  normal: "provider-normal",
+  big: "provider-big",
 };
 
 test("neutral model choices resolve through the adapter's model map", () => {
-  expect(modelFor("best", "test", models, () => undefined)).toBe("provider-best");
+  expect(modelFor("normal", "test", models, () => undefined)).toBe("provider-normal");
   expect(modelFor("big", "test", models, () => undefined)).toBe("provider-big");
   expect(modelFor("small", "test", models, () => undefined)).toBe("provider-small");
 });
@@ -27,8 +27,8 @@ test("an exact provider model passes through unchanged", () => {
   );
 });
 
-test("a session that names no model runs on best", () => {
-  expect(modelFor(undefined, "test", models, () => undefined)).toBe("provider-best");
+test("a session that names no model runs on normal", () => {
+  expect(modelFor(undefined, "test", models, () => undefined)).toBe("provider-normal");
   expect(modelFor(undefined, "test", {}, () => undefined)).toBeUndefined();
 });
 

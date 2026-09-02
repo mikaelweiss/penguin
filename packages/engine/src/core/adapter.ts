@@ -72,6 +72,12 @@ export type Host = {
   spawn(argv: string[], options?: SpawnOptions): Process;
 };
 
+/**
+ * Which installed agent adapter runs the session. The engine routes on it and the adapter never
+ * sees it.
+ */
+export type AgentChoice = { adapter?: string };
+
 export type Adapter<A = unknown> = {
   /** What the adapter is, on ctx: vcs, github, agent, view. One role, many implementations. */
   role: string;
