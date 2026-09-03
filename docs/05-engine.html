@@ -163,7 +163,9 @@ return definition.run(reached(ctx));</code></pre>
       appends a new head and replays the latest segment. What the person answered, what agents
       returned, and what finished children came back with are handed back without calling out,
       each at the position it was recorded; every other call runs for real, so the world is read
-      again. The first replayable call that does not match ends the replay. A child a paused
+      again. A replayable call the earlier segment never made runs for real, and a recorded call
+      the resumed run no longer makes is passed over; the replay carries on past both, since a
+      run re-reads a world its own earlier steps changed and rejoins its path further on. A child a paused
       parent had spawned is resumed in place, not started again, and a child whose process is
       still going is waited on.
     </p>

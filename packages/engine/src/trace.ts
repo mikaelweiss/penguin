@@ -187,7 +187,6 @@ export function createTrace(info: RunInfo, journal?: Journal): Trace {
   fs.writeFileSync(path.join(dir, "pid"), String(process.pid));
   const ahead = journal?.calls ?? [];
   let index = 0;
-  let live = journal === undefined;
   let seq = journal?.issued ?? 0;
 
   const append = (entry: Entry): void => {
@@ -211,19 +210,22 @@ export function createTrace(info: RunInfo, journal?: Journal): Trace {
     append(cleaned);
   };
 
-  /** The next journal entry, when it is this exact call. Any other call ends the replay. */
+  /**
+   * The journal entry this call replays: the next one ahead that is this exact call. A run
+   * re-reads a world its earlier segment changed, so its path differs before it rejoins: a
+   * call the journal never saw runs live, and entries it passes over stood for a path the
+   * run no longer takes. Neither ends the replay.
+   */
   function recorded(name: string, args: unknown): Entry | undefined {
-    const entry = ahead[index];
-    const match =
-      entry !== undefined &&
-      entry["call"] === name &&
-      JSON.stringify(entry["args"]) === JSON.stringify(args);
-    if (!match) {
-      live = true;
-      return undefined;
+    const wanted = JSON.stringify(args);
+    for (let at = index; at < ahead.length; at++) {
+      const entry = ahead[at];
+      if (entry === undefined) break;
+      if (entry["call"] !== name || JSON.stringify(entry["args"]) !== wanted) continue;
+      index = at + 1;
+      return entry;
     }
-    index++;
-    return entry;
+    return undefined;
   }
 
   function replay(entry: Entry, name: string, args: unknown): unknown {
@@ -243,7 +245,7 @@ export function createTrace(info: RunInfo, journal?: Journal): Trace {
   function wrapFunction(name: string, fn: (...args: unknown[]) => unknown, self: unknown) {
     return (...args: unknown[]): unknown => {
       const argsSafe = safe(args);
-      if (!live && remembered(name)) {
+      if (index < ahead.length && remembered(name)) {
         const entry = recorded(name, argsSafe);
         if (entry !== undefined) return replay(entry, name, argsSafe);
       }

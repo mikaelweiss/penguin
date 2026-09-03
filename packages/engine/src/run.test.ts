@@ -294,6 +294,73 @@ test("a resume leaves the earlier segment's answers behind and waits on a new as
   expect(await again).toEqual({ ok: true, text: "hi bye" });
 });
 
+const ASKING_FIRST = `import fs from "node:fs";
+import { workflow } from "penguin";
+import { z } from "zod";
+type Echo = { say(text: string): Promise<{ ok: boolean; text: string }> };
+type Asker = { ask(question: string): Promise<unknown> };
+export default workflow({
+  description: "asks an extra question first when a marker file says so, then asks what to say",
+  params: z.object({ name: z.string().describe("who to greet") }),
+  async run(ctx) {
+    const echo = (ctx as unknown as { echo: Echo }).echo;
+    const view = (ctx as unknown as { view: Asker }).view;
+    const marked = fs.existsSync(process.env["PENGUIN_TEST_TALLY"] + ".more");
+    const first = marked ? await view.ask("Anything first?") : "";
+    const answer = await view.ask("What do I say to " + ctx.params.name + "?");
+    return echo.say(first + String(answer));
+  },
+});
+`;
+
+test("a resume asks a question the earlier segment never asked, and still replays what follows", async () => {
+  const tally = tallyFile();
+  const { list, workflow } = catalog({
+    "adapters/echo.ts": COUNTING,
+    "workflows/hello.ts": ASKING_FIRST,
+  });
+  const id = runId();
+  const first = run(workflow, { name: "pip" }, { catalogs: list, id });
+  expect(await answerNext("hi")).toBe("What do I say to pip?");
+  expect(await first).toEqual({ ok: true, text: "hi" });
+
+  fs.writeFileSync(`${tally}.more`, "");
+  const again = run(workflow, { name: "pip" }, { catalogs: list, id, resume: true });
+
+  expect(await answerNext("oh ")).toBe("Anything first?");
+  expect(await again).toEqual({ ok: true, text: "oh hi" });
+  const entries = readEntries(runFile(id));
+  const asked = entries.filter((e) => e["call"] === "view.ask" && e["pending"] === true);
+  expect(asked.map((e) => (e["args"] as string[])[0])).toEqual([
+    "What do I say to pip?",
+    "Anything first?",
+  ]);
+  expect(entries.findLast((e) => e["call"] === "view.ask")?.["replayed"]).toBe(true);
+});
+
+test("a resume passes over a recorded question it no longer asks, and still replays what follows", async () => {
+  const tally = tallyFile();
+  const { list, workflow } = catalog({
+    "adapters/echo.ts": COUNTING,
+    "workflows/hello.ts": ASKING_FIRST,
+  });
+  fs.writeFileSync(`${tally}.more`, "");
+  const id = runId();
+  const first = run(workflow, { name: "pip" }, { catalogs: list, id });
+  expect(await answerNext("oh ")).toBe("Anything first?");
+  await waitFor(() => readEntries(runFile(id)).some((e) => e["call"] === "view.ask" && "outcome" in e));
+  expect(await answerNext("hi")).toBe("What do I say to pip?");
+  expect(await first).toEqual({ ok: true, text: "oh hi" });
+
+  fs.rmSync(`${tally}.more`);
+  const again = await run(workflow, { name: "pip" }, { catalogs: list, id, resume: true });
+
+  expect(again).toEqual({ ok: true, text: "hi" });
+  const entries = readEntries(runFile(id));
+  expect(entries.filter((e) => e["call"] === "view.ask" && e["pending"] === true)).toHaveLength(2);
+  expect(entries.findLast((e) => e["call"] === "view.ask")?.["replayed"]).toBe(true);
+});
+
 const STOPPING = `import { workflow } from "penguin";
 import { z } from "zod";
 type Echo = { say(text: string): Promise<{ ok: boolean; text: string }> };
