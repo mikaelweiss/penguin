@@ -5,12 +5,12 @@ import { z } from "zod";
 import {
   Channel,
   issuesOf,
-  messageOf,
   PenguinError,
   RunPaused,
   type Action,
   type AgentChoice,
   type Host,
+  type PausedBy,
   type Skill,
   type View,
 } from "penguin";
@@ -34,8 +34,12 @@ export type Usage = {
 
 export type Attempt =
   | { ok: true; value: unknown; usage?: Usage }
-  /** `limited` means the agent hit a usage limit: the run pauses, until `until` when the CLI named it. */
-  | { ok: false; error: string; limited?: boolean; until?: string; usage?: Usage };
+  /**
+   * `pause` marks a failure no correction fixes, so the run parks instead of spending
+   * its retry: "limit" for a usage limit, until `until` when the CLI named it, and
+   * "error" for one the API refused.
+   */
+  | { ok: false; error: string; pause?: PausedBy; until?: string; usage?: Usage };
 
 export type TurnFn = {
   (session: string, ask: TurnAsk): Turn<null>;
@@ -144,9 +148,9 @@ function ledger<Options>(dir: string): {
 
 /**
  * The session machinery every agent adapter shares: open handles, run a turn
- * with one corrected retry, pause the run on a usage limit, validate a typed
- * result, note what each attempt cost, and stop mid-flight. The adapter supplies
- * runOnce, the one CLI invocation, and its name for the usage notes.
+ * with one corrected retry, pause the run on a failure that retry cannot fix,
+ * validate a typed result, note what each attempt cost, and stop mid-flight. The
+ * adapter supplies runOnce, the one CLI invocation, and its name for the usage notes.
  */
 export function sessions<Options>(
   host: Host,
@@ -214,8 +218,8 @@ export function sessions<Options>(
             });
           }
           halt();
-          if (!attempt.ok && attempt.limited === true) {
-            throw new RunPaused(attempt.error, { by: "limit", until: attempt.until });
+          if (!attempt.ok && attempt.pause !== undefined) {
+            throw new RunPaused(attempt.error, { by: attempt.pause, until: attempt.until });
           }
           tries++;
           if (!attempt.ok) {
@@ -227,7 +231,7 @@ export function sessions<Options>(
           if (checked.success) return checked.data;
           failure = issuesOf(checked.error);
         }
-        throw new PenguinError(`the turn failed twice: ${failure}`);
+        throw new RunPaused(`the turn failed twice: ${failure}`, { by: "error" });
       } finally {
         output.end();
       }
@@ -264,35 +268,16 @@ export function narrate(view: View, output: AsyncIterable<Chunk>): Promise<void>
   })();
 }
 
-/** What a turn that will not finish waits at. Nothing but a person ends a run over a failed turn. */
-const Again = z.enum(["again", "stop"]);
-
 /**
- * The gate a failed turn waits at. It comes back when the turn is to run again, and throws when
- * the person says the run ends here, so a failing CLI never decides that on its own.
+ * Runs one turn to its value, narrating the whole stream on the way. A turn that will not
+ * finish pauses the run, so the person who clears what stopped it resumes from there.
  */
-export async function retried(view: View, error: unknown): Promise<void> {
-  const answer = await view.ask(
-    `The turn did not finish: ${messageOf(error)}\n\nClear what stopped it. again runs it once more, stop ends this run.`,
-    Again,
-  );
-  if (answer === "stop") throw error;
-}
-
-/** Runs one turn to its value, narrating the whole stream on the way, and again when it fails. */
 export async function narrated<T>(view: View, start: () => Turn<T>): Promise<T> {
-  for (;;) {
-    const turn = start();
-    const shown = narrate(view, turn.output);
-    let failure: unknown;
-    try {
-      return await turn.value;
-    } catch (error) {
-      failure = error;
-    } finally {
-      await shown;
-    }
-    if (failure instanceof RunPaused) throw failure;
-    await retried(view, failure);
+  const turn = start();
+  const shown = narrate(view, turn.output);
+  try {
+    return await turn.value;
+  } finally {
+    await shown;
   }
 }

@@ -77,10 +77,13 @@ export type Auth = {
   at: string;
 };
 
-/** Why a run is parked: a person paused it, a usage limit did, or its process ended without a word. */
+/**
+ * Why a run is parked: a person paused it, a usage limit did, an error no retry fixes did,
+ * or its process ended without a word.
+ */
 export type Paused = {
-  by: "user" | "limit" | "interrupted";
-  /** What the agent said it hit, in its own words, when a limit did it. */
+  by: "user" | "limit" | "error" | "interrupted";
+  /** What the agent said it hit, in its own words, when a limit or an error did it. */
   reason?: string;
   /** When the limit clears, when the agent named it. */
   until?: string;
@@ -198,6 +201,7 @@ export function subtree(run: Run): string[] {
 /** What to tell a person about a parked run. A pause they asked for needs no explaining. */
 export function pausedReason(paused: Paused): string | undefined {
   if (paused.by === "limit") return paused.reason ?? "the agent hit its usage limit";
+  if (paused.by === "error") return paused.reason ?? "the agent hit an error";
   if (paused.by === "interrupted") return "the process ended before the run finished";
   return undefined;
 }
@@ -442,7 +446,7 @@ function pausedOf(note: Entry): Paused {
   const reason = shown(said["reason"]);
   const until = text(said["until"]);
   return {
-    by: said["by"] === "limit" ? "limit" : "user",
+    by: said["by"] === "limit" || said["by"] === "error" ? said["by"] : "user",
     ...(reason === undefined ? {} : { reason }),
     ...(until === undefined ? {} : { until }),
     at: text(note["at"]) ?? "",

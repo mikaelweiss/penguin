@@ -276,6 +276,18 @@ test("a limit's paused note says who parked the run and when it comes back", () 
   expect(pausedReason(run.paused!)).toBe("resets 3pm");
 });
 
+test("an error's paused note carries the agent's own words, and an unknown kind reads as a person's", () => {
+  const note = { by: "error" as const, reason: "API Error: 500" };
+  const broken = only([written(false, { at: "t2", paused: note })]);
+
+  expect(broken.status).toBe("paused");
+  expect(broken.paused).toEqual({ ...note, at: "t2" });
+  expect(pausedReason(broken.paused!)).toBe("API Error: 500");
+
+  const later = only([written(false, { at: "t2", paused: { by: "whatever-comes-next" } })]);
+  expect(later.paused).toEqual({ by: "user", at: "t2" });
+});
+
 test("a person's pause needs no reason, and their stop of a parked run ends it", () => {
   const paused = only([written(false, { at: "t2", paused: { by: "user" } })]);
   expect(paused.paused).toEqual({ by: "user", at: "t2" });

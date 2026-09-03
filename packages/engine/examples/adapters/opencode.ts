@@ -226,7 +226,7 @@ export default adapter({
 
       const spent = usage === undefined ? {} : { usage };
       /** The reason rides an error event on stdout. opencode writes stderr under --print-logs only. */
-      if (failed !== undefined) return { ok: false, error: failed, ...spent };
+      if (failed !== undefined) return { ok: false, error: failed, pause: "error", ...spent };
       if (done.code !== 0) {
         const tail = done.stderr.trim().split("\n").at(-1) ?? "";
         return {

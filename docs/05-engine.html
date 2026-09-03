@@ -156,7 +156,10 @@ return definition.run(reached(ctx));</code></pre>
     </p>
 
     <p>
-      A paused run resumes in its own folder: <code>run(file, params, { id, resume: true })</code>
+      A run parks because a person asked, because an agent hit a usage limit, or because one hit
+      an error no retry clears; its paused note says which. Only a limit clears itself, so only a
+      limit-paused run is brought back on its own. A paused run resumes in its own folder:
+      <code>run(file, params, { id, resume: true })</code>
       appends a new head and replays the latest segment. What the person answered, what agents
       returned, and what finished children came back with are handed back without calling out,
       each at the position it was recorded; every other call runs for real, so the world is read

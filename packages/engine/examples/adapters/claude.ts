@@ -315,6 +315,7 @@ export default adapter({
       let value: unknown;
       let failed: string | undefined;
       let limited: string | undefined;
+      let apiError: string | undefined;
       let usage: Usage | undefined;
       const calls = new Map<string, Action>();
       const handle = (line: string): boolean => {
@@ -331,9 +332,11 @@ export default adapter({
           return false;
         }
         if (event.type === "assistant") {
-          // The limit is the pause's reason, not part of the story.
-          if (event.is_api_error_message === true && event.error === "rate_limit") {
-            limited = resultText(event.message?.content).trim();
+          // What the API refused is the pause's reason, not part of the story.
+          if (event.is_api_error_message === true) {
+            const said = resultText(event.message?.content).trim();
+            if (event.error === "rate_limit") limited = said;
+            else apiError = said === "" ? (event.error ?? "claude hit an API error") : said;
             return false;
           }
           for (const block of event.message?.content ?? []) {
@@ -421,8 +424,9 @@ export default adapter({
         const said = limited === "" ? "claude hit its usage limit" : limited;
         const until =
           live.resetsAt === undefined ? {} : { until: new Date(live.resetsAt * 1000).toISOString() };
-        return { ok: false, error: said, limited: true, ...until, ...spent };
+        return { ok: false, error: said, pause: "limit", ...until, ...spent };
       }
+      if (apiError !== undefined) return { ok: false, error: apiError, pause: "error", ...spent };
       return { ok: false, error: failure, ...spent };
     }
 

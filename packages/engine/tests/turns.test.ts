@@ -40,29 +40,21 @@ function turning(values: (string | Error)[]): { start: () => Turn<string>; tries
   return { start, tries: () => tries };
 }
 
-test("a turn that did not finish runs again when the person says so", async () => {
-  const { view, asked } = viewWith(["again"]);
-  const { start, tries } = turning([new Error("claude exited with code 1"), "value"]);
-
-  expect(await narrated(view, start)).toBe("value");
-  expect(tries()).toBe(2);
-  expect(asked[0]).toContain("claude exited with code 1");
-});
-
-test("a turn that did not finish ends the run only when the person says stop", async () => {
-  const { view, asked } = viewWith(["stop"]);
-  const { start, tries } = turning([new Error("claude exited with code 1")]);
-
-  await expect(narrated(view, start)).rejects.toThrow("claude exited with code 1");
-  expect(tries()).toBe(1);
-  expect(asked).toHaveLength(1);
-});
-
-test("a turn that finishes never asks", async () => {
+test("a turn that finishes hands back its value", async () => {
   const { view, asked } = viewWith([]);
-  const { start } = turning(["value"]);
+  const { start, tries } = turning(["value"]);
 
   expect(await narrated(view, start)).toBe("value");
+  expect(tries()).toBe(1);
+  expect(asked).toHaveLength(0);
+});
+
+test("a turn that did not finish parks the run instead of asking", async () => {
+  const { view, asked } = viewWith([]);
+  const { start, tries } = turning([new RunPaused("the turn failed twice: boom", { by: "error" })]);
+
+  await expect(narrated(view, start)).rejects.toThrow("the turn failed twice: boom");
+  expect(tries()).toBe(1);
   expect(asked).toHaveLength(0);
 });
 
@@ -146,7 +138,7 @@ test("a usage limit pauses the run, carrying when the window resets", async () =
     hostWith(notes),
     async () => {
       tries += 1;
-      return { ok: false, error: "resets 3pm", limited: true, until: "2026-09-02T15:00:00.000Z" };
+      return { ok: false, error: "resets 3pm", pause: "limit", until: "2026-09-02T15:00:00.000Z" };
     },
     "fake",
   );
@@ -160,6 +152,49 @@ test("a usage limit pauses the run, carrying when the window resets", async () =
   expect((failure as RunPaused).by).toBe("limit");
   expect((failure as RunPaused).until).toBe("2026-09-02T15:00:00.000Z");
   expect(tries).toBe(1);
+});
+
+test("an error the adapter named pauses the run, spending no retry", async () => {
+  let tries = 0;
+  const agent = sessions(
+    hostWith([]),
+    async () => {
+      tries += 1;
+      return { ok: false, error: "API Error: 500", pause: "error" };
+    },
+    "fake",
+  );
+  const session = await agent.open();
+  const failure = await agent.turn(session, "go").value.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).by).toBe("error");
+  expect((failure as RunPaused).until).toBeUndefined();
+  expect((failure as RunPaused).message).toBe("API Error: 500");
+  expect(tries).toBe(1);
+});
+
+test("a failure the correction did not fix pauses the run for a person", async () => {
+  let tries = 0;
+  const agent = sessions(
+    hostWith([]),
+    async () => {
+      tries += 1;
+      return { ok: false, error: "boom" };
+    },
+    "fake",
+  );
+  const session = await agent.open();
+  const failure = await agent.turn(session, "go").value.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).by).toBe("error");
+  expect((failure as RunPaused).message).toBe("the turn failed twice: boom");
+  expect(tries).toBe(2);
 });
 
 test("the sessions a run opened outlive its process, so a resume carries each one on", async () => {

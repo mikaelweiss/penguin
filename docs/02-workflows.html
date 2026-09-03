@@ -264,8 +264,8 @@ if (files.length === 0) {
       The child builds its own adapters and gets its own params. Because it is a process, it can be
       stopped without touching its parent, and it can die without taking the parent down. The
       parent sees each of those as a typed rejection: <code>RunStopped</code> when a person or a
-      parent stopped it, <code>RunPaused</code> when it parked on a usage limit or a person's
-      pause, <code>RunCrashed</code> when the process died without recording an outcome, and a
+      parent stopped it, <code>RunPaused</code> when it parked on a usage limit, an error no
+      retry clears, or a person's pause, <code>RunCrashed</code> when the process died without recording an outcome, and a
       plain error carrying the child's message when the child threw. A parent that wants to
       survive wraps the call in try/catch; one that does not care rejects too, which is the right
       default. A pause is never caught: it parks the parent too, and the whole tree comes back

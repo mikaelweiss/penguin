@@ -1,7 +1,7 @@
 import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
 import { REVIEWER } from "../helpers/models.ts";
-import { narrate, narrated, retried } from "../helpers/turns.ts";
+import { narrate, narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
 const DIFF_LINES = 500;
@@ -383,18 +383,11 @@ export default workflow({
         shown = narrate(view, turn.output);
       }
 
-      // A turn that will not finish is the person's to clear. The review does not end on it.
-      for (;;) {
-        try {
-          const value = await turn.value;
-          await shown;
-          return { value };
-        } catch (error) {
-          await shown;
-          await retried(view, error);
-          turn = agent.turn(session, { skill, prompt }, { result });
-          shown = narrate(view, turn.output);
-        }
+      // A turn that will not finish pauses the run. The review takes it up again on the resume.
+      try {
+        return { value: await turn.value };
+      } finally {
+        await shown;
       }
     };
 

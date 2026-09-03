@@ -355,7 +355,8 @@ export default adapter({
             ...spent,
           };
         }
-        if (failed !== undefined) return { ok: false, error: failed, ...spent };
+        // Only a turn.failed or an error event sets this, both of them the provider's refusal.
+        if (failed !== undefined) return { ok: false, error: failed, pause: "error", ...spent };
         if (schema === undefined) return { ok: true, value: null, ...spent };
         const value = message === undefined ? undefined : structured(message);
         if (value === undefined) {

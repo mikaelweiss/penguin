@@ -22,11 +22,12 @@ export class RunStopped extends PenguinError {}
 /** A sub-run's process died without recording an outcome. */
 export class RunCrashed extends PenguinError {}
 
-export type PausedBy = "user" | "limit";
+export type PausedBy = "user" | "limit" | "error";
 
 /**
  * The run parks where it is, to be resumed later: a usage limit that clears at
- * `until`, or a person who asked for the pause. Nothing in a workflow catches it.
+ * `until`, an error no retry fixes, or a person who asked for the pause. A limit
+ * comes back on its own; an error waits for a person. Nothing in a workflow catches it.
  */
 export class RunPaused extends PenguinError {
   readonly by: PausedBy;

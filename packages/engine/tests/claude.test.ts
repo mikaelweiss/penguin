@@ -92,8 +92,8 @@ function prompt(call: Call | undefined, index = 0): string | undefined {
   return (JSON.parse(line) as { message: { content: string } }).message.content;
 }
 
-/** What claude streams when a turn dies on a usage limit. */
-function limit(call: Call, kind: string, text: string): void {
+/** What claude streams when a turn dies on an API error of the given subtype. */
+function apiError(call: Call, kind: string, text: string): void {
   emit(call, {
     type: "assistant",
     is_api_error_message: true,
@@ -226,12 +226,14 @@ test("a process that dies mid-turn fails the turn, and the retry resumes the ses
   expect(prompt(calls[1], 0)).toContain("claude exited with code 1: boom");
 });
 
-test("two failures throw instead of looping", async () => {
+test("two failures pause the run instead of looping", async () => {
   const { host, calls } = fakeHost((call) => call.exit({ code: 1, stdout: "", stderr: "boom\n" }));
   const agent = definition.build(host);
   const session = await agent.open();
-  const turn = agent.turn(session, "go");
-  await expect(turn.value).rejects.toThrow("the turn failed twice");
+  const failure = await thrown(agent.turn(session, "go").value);
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).by).toBe("error");
+  expect((failure as RunPaused).message).toContain("the turn failed twice");
   expect(calls).toHaveLength(2);
 });
 
@@ -372,7 +374,7 @@ function thrown(value: Promise<unknown>): Promise<unknown> {
 test("a usage limit pauses the run, naming when the window resets", async () => {
   const { host, calls, notes } = fakeHost((call) => {
     emit(call, { type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1788393000 } });
-    limit(call, "rate_limit", RESETS);
+    apiError(call, "rate_limit", RESETS);
   });
   const agent = definition.build(host);
   const session = await agent.open();
@@ -387,7 +389,7 @@ test("a usage limit pauses the run, naming when the window resets", async () => 
 });
 
 test("a limit the CLI gave no reset time for still pauses, with nothing to resume at", async () => {
-  const { host } = fakeHost((call) => limit(call, "rate_limit", RESETS));
+  const { host } = fakeHost((call) => apiError(call, "rate_limit", RESETS));
   const agent = definition.build(host);
   const session = await agent.open();
   const failure = await thrown(agent.turn(session, "go").value);
@@ -396,7 +398,7 @@ test("a limit the CLI gave no reset time for still pauses, with nothing to resum
 });
 
 test("the limit itself never reaches the story", async () => {
-  const { host } = fakeHost((call) => limit(call, "rate_limit", RESETS));
+  const { host } = fakeHost((call) => apiError(call, "rate_limit", RESETS));
   const agent = definition.build(host);
   const session = await agent.open();
   const turn = agent.turn(session, "go");
@@ -423,16 +425,31 @@ test("a limit the CLI recovered from does not pause the turn", async () => {
   expect(notes).toEqual([]);
 });
 
-test("an error that no wait can clear still fails after two tries", async () => {
+test("an API error no wait can clear pauses the run for a person, spending no retry", async () => {
   const { host, calls, notes } = fakeHost((call) => {
-    limit(call, "billing_error", "You're out of usage credits.");
+    apiError(call, "billing_error", "You're out of usage credits.");
   });
   const agent = definition.build(host);
   const session = await agent.open();
-  const turn = agent.turn(session, "go");
-  await expect(turn.value).rejects.toThrow("You're out of usage credits.");
-  expect(calls[0]?.written).toHaveLength(2);
+  const failure = await thrown(agent.turn(session, "go").value);
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).by).toBe("error");
+  expect((failure as RunPaused).message).toBe("You're out of usage credits.");
+  expect((failure as RunPaused).until).toBeUndefined();
+  expect(calls[0]?.written).toHaveLength(1);
   expect(notes).toEqual([]);
+});
+
+test("an API error the CLI named but never worded still says which one it was", async () => {
+  const { host } = fakeHost((call) => {
+    emit(call, { type: "assistant", is_api_error_message: true, error: "overloaded_error" });
+    emit(call, { type: "result", is_error: true, errors: ["stream ended"] });
+  });
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const failure = await thrown(agent.turn(session, "go").value);
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).message).toBe("overloaded_error");
 });
 
 test("an error result without a result field says what claude reported", async () => {

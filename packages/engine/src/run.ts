@@ -14,6 +14,7 @@ import {
   RunCrashed,
   RunPaused,
   RunStopped,
+  type PausedBy,
 } from "./core/errors.ts";
 import { createRescue, worldOf } from "./core/rescue.ts";
 import type { Adapter, Host } from "./core/adapter.ts";
@@ -122,6 +123,11 @@ export async function run(
     }
     throw error;
   }
+}
+
+/** A note written by an older engine names only the kinds it knew, so anything else is a person's pause. */
+function pausedBy(written: unknown): PausedBy {
+  return written === "limit" || written === "error" ? written : "user";
 }
 
 function pausedNote(error: RunPaused): Entry {
@@ -352,7 +358,7 @@ function ended(workflow: string, last: Entry | undefined, died: string): unknown
     const note = paused as Record<string, unknown>;
     const reason = typeof note["reason"] === "string" ? note["reason"] : `${name} was paused`;
     throw new RunPaused(reason, {
-      by: note["by"] === "limit" ? "limit" : "user",
+      by: pausedBy(note["by"]),
       until: typeof note["until"] === "string" ? note["until"] : undefined,
     });
   }

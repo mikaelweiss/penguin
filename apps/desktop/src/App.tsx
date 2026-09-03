@@ -26,6 +26,7 @@ import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { RunAuth } from "@/components/run-auth";
 import { RunBreadcrumb } from "@/components/run-breadcrumb";
 import { RunComposer } from "@/components/run-composer";
+import { RunPaused } from "@/components/run-paused";
 import { RunSidebar } from "@/components/run-sidebar";
 import { RemoveProjectDialog } from "@/components/remove-project-dialog";
 import { RunTranscript } from "@/components/run-transcript";
@@ -324,6 +325,12 @@ export function App() {
                             run={run}
                             error={inbox.error}
                             onSend={(entry, files) => inbox.send(run.id, entry, files)}
+                          />
+                        ) : run?.paused !== undefined ? (
+                          <RunPaused
+                            key={`${run.id}:${run.paused.at}`}
+                            paused={run.paused}
+                            onResume={() => actions.resume(run)}
                           />
                         ) : null}
                       </ResizablePanel>

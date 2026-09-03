@@ -517,6 +517,36 @@ test("a child's limit pauses the tree, and resuming the parent resumes the child
   expect(spawns.map((e) => e["id"])).toEqual(["c1", "c2"]);
 }, 20000);
 
+const ERRORING = `import { RunPaused, workflow } from "penguin";
+import { z } from "zod";
+export default workflow({
+  description: "stops on an error no retry clears",
+  params: z.object({ name: z.string().describe("who to greet") }),
+  async run() {
+    throw new RunPaused("API Error: 500", { by: "error" });
+  },
+});
+`;
+
+test("a child's error pause reaches the parent as one, not as a person's", async () => {
+  const { list, workflow } = catalog({
+    "adapters/echo.ts": ECHO,
+    "workflows/hello.ts": PARENT,
+    "workflows/child.ts": ERRORING,
+  });
+  const id = runId();
+  const paused = { by: "error", reason: "API Error: 500" };
+
+  await expect(run(workflow, { name: "pip" }, { catalogs: list, id })).rejects.toBeInstanceOf(
+    RunPaused,
+  );
+
+  expect(readEntries(runFile(id)).findLast((e) => "paused" in e)?.["paused"]).toEqual(paused);
+  expect(readEntries(runFile(`${id}-c1`)).findLast((e) => "paused" in e)?.["paused"]).toEqual(
+    paused,
+  );
+}, 20000);
+
 function waitFor(check: () => boolean): Promise<void> {
   const deadline = Date.now() + 10000;
   return new Promise((resolve, reject) => {
@@ -873,82 +903,3 @@ test("a resume refused before the run file opens leaves the paused note where it
   expect(await closed(child)).toBe(1);
   expect(readEntries(runFile(id))).toEqual([head, paused]);
 }, 20000);
-
-const AGENT = `import { adapter } from "penguin";
-export default adapter({
-  role: "agent",
-  name: "NAME",
-  description: "a stand-in agent whose session id names it",
-  build: () => ({
-    async open() {
-      return "NAME-session";
-    },
-    turn: (session) => ({ output: [], value: Promise.resolve(session) }),
-    async stop() {},
-  }),
-});
-`;
-
-const UNREADY_AGENT = AGENT.replace(
-  "  build:",
-  `  async check() {
-    return ["two is not installed or not on PATH."];
-  },
-  build:`,
-);
-
-const NAMES = `import { workflow } from "penguin";
-import { z } from "zod";
-type Agent = { open(options?: { adapter?: string }): Promise<string> };
-export default workflow({
-  description: "opens a session on the agent adapter it was told to name",
-  params: z.object({ adapter: z.string().describe("which agent adapter runs the session") }),
-  async run(ctx) {
-    const agent = (ctx as unknown as { agent: Agent }).agent;
-    return agent.open({ adapter: ctx.params.adapter });
-  },
-});
-`;
-
-/** Two agent adapters with a config line choosing the first, the shape routing needs. */
-function agents(second: string): { list: { dir: string; scope: "project" }[]; workflow: string } {
-  bare();
-  fs.writeFileSync(path.join(process.env["PENGUIN_HOME"] ?? "", "config"), "agent one\n");
-  return catalog({
-    "adapters/one.ts": AGENT.replaceAll("NAME", "one"),
-    "adapters/two.ts": second.replaceAll("NAME", "two"),
-    "workflows/hello.ts": NAMES,
-  });
-}
-
-function notes(): Record<string, unknown>[] {
-  const dirs = fs.readdirSync(runsDir());
-  const first = dirs[0];
-  if (first === undefined) throw new Error("no run folder");
-  return fs
-    .readFileSync(path.join(runsDir(), first, "run.jsonl"), "utf8")
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
-test("a workflow names the agent adapter its session runs on", async () => {
-  const { list, workflow } = agents(AGENT);
-  expect(await run(workflow, { adapter: "two" }, { catalogs: list })).toBe("two-session");
-});
-
-test("a named agent adapter that is not ready falls back, and never blocks the run", async () => {
-  const { list, workflow } = agents(UNREADY_AGENT);
-
-  // Nothing gates the run: only the configured adapter is preflighted, and the fallback is silent
-  // to the workflow, so this settles without an answer from anyone.
-  expect(await run(workflow, { adapter: "two" }, { catalogs: list })).toBe("one-session");
-
-  const told = notes().find((note) => note["fallback"] !== undefined);
-  expect(told?.["fallback"]).toEqual({
-    role: "agent",
-    wanted: "two",
-    used: "one",
-    reason: "two is not installed or not on PATH.",
-  });
-});

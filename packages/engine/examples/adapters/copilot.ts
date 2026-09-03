@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import { adapter, type Action, type ActionKind } from "penguin";
+import { adapter, type Action, type ActionKind, type PausedBy } from "penguin";
 import { modelFor, type ModelMap } from "../helpers/models.ts";
 import { clip, flatten, said, sessions, targetIn, type Attempt, type Chunk, type Invocation } from "../helpers/turns.ts";
 
@@ -161,7 +161,7 @@ export default adapter({
       let buffer = "";
       let answer = "";
       let failed: string | undefined;
-      let limited: string | undefined;
+      let pause: PausedBy | undefined;
       const handle = (line: string): void => {
         if (line.trim() === "") return;
         let event: StreamLine;
@@ -225,12 +225,11 @@ export default adapter({
             },
           });
         }
+        // A session error is the API's refusal, not a mistake the agent can correct.
         if (event.type === "session.error") {
-          const message = said(data["message"]) ? data["message"] : "copilot reported an error";
-          failed = message;
-          if (data["errorType"] === "rate_limit" || data["error_type"] === "rate_limit") {
-            limited = message;
-          }
+          failed = said(data["message"]) ? data["message"] : "copilot reported an error";
+          const limit = data["errorType"] === "rate_limit" || data["error_type"] === "rate_limit";
+          pause = limit ? "limit" : "error";
         }
       };
 
@@ -267,10 +266,7 @@ export default adapter({
       if (failure === undefined) {
         return { ok: true, value: schema === undefined ? null : lastObject(answer) };
       }
-      if (limited !== undefined) {
-        return { ok: false, error: limited, limited: true };
-      }
-      return { ok: false, error: failure };
+      return { ok: false, error: failure, ...(pause === undefined ? {} : { pause }) };
     }
 
     return sessions(host, runOnce, "copilot");

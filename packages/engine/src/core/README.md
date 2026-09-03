@@ -180,7 +180,7 @@ and stop the agent, which is the whole steering story.
 ## Pause and resume
 
 A run that did not finish is paused, whatever ended it: a person, a usage
-limit, or a machine going down. It resumes in its own folder and takes up where
+limit, an error no retry clears, or a machine going down. It resumes in its own folder and takes up where
 it left off. Two kinds of state make that work. The world is the state store
 for the world: workflows are reconcilers, they ask adapters what is true before
 acting, the way `commit` checks `vcs.dirty` first, so a resumed run re-reads
@@ -188,7 +188,8 @@ everything it asked of git, GitHub, or a shell. The run file is the state store
 for what people and agents said: the answers a person gave and the values
 agents returned replay from it, so nobody is asked twice and no turn is paid
 for twice. A usage limit pauses the run and a frontend brings it back when the
-limit clears.
+limit clears. An error pauses it the same way but waits for a person, because
+nothing about waiting fixes a 500 or an empty account.
 
 ## The engine
 

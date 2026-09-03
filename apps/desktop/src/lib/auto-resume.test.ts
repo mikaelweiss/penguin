@@ -39,7 +39,7 @@ function run(id: string, status: Run["status"], held?: Paused, children: Run[] =
   };
 }
 
-test("only root runs a limit parked are brought back", () => {
+test("only root runs a limit parked are brought back, never one an error did", () => {
   const limited = run("limited", "paused", paused());
   const inner = run("inner", "paused", paused());
   const projects: Project[] = [
@@ -50,6 +50,7 @@ test("only root runs a limit parked are brought back", () => {
       runs: [
         limited,
         run("byhand", "paused", paused({ by: "user" })),
+        run("broken", "paused", paused({ by: "error" })),
         run("dead", "paused", paused({ by: "interrupted" })),
         run("going", "running"),
         run("parent", "paused", paused({ by: "user" }), [inner]),
