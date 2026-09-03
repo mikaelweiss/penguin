@@ -62,6 +62,24 @@ export default adapter({
       throw new Fault(`the rebase onto ${onto} failed:\n\n${saidOf(done)}`);
     }
 
+    /**
+     * The rebase's arguments. `from` keeps a base rewritten under the branch out of the
+     * replay, and a base that has moved forward past `from` already carries the commits
+     * between them, so the later of the two starts the range.
+     */
+    async function replaying(
+      onto: string,
+      from: string | undefined,
+      cwd: string | undefined,
+    ): Promise<string[]> {
+      if (from === undefined) return ["rebase", onto];
+      const shared = await git(["merge-base", onto, "HEAD"], cwd);
+      const common = shared.stdout.trim();
+      if (shared.code !== 0 || common === "") return ["rebase", "--onto", onto, from];
+      const behind = await git(["merge-base", "--is-ancestor", from, common], cwd);
+      return ["rebase", "--onto", onto, behind.code === 0 ? common : from];
+    }
+
     /** Every worktree of a clone shares one ref store, so a sibling's fetch can win the write. */
     function contended(said: string): boolean {
       return /cannot lock ref|unable to update local ref|config\.lock/i.test(said);
@@ -348,8 +366,6 @@ export default adapter({
       ): Promise<Sync> {
         const cwd = options?.cwd;
         const onto = options?.local === true ? base : `origin/${base}`;
-        const replay =
-          options?.from === undefined ? ["rebase", onto] : ["rebase", "--onto", onto, options.from];
         for (let pass = 1; pass <= 5; pass++) {
           // A rebase a dead run left open is dropped; this pass replays it whole.
           if (await pendingRebase(cwd)) await git(["rebase", "--abort"], cwd);
@@ -362,6 +378,7 @@ export default adapter({
             throw new Fault(`${branch} has uncommitted changes. Commit or drop them first.`);
           }
           if (options?.local !== true) await fetching(base, cwd);
+          const replay = await replaying(onto, options?.from, cwd);
           const landed = await rebased(git(replay, cwd), cwd, onto);
           if (landed.conflicted) {
             await git(["rebase", "--abort"], cwd);
@@ -405,8 +422,8 @@ export default adapter({
          * The branch's own commits onto ref. `from` names the commit the branch was cut from,
          * so a parent whose history was rewritten under it is not replayed with it.
          */
-        onto(ref: string, options?: { cwd?: string; from?: string }): Promise<Rebase> {
-          const args = options?.from === undefined ? ["rebase", ref] : ["rebase", "--onto", ref, options.from];
+        async onto(ref: string, options?: { cwd?: string; from?: string }): Promise<Rebase> {
+          const args = await replaying(ref, options?.from, options?.cwd);
           return rebased(git(args, options?.cwd), options?.cwd, ref);
         },
         continue(options?: { cwd?: string }): Promise<Rebase> {

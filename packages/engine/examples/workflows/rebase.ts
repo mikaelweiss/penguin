@@ -32,7 +32,6 @@ export default workflow({
     /** The worktree that rebases, which is not the checkout the run started from. */
     dir: z.string().optional().meta({ internal: true }),
     passes: z.number().int().min(1).default(3).meta({ internal: true }),
-    resolutions: z.number().int().min(1).default(10).meta({ internal: true }),
   }),
 
   async run(ctx) {
@@ -40,7 +39,6 @@ export default workflow({
     const cwd = params.dir;
     const folder = cwd ?? "The checkout";
     const dropped = { rebased: false, sha: "", base: "", reason: "the user dropped the rebase" };
-    let turns = 0;
     let fixer = "";
 
     /**
@@ -87,7 +85,7 @@ export default workflow({
 
     /**
      * The gate open conflicts stop at. The resolver just stopped, so what the person types is its
-     * next instruction, and no bound applies to a turn a person asked for by hand.
+     * next instruction.
      */
     const directed = async (notes: string): Promise<boolean> => {
       let said = notes;
@@ -102,14 +100,6 @@ export default workflow({
         if (fixed.resolved) return true;
         said = fixed.notes;
       }
-    };
-
-    /** The resolver's turns are bounded. A person's are not, so a spent bound hands them the tree. */
-    const mended = async (said: string): Promise<boolean> => {
-      if (turns === params.resolutions) return directed(said);
-      turns += 1;
-      const fixed = await resolving(said);
-      return fixed.resolved ? true : directed(fixed.notes);
     };
 
     // A rebase a run died inside is dropped, which puts the branch back where that run found it.
@@ -132,11 +122,18 @@ export default workflow({
         let state = await vcs.rebase.onto(onto, { cwd, from });
         const conflicted = state.conflicted;
         while (state.conflicted) {
-          const stopped = `The rebase onto ${onto} stopped on these files:\n\n${listed(state.files)}`;
-          if (!(await mended(stopped))) {
-            await vcs.rebase.abort({ cwd });
+          const fixed = await resolving(
+            `The rebase onto ${onto} stopped on these files:\n\n${listed(state.files)}`,
+          );
+          const dropping = !fixed.resolved && !(await directed(fixed.notes));
+          // A person can finish or drop the rebase by hand while the ask waits, so what is
+          // still open is read again rather than carried over from before the turn.
+          const open = await vcs.rebase.pending({ cwd });
+          if (dropping) {
+            if (open) await vcs.rebase.abort({ cwd });
             return dropped;
           }
+          if (!open) break;
           state = await vcs.rebase.continue({ cwd });
         }
         // Conflicts take time, and the base can move while they are resolved, so a pass that hit

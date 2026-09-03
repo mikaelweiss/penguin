@@ -47,6 +47,6 @@ What fails a test is a literal in the file, a default, a turn, or an ask. A loop
 - A workflow has no shell. Every side effect is an adapter method on ctx or an agent turn, so every step in the design names the one it uses.
 - One session is one conversation. Reuse a session for continuity. Open a fresh one only for fresh eyes: a fresh session reads the world again, and that is the slow part.
 - Pass what one turn learned into the next turn's input, so nothing is read twice.
-- Bound every loop, and ask when the bound runs out.
+- Bound a loop that retries a step, and scope the bound to that step, so the next step starts it fresh. Ask when it runs out. Work the input sizes is not a runaway: a branch with more conflicting commits is a bigger job, and a budget spent on succeeding is a bug.
 - An ask checks the form of an answer, never its meaning. A workflow that wants approval loops on the answer. A workflow that needs two facts asks twice.
 - A result is a small typed envelope: verdicts, numbers, short strings, paths, and the text the workflow passes onward. A document only a human opens is a markdown file, referenced by path.

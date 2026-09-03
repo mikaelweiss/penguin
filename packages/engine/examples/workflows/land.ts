@@ -12,7 +12,6 @@ export default workflow({
     /** The worktree the branch rebases in, which is not the checkout this run moves. */
     dir: z.string().optional().meta({ internal: true }),
     passes: z.number().int().min(1).default(3).meta({ internal: true }),
-    resolutions: z.number().int().min(1).default(10).meta({ internal: true }),
   }),
 
   async run(ctx) {
@@ -41,7 +40,6 @@ export default workflow({
       local: true,
       dir: params.dir,
       passes: params.passes,
-      resolutions: params.resolutions,
     });
     if (!rebased.rebased) return nowhere(rebased.reason);
 

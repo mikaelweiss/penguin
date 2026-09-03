@@ -15,7 +15,7 @@ The input carries the design and names the workflow file. Review with fresh eyes
    - Every param a person fills reads as a question they can answer, and carries a one-line `.describe()`. Every param only a calling workflow fills carries `.meta({ internal: true })`, and a workflow only a calling workflow starts carries `internal: true`. A folder a child works in is a `call` option, never a param.
    - Module top level is side-effect-free.
    - No step needs a shell: every side effect is an adapter method on ctx or an agent turn.
-   - Every loop has a bound, and the workflow asks when a bound runs out.
+   - Every loop that retries a step has a bound scoped to that step, and the workflow asks when a bound runs out. No bound counts work the input sizes.
    - An ask that wants approval loops on the answer. No unexpected answer falls through silently.
    - Result schemas are small envelopes. A document only a human opens lives in a markdown file, referenced by path.
    - Craft lives in skills, not in long inline prompt strings.
