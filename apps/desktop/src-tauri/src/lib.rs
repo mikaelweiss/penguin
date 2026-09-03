@@ -623,11 +623,19 @@ fn project_root(dir: String) -> String {
     }
 }
 
-/// The quality gates a project lists, in the project root a run resolves from dir.
-fn gates_file(dir: String) -> PathBuf {
-    PathBuf::from(project_root(dir))
-        .join(".penguin")
-        .join("gates")
+/// The quality gates a project lists, under ~/.penguin by the name of the repository a run
+/// resolves from dir. Machine-local on purpose: nothing penguin keeps sits in the checkout.
+fn gates_file(home: &Path, dir: String) -> PathBuf {
+    let root = PathBuf::from(project_root(dir));
+    let name = root
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_else(|| "project".into());
+    home.join("gates").join(name)
+}
+
+fn gates_home(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    penguin_home(app).ok_or_else(|| "no home folder to keep the gates in".to_string())
 }
 
 /// A gate is a whole line, so the last one needs its newline to stay one.
@@ -640,21 +648,29 @@ fn ended(text: &str) -> String {
 }
 
 /// The gate file as a person wrote it, none when the project has no file yet.
-#[tauri::command]
-fn read_gates(dir: String) -> Result<Option<String>, String> {
-    match std::fs::read_to_string(gates_file(dir)) {
+fn read_gates_in(home: &Path, dir: String) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(gates_file(home, dir)) {
         Ok(text) => Ok(Some(text)),
         Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(cause) => Err(cause.to_string()),
     }
 }
 
-#[tauri::command]
-fn write_gates(dir: String, text: String) -> Result<(), String> {
-    let file = gates_file(dir);
-    let home = file.parent().ok_or("the gate file has no folder")?;
-    std::fs::create_dir_all(home).map_err(|cause| cause.to_string())?;
+fn write_gates_in(home: &Path, dir: String, text: String) -> Result<(), String> {
+    let file = gates_file(home, dir);
+    let folder = file.parent().ok_or("the gate file has no folder")?;
+    std::fs::create_dir_all(folder).map_err(|cause| cause.to_string())?;
     std::fs::write(&file, ended(&text)).map_err(|cause| cause.to_string())
+}
+
+#[tauri::command]
+fn read_gates(app: tauri::AppHandle, dir: String) -> Result<Option<String>, String> {
+    read_gates_in(&gates_home(&app)?, dir)
+}
+
+#[tauri::command]
+fn write_gates(app: tauri::AppHandle, dir: String, text: String) -> Result<(), String> {
+    write_gates_in(&gates_home(&app)?, dir, text)
 }
 
 pub(crate) fn text_of(path: PathBuf) -> String {
@@ -1475,36 +1491,54 @@ mod tests {
 
     #[test]
     fn a_project_with_no_gate_file_reads_as_none() {
+        let home = temp("gates-none-home");
         let dir = temp("gates-none");
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(read_gates(text_of(dir)).unwrap(), None);
+        assert_eq!(read_gates_in(&home, text_of(dir)).unwrap(), None);
     }
 
     #[test]
     fn a_written_gate_file_ends_in_one_newline() {
+        let home = temp("gates-newline-home");
         let dir = temp("gates-newline");
         std::fs::create_dir_all(&dir).unwrap();
         let at = text_of(dir);
-        write_gates(at.clone(), "bun run check".into()).unwrap();
-        assert_eq!(read_gates(at.clone()).unwrap().unwrap(), "bun run check\n");
-        write_gates(at.clone(), "bun run check\n".into()).unwrap();
-        assert_eq!(read_gates(at).unwrap().unwrap(), "bun run check\n");
+        write_gates_in(&home, at.clone(), "bun run check".into()).unwrap();
+        assert_eq!(read_gates_in(&home, at.clone()).unwrap().unwrap(), "bun run check\n");
+        write_gates_in(&home, at.clone(), "bun run check\n".into()).unwrap();
+        assert_eq!(read_gates_in(&home, at).unwrap().unwrap(), "bun run check\n");
     }
 
     #[test]
-    fn a_worktree_keeps_its_gates_in_the_repository_it_was_cut_from() {
+    fn gates_live_under_home_by_the_repository_name_and_never_in_the_checkout() {
+        let home = temp("gates-home");
         let repo = temp("gates-main");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        write_gates_in(&home, text_of(repo.clone()), "bun test".into()).unwrap();
+        let name = repo.file_name().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.join("gates").join(name)).unwrap(),
+            "bun test\n"
+        );
+        assert!(!repo.join(".penguin").exists());
+    }
+
+    #[test]
+    fn a_worktree_shares_the_gates_of_the_repository_it_was_cut_from() {
+        let home = temp("gates-side-home");
+        let repo = temp("gates-shared-main");
         std::fs::create_dir_all(repo.join(".git").join("worktrees").join("side")).unwrap();
         let tree = temp("gates-side");
         std::fs::create_dir_all(&tree).unwrap();
         let gitdir = repo.join(".git").join("worktrees").join("side");
         std::fs::write(tree.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
-        write_gates(text_of(tree.clone()), "bun test".into()).unwrap();
+        write_gates_in(&home, text_of(tree.clone()), "bun test".into()).unwrap();
+        let name = repo.file_name().unwrap();
         assert_eq!(
-            std::fs::read_to_string(repo.join(".penguin").join("gates")).unwrap(),
+            std::fs::read_to_string(home.join("gates").join(name)).unwrap(),
             "bun test\n"
         );
-        assert_eq!(read_gates(text_of(tree)).unwrap().unwrap(), "bun test\n");
+        assert_eq!(read_gates_in(&home, text_of(tree)).unwrap().unwrap(), "bun test\n");
     }
 
     #[test]

@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
-/** The project's .penguin/gates as it was written, undefined when the project has none. */
+/** The project's gates from ~/.penguin/gates as they were written, undefined when the project has none. */
 export function readGates(dir: string): Promise<string | undefined> {
   return invoke<string | null>("read_gates", { dir }).then((text) => text ?? undefined);
 }
 
-/** Writes the gate file whole, creating .penguin and closing the last line. */
+/** Writes the gate file whole, creating its folder and closing the last line. */
 export function writeGates(dir: string, text: string): Promise<void> {
   return invoke("write_gates", { dir, text });
 }

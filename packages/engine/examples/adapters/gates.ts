@@ -35,9 +35,11 @@ export default adapter({
   role: "gates",
   name: "file",
   description:
-    "the quality gates a project lists in .penguin/gates, run as written, each one scoped to the paths a change touches",
+    "the quality gates a project lists in ~/.penguin/gates/<project>, run as written, each one scoped to the paths a change touches",
   build: (host) => {
-    const file = path.join(rootOf(host.cwd), ".penguin", "gates");
+    // Gates are machine-local config, kept out of the repository so a tool that
+    // rewrites the root checkout (a mirror, a stash) never has to carry them.
+    const file = path.join(host.home, "gates", path.basename(rootOf(host.cwd)));
 
     const listed = (): string | undefined =>
       fs.existsSync(file) ? fs.readFileSync(file, "utf8") : undefined;

@@ -132,7 +132,7 @@ export function ProjectSettingsDialog({
               </EmptyMedia>
               <EmptyTitle>No gates yet</EmptyTitle>
               <EmptyDescription>
-                An agent drafts .penguin/gates on the first run. Write it yourself to say now
+                An agent drafts the gates on the first run. Write them yourself to say now
                 what a change has to pass.
               </EmptyDescription>
             </EmptyHeader>
@@ -146,10 +146,11 @@ export function ProjectSettingsDialog({
         {gates.draft === undefined ? null : (
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="gates">.penguin/gates</FieldLabel>
+              <FieldLabel htmlFor="gates">Gates</FieldLabel>
               <FieldDescription>
                 One shell command a line, run in order. A line opening with # is a comment, and
-                [path] in front of a command runs it only for a change under that path.
+                [path] in front of a command runs it only for a change under that path. Kept in
+                ~/.penguin/gates under the repository&apos;s name, never in the checkout.
               </FieldDescription>
               <Textarea
                 id="gates"
