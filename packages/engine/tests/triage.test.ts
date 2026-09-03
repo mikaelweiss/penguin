@@ -47,13 +47,13 @@ const triaged = {
   tasks: ["build the model"],
 };
 
-test("the turn reads the ticket and the branch names off the prompt, with no tool", async () => {
+test("the turn reads the branch names off the prompt, and carries Read for an attachment", async () => {
   const bench = harness([{ result: triaged }], [], ["main", "fix-login-timeout"]);
 
   const out = await bench.run("add a widget to the sidebar");
 
   expect(out.branch).toBe("widget sidebar toggle");
-  expect(bench.opens).toEqual([{ model: "small", tools: [], settings: [] }]);
+  expect(bench.opens).toEqual([{ model: "small", tools: ["Read"], settings: [] }]);
   expect(bench.turns[0]?.prompt).toBe(
     "add a widget to the sidebar\n\n# Recent branch names\n\nmain\nfix-login-timeout",
   );

@@ -7,9 +7,9 @@ description: Decides if a ticket is ready to work on, splits it into the tasks t
 
 Decide if the ticket is ready to work on, return the tasks that build it, and name the branch they go on. Do not write code, and do not read the repository. The planner reads the code. You read the ticket.
 
-The input carries the ticket text and the repository's recent branch names. Everything you need is in the prompt, so answer from it in one pass without a tool call.
+The input carries the ticket text and the repository's recent branch names. When the ticket heads a list of paths with `# Attached files`, open every one with Read: a screenshot or a log is part of the ticket, and the prompt holds only its path. Nothing else needs a tool call.
 
-1. Read the ticket.
+1. Read the ticket, and the files it attaches.
 2. Answer one question: is the goal clear enough to build? A ticket is clear when a planner could start from it without asking what it means.
 3. If the ticket leaves a question the planner could not settle by reading the code, return `blocked` with the questions and no verdict. The answers arrive in the next turn. Ask only what the ticket itself leaves open. Whether the code the ticket names exists is the planner's to find, not yours.
 4. Set `actionable` to true only if the goal is clear. Put the deciding fact in `reason`: the missing detail or the conflict. One or two sentences.

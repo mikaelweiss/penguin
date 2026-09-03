@@ -1,4 +1,4 @@
-import { bodyOf } from "@/lib/attachments";
+import { bodyOf, linesOf } from "@/lib/attachments";
 import type { Attachment } from "@/lib/attachments";
 
 export type Control =
@@ -105,7 +105,9 @@ export function withAttachments(
     const files = attachments[param.name] ?? [];
     if (!canAttach(param.control) || files.length === 0) continue;
     const typed = values[param.name];
-    merged[param.name] = bodyOf(files, typeof typed === "string" ? typed : "");
+    const written = typeof typed === "string" ? typed : "";
+    merged[param.name] =
+      param.control.kind === "lines" ? linesOf(files, written) : bodyOf(files, written);
   }
   return merged;
 }

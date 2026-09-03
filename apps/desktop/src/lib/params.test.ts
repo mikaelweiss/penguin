@@ -61,8 +61,15 @@ test("prose takes attachments ahead of the typed body, newlines intact", () => {
   expect(canAttach(param.control)).toBe(true);
   const file: Attachment = { path: "/work/shot.png", name: "shot.png", thumbnail: undefined };
   expect(withAttachments([param], { ticket: "line one\nline two" }, { ticket: [file] })).toEqual({
-    ticket: "/work/shot.png\nline one\nline two",
+    ticket: "# Attached files\n\n/work/shot.png\n\nline one\nline two",
   });
+});
+
+test("a list takes attachments as bare entries, with no heading among them", () => {
+  const param = only({ tasks: { type: "array", items: { type: "string" } } });
+  const file: Attachment = { path: "/work/shot.png", name: "shot.png", thumbnail: undefined };
+  const merged = withAttachments([param], { tasks: "one\ntwo" }, { tasks: [file] });
+  expect(fill([param], merged)).toEqual({ params: { tasks: ["/work/shot.png", "one", "two"] } });
 });
 
 test("a required prose param that is blank needs a value", () => {

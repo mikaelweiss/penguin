@@ -54,10 +54,10 @@ export default workflow({
     ]);
     const named =
       style.branches.length === 0 ? "" : `\n\n# Recent branch names\n\n${style.branches.join("\n")}`;
-    // The ticket and the branch names are in the prompt, so this turn only answers. No tools and
-    // none of the person's own CLI setup means no tool definitions to send and no MCP servers to
-    // wait on.
-    const session = await agent.open({ model: "small", tools: [], settings: [] });
+    // A ticket can attach a screenshot or a log, so the turn needs Read to open one. Nothing else
+    // is on the ticket's path, and none of the person's own CLI setup means no MCP servers to wait
+    // on.
+    const session = await agent.open({ model: "small", tools: ["Read"], settings: [] });
     let input = `${ticket}${named}`;
     for (;;) {
       const out = await narrated(view, () =>

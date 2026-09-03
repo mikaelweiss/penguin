@@ -50,7 +50,14 @@ export async function attachPath(path: string): Promise<Attachment> {
   return { path, name, thumbnail: isImage(name) ? await thumbnailOf(path) : undefined };
 }
 
-/** One path per line, then the typed text. The agent opens the files itself. */
+/** A heading names the paths as files, so the agent opens them instead of reading them as prose. */
 export function bodyOf(files: Attachment[], text: string): string {
+  const paths = files.map((file) => file.path).join("\n");
+  const attached = files.length === 0 ? "" : `# Attached files\n\n${paths}`;
+  return [attached, text].filter((part) => part.trim() !== "").join("\n\n");
+}
+
+/** A list takes one path per entry, where a heading would read as an entry of its own. */
+export function linesOf(files: Attachment[], text: string): string {
   return [...files.map((file) => file.path), text].filter((part) => part.trim() !== "").join("\n");
 }
