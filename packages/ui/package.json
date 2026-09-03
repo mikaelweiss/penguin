@@ -21,6 +21,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-resizable-panels": "^4.12.3",
+    "remark-breaks": "^4.0.0",
     "shadcn": "^4.19.0",
     "streamdown": "^2.6.0",
     "tailwind-merge": "^3.6.0",
