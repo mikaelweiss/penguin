@@ -24,4 +24,4 @@ Split only at a shippable seam. Each task is a vertical slice: a thin path throu
 
 Size each task as big as one review can hold. Review capacity tracks the number of independent decisions in a change, not its line count.
 
-Write each task as self-contained text: what to build, why, and the ticket context a planner needs. A task never references another task's internals. An actionable ticket returns at least one task. A ticket that is not actionable returns none.
+Write each task as a scope line: the slice it builds and where its edges meet the tasks beside it, in a sentence or two. The ticket travels whole with every task, so a task repeats none of it. Name a neighbor's edge, never its insides. An actionable ticket returns at least one task. A ticket that is not actionable returns none.

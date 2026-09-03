@@ -14,9 +14,11 @@ const Triage = z.object({
     .describe(
       "the branch the work goes on: lowercase words with dashes between them, three to five words saying what the work does, under 50 characters",
     ),
-  tasks: z.array(z.string()).describe("the tasks that build the ticket, each one a vertical slice"),
+  tasks: z
+    .array(z.string())
+    .describe("the tasks that build the ticket, each a scope line for one vertical slice"),
 });
-const Out = z.object({
+export const Out = z.object({
   result: Triage.optional().describe("fill this or blocked, and never both"),
   blocked: z
     .object({ questions: z.array(z.string()) })

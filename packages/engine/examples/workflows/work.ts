@@ -1,6 +1,7 @@
 import { call, workflow, type Ctx } from "penguin";
 import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
+import { resolveTicket } from "../helpers/ticket.ts";
 import { narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 import commit from "./commit.ts";
@@ -78,7 +79,9 @@ export default workflow({
     if (base === "") return nothing;
     await vcs.fetch(base);
 
-    const triaged = await call(ctx, triage, { ticket: params.ticket });
+    // Fetched once, so every stage after this reads the same ticket and none refetches it.
+    const ticket = await resolveTicket(ctx, params.ticket);
+    const triaged = await call(ctx, triage, { ticket });
     if (!triaged.actionable) {
       await view.ask(`Not actionable: ${triaged.reason}`, Ack);
       return nothing;
@@ -95,12 +98,14 @@ export default workflow({
     await view.show(before.green ? "baseline: green" : "baseline: already red");
 
     const checks: string[] = [];
-    const total = triaged.tasks.length;
-    for (const [index, task] of triaged.tasks.entries()) {
-      await view.show(`task ${index + 1} of ${total}`);
+    let tasks = triaged.tasks;
+    for (let index = 0; index < tasks.length; index++) {
+      await view.show(`task ${index + 1} of ${tasks.length}`);
       // Where this task starts, so its walkthrough reads this change and not the whole branch.
       const start = await vcs.head({ cwd: dir });
-      const planned = await call(ctx, plan, { ticket: task }, { cwd: dir });
+      const planned = await call(ctx, plan, { ticket, tasks, done: index }, { cwd: dir });
+      // The planner reads the code, so the split it hands back is the one the run goes on with.
+      tasks = planned.tasks;
       checks.push(planned.acceptance);
       const built = await call(
         ctx,
@@ -130,7 +135,7 @@ export default workflow({
           { cwd: dir },
         );
         const answer = await view.ask(
-          `Task ${index + 1} of ${total} is in ${dir}. Try it.\n\n${tried.walkthrough}\n\ndone accepts it. Anything else says what to change.`,
+          `Task ${index + 1} of ${tasks.length} is in ${dir}. Try it.\n\n${tried.walkthrough}\n\ndone accepts it. Anything else says what to change.`,
           Tried,
         );
         if (answer === "done") break;

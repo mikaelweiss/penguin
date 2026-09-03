@@ -14,6 +14,8 @@ type Options = {
   settled?: boolean;
   approved?: boolean;
   answer?: (question: string) => string;
+  /** What the first plan hands back as the split, when the code changed it. */
+  resplit?: string[];
 };
 
 function reply(question: string): string {
@@ -88,7 +90,11 @@ function harness(options: Options) {
           tasks,
         });
       }
-      if (name === "plan.ts") return Promise.resolve({ plan: "the plan", acceptance: "it works" });
+      if (name === "plan.ts") {
+        const first = children.filter((child) => child.name === "plan.ts").length === 1;
+        const tasks = first && options.resplit !== undefined ? options.resplit : params["tasks"];
+        return Promise.resolve({ plan: "the plan", acceptance: "it works", tasks });
+      }
       if (name === "walkthrough.ts") return Promise.resolve({ walkthrough: "Open: the widget" });
       if (name === "implement.ts") {
         return Promise.resolve({
@@ -135,16 +141,31 @@ test("nothing names the branch: it comes back from triage, slugged", async () =>
   expect(done.path).toBe("/tmp/trees/widget-sidebar-toggle");
 });
 
-test("each plan is handed its task alone, as the ticket", async () => {
+test("each plan is handed the whole ticket, the split, and its place in it", async () => {
   const run = harness({});
 
   await run.run();
 
   const plans = run.children.filter((child) => child.name === "plan.ts");
+  const tasks = ["build the model", "build the screen"];
   expect(plans.map((child) => child.params)).toEqual([
-    { ticket: "build the model" },
-    { ticket: "build the screen" },
+    { ticket: "add a widget to the sidebar", tasks, done: 0 },
+    { ticket: "add a widget to the sidebar", tasks, done: 1 },
   ]);
+});
+
+test("the split a planner hands back is the one the run goes on with", async () => {
+  const resplit = ["build the model", "build the list", "build the screen"];
+  const run = harness({ resplit });
+
+  const done = await run.run();
+
+  const plans = run.children.filter((child) => child.name === "plan.ts");
+  expect(plans.map((child) => child.params["done"])).toEqual([0, 1, 2]);
+  expect(plans[2]?.params["tasks"]).toEqual(resplit);
+  expect(run.asked.filter((question) => question.includes("Try it."))).toHaveLength(3);
+  expect(run.asked.some((question) => question.includes("Task 3 of 3"))).toBe(true);
+  expect(done.done).toBe(true);
 });
 
 test("the shape ship and ship-local read comes back whole", async () => {

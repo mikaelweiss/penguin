@@ -37,7 +37,8 @@ function harness(values: unknown[], answers: string[]) {
     asked,
     turns,
     opens,
-    run: (ticket: string) => plan.run({ ...ctx, params: { ticket } } as never),
+    run: (ticket: string, tasks: string[] = [], done = 0) =>
+      plan.run({ ...ctx, params: { ticket, tasks, done } } as never),
   };
 }
 
@@ -79,6 +80,63 @@ test("blocked questions come back as answers on the planner's session", async ()
 
   expect(bench.turns.slice(1).map((turn) => turn.session)).toEqual(["session-2", "session-2"]);
   expect(bench.turns[2]?.prompt).toBe("# Answers\n\nwhich store?\nthe local one");
+});
+
+test("a split shows the planner its task, the ones built, and the ones to come", async () => {
+  const bench = harness([nothing, planned], []);
+  const tasks = ["build the model", "build the list", "build the screen"];
+
+  const out = await bench.run("add a widget", tasks, 1);
+
+  expect(out.tasks).toEqual(tasks);
+  const fence =
+    "# The split\n\nThis ticket builds in 3 tasks. Tasks 1 to 1 are in the worktree already. Task 2 is yours.\n\n1. build the model\n2. build the list\n3. build the screen";
+  expect(bench.turns[0]?.prompt).toContain(fence);
+  expect(bench.turns[1]?.prompt).toBe(`add a widget\n\n${fence}`);
+});
+
+test("a decision is put to the person as options, and the pick goes back to the planner", async () => {
+  const decide = {
+    question: "push or poll?",
+    options: [
+      { name: "push", tradeoff: "live, but a socket to run" },
+      { name: "poll", tradeoff: "a delay, on the pattern the app has" },
+    ],
+    recommended: "poll",
+  };
+  const bench = harness([nothing, { decide }, planned], ["poll"]);
+
+  await bench.run("build notifications");
+
+  expect(bench.asked[0]).toBe(
+    "push or poll?\n\npush: live, but a socket to run\npoll: a delay, on the pattern the app has\n\nThe planner recommends poll. Pick one, or say what to do instead.",
+  );
+  expect(bench.turns[2]?.prompt).toBe("# The decision\n\npush or poll?\npoll");
+});
+
+test("a resplit the person approves replaces the tasks that remain", async () => {
+  const resplit = { reason: "the list and the screen are one component.", tasks: ["build the list and screen"] };
+  const bench = harness([nothing, { resplit }, planned], ["approve"]);
+
+  const out = await bench.run("add a widget", ["build the model", "build the list", "build the screen"], 1);
+
+  expect(out.tasks).toEqual(["build the model", "build the list and screen"]);
+  expect(bench.asked[0]).toBe(
+    "The code changes the split. the list and the screen are one component.\n\nThe work that remains:\n\n1. build the list and screen\n\nApprove the split?",
+  );
+  expect(bench.turns[2]?.prompt).toBe(
+    "# The split is approved\n\n# The split\n\nThis ticket builds in 2 tasks. Tasks 1 to 1 are in the worktree already. Task 2 is yours.\n\n1. build the model\n2. build the list and screen\n\nPlan task 2.",
+  );
+});
+
+test("a resplit the person will not take goes back as a revision, and the split stands", async () => {
+  const resplit = { reason: "one slice.", tasks: ["build it all"] };
+  const bench = harness([nothing, { resplit }, planned], ["keep them apart"]);
+
+  const out = await bench.run("add a widget", ["build the model", "build the screen"], 0);
+
+  expect(out.tasks).toEqual(["build the model", "build the screen"]);
+  expect(bench.turns[2]?.prompt).toBe("# The revision the user asks for\n\nkeep them apart");
 });
 
 test("a plan the person will not approve goes back as a revision", async () => {

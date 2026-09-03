@@ -34,7 +34,9 @@ import type { Case, Verdict } from "../helpers/score.ts";
 import { narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 import { runsDir } from "../../src/paths.ts";
+import { Out as PlanOut } from "./plan.ts";
 import { checklist, Review } from "./review.ts";
+import { Out as TriageOut } from "./triage.ts";
 
 const WINDOW = "200000";
 
@@ -72,41 +74,6 @@ const Graded = z.object({
 });
 
 type Graded = z.infer<typeof Graded>;
-
-const Blocked = z
-  .object({ questions: z.array(z.string()) })
-  .optional()
-  .describe("fill this or result, and never both");
-
-const PlanOut = z.object({
-  result: z
-    .object({
-      plan: z.string().describe("the finished plan, in markdown"),
-      acceptance: z.string().describe("the acceptance criteria, one per line"),
-    })
-    .optional()
-    .describe("fill this or blocked, and never both"),
-  blocked: Blocked,
-});
-
-const TriageOut = z.object({
-  result: z
-    .object({
-      actionable: z.boolean(),
-      reason: z.string(),
-      branch: z
-        .string()
-        .describe(
-          "the branch the work goes on: lowercase words with dashes between them, three to five words saying what the work does, under 50 characters",
-        ),
-      tasks: z
-        .array(z.string())
-        .describe("the tasks that build the ticket, each one a vertical slice"),
-    })
-    .optional()
-    .describe("fill this or blocked, and never both"),
-  blocked: Blocked,
-});
 
 /** Room for a claim and the file and line it rests on, as the review skills ask for it. */
 const LINE = 300;
@@ -223,6 +190,13 @@ function proposal(assessed: Assessment): string {
       return `### ${index + 1}. ${issue.title}${place}\n\n${verdict} ${issue.why}\n\n**${doing}:** ${issue.plan}`;
     })
     .join("\n\n");
+}
+
+/** What a turn put to the person instead of the answer the key holds. */
+function askedInstead(out: z.infer<typeof PlanOut> | z.infer<typeof TriageOut>): string {
+  if ("decide" in out && out.decide !== undefined) return out.decide.question;
+  if ("resplit" in out && out.resplit !== undefined) return out.resplit.reason;
+  return (out.blocked?.questions ?? []).join("; ");
 }
 
 /** The split as triage shows it, which is the shape the key recorded. */
@@ -363,8 +337,7 @@ async function tryPlan(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
     let out = await turned(held.prompt);
     for (const prompt of held.prompts.slice(1)) out = await turned(prompt);
     if (out.result === undefined) {
-      const asked = out.blocked?.questions ?? [];
-      return graded(failed(`the turn asked instead of answering: ${asked.join("; ")}`), "");
+      return graded(failed(`the turn asked instead of answering: ${askedInstead(out)}`), "");
     }
     const answer = out.result;
     if ("tasks" in answer && !answer.actionable) {
