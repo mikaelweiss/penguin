@@ -184,3 +184,14 @@ test("the sessions a run opened outlive its process, so a resume carries each on
   ]);
   expect(() => after.turn("nobody", "go")).toThrow(/no open session/);
 });
+
+test("an autocompact option reads as a token count, and rejects what is not one", () => {
+  expect(compactTokens("200000")).toBe(200000);
+  expect(compactTokens("200k")).toBe(200000);
+  expect(compactTokens("1M")).toBe(1000000);
+  expect(compactTokens(" 1.5m ")).toBe(1500000);
+  expect(compactTokens("auto")).toBeUndefined();
+  expect(compactTokens("0")).toBeUndefined();
+  expect(compactTokens("")).toBeUndefined();
+  expect(compactTokens(undefined)).toBeUndefined();
+});

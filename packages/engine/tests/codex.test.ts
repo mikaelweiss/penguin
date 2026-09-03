@@ -101,3 +101,35 @@ test("a later turn resumes the thread the first one started, in this process or 
   await later.turn(session, "once more").value;
   expect(calls[2]?.argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "t-1"]);
 });
+
+test("an autocompact size becomes codex's own auto-compact token limit", async () => {
+  for (const [size, limit] of [
+    ["200000", "200000"],
+    ["200k", "200000"],
+    ["1M", "1000000"],
+  ]) {
+    const { host, calls } = fakeHost();
+    const agent = definition.build(host);
+    const session = await agent.open({ autocompact: size });
+    await agent.turn(session, "go").value;
+    expect(calls[0]?.argv).toContain(`model_auto_compact_token_limit=${limit}`);
+  }
+});
+
+test("an autocompact naming no count leaves codex the limit it chose for the model", async () => {
+  for (const size of ["auto", ""]) {
+    const { host, calls } = fakeHost();
+    const agent = definition.build(host);
+    const session = await agent.open({ autocompact: size });
+    await agent.turn(session, "go").value;
+    expect(calls[0]?.argv.join(" ")).not.toContain("model_auto_compact_token_limit");
+  }
+});
+
+test("a session that asks for no compaction passes no limit", async () => {
+  const { host, calls } = fakeHost();
+  const agent = definition.build(host);
+  const session = await agent.open({});
+  await agent.turn(session, "go").value;
+  expect(calls[0]?.argv.join(" ")).not.toContain("model_auto_compact_token_limit");
+});
