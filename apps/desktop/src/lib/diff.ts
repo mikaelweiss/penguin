@@ -23,53 +23,22 @@ function fnv1a32(input: string, seed: number, prime: number): number {
   return hash >>> 0;
 }
 
-/** Two hashes plus the length, so the renderer's cache never reuses one patch's tokens for another. */
-function cacheKey(patch: string): string {
-  const first = fnv1a32(patch, FNV_OFFSET, FNV_PRIME).toString(36);
-  const second = fnv1a32(patch, SECOND_SEED, SECOND_PRIME).toString(36);
-  return `diff:${patch.length}:${first}:${second}`;
+/** Two hashes plus the length, so the renderer never reuses one file's tokens. */
+export function diffCacheKey(text: string): string {
+  const first = fnv1a32(text, FNV_OFFSET, FNV_PRIME).toString(36);
+  const second = fnv1a32(text, SECOND_SEED, SECOND_PRIME).toString(36);
+  return `diff:${text.length}:${first}:${second}`;
 }
 
-export type ParsedDiff =
-  | { kind: "files"; files: FileDiffMetadata[] }
-  | { kind: "raw"; text: string; reason: string };
-
-export function parseDiff(patch: string): ParsedDiff | undefined {
+/** The one file a single-file patch describes, or undefined when it will not parse. */
+export function parseFileDiff(file: string, patch: string): FileDiffMetadata | undefined {
   const text = patch.trim();
   if (text === "") return undefined;
 
   try {
-    const parsed = parsePatchFiles(text, cacheKey(text));
-    const files = parsed.flatMap((one) => one.files);
-    if (files.length > 0) return { kind: "files", files };
-    return { kind: "raw", text, reason: "Unsupported diff format." };
+    const parsed = parsePatchFiles(text, diffCacheKey(`${file}\n${text}`));
+    return parsed.flatMap((one) => one.files)[0];
   } catch {
-    return { kind: "raw", text, reason: "The patch would not parse." };
+    return undefined;
   }
-}
-
-export type DiffStat = { files: number; additions: number; deletions: number };
-
-export function diffStat(files: readonly FileDiffMetadata[]): DiffStat {
-  return files.reduce<DiffStat>(
-    (total, file) => {
-      for (const hunk of file.hunks) {
-        total.additions += hunk.additionLines;
-        total.deletions += hunk.deletionLines;
-      }
-      return total;
-    },
-    { files: files.length, additions: 0, deletions: 0 },
-  );
-}
-
-export function filePath(file: FileDiffMetadata): string {
-  const raw = file.name ?? file.prevName ?? "";
-  return raw.startsWith("a/") || raw.startsWith("b/") ? raw.slice(2) : raw;
-}
-
-export function fileKey(file: FileDiffMetadata): string {
-  const key = file.cacheKey;
-  if (key === undefined) return `${file.prevName ?? "none"}:${file.name}`;
-  return key.endsWith(":hydrated") ? key.slice(0, -":hydrated".length) : key;
 }

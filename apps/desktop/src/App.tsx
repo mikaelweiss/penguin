@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { FileDiffIcon, GlobeIcon, InfoIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
+import { FilesIcon, GlobeIcon, InfoIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
 import { Button } from "@workspace/ui/components/button";
@@ -18,8 +18,7 @@ import { cn } from "@workspace/ui/lib/utils";
 import { AppSettingsDialog } from "@/components/app-settings-dialog";
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
-import { DiffPanel } from "@/components/diff-panel";
-import { DiffWorkerPool } from "@/components/diff-worker-pool";
+import { FilesPanel } from "@/components/files-panel";
 import { InfoPanel } from "@/components/info-panel";
 import { NewWorkflowDialog } from "@/components/new-workflow-dialog";
 import { PANEL_GRAB, PanelHandle } from "@/components/panel-handle";
@@ -33,7 +32,6 @@ import { RunTranscript } from "@/components/run-transcript";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { useBrowser } from "@/hooks/use-browser";
 import { useConfig } from "@/hooks/use-config";
-import { useDiffView } from "@/hooks/use-diff-view";
 import { useDirectories } from "@/hooks/use-directories";
 import { useDragKeepsFocus } from "@/hooks/use-drag-keeps-focus";
 import { useFollow } from "@/hooks/use-follow";
@@ -42,10 +40,12 @@ import { useNeedsYou } from "@/hooks/use-needs-you";
 import { useOverlay } from "@/hooks/use-overlay";
 import { PANEL_DEFAULTS, PANEL_MINIMUMS, usePanels } from "@/hooks/use-panels";
 import { useRemoveProject } from "@/hooks/use-remove-project";
+import { useReviewRoot } from "@/hooks/use-review-root";
 import { useRunActions } from "@/hooks/use-run-actions";
 import { useRuns } from "@/hooks/use-runs";
 import { useRunTree } from "@/hooks/use-run-tree";
 import { useSidebarWidth } from "@/hooks/use-sidebar-width";
+import { useWatchRoot } from "@/hooks/use-watch-root";
 import { useWindowBackground } from "@/hooks/use-window-background";
 import { useWorkflowIndex } from "@/hooks/use-workflow-index";
 import { autoShows, notificationSound, openIn } from "@/lib/settings";
@@ -79,26 +79,27 @@ export function App() {
   const run = selected?.run;
   const panels = usePanels(run?.id);
   const sidebar = useSidebarWidth();
-  const diffView = useDiffView();
+  const root = useReviewRoot(run?.dir);
   const browser = useBrowser();
   const overlay = useOverlay();
+  useWatchRoot(root?.root);
   const showTerminal = panels.open("terminal") && run !== undefined;
   const showBrowser = panels.open("browser") && run !== undefined;
-  const showDiff = panels.open("diff") && run !== undefined;
+  const showFiles = panels.open("files") && run !== undefined;
   const showInfo = panels.open("info") && run !== undefined;
   const fullTerminal = panels.full === "terminal" && showTerminal;
   const fullBrowser = panels.full === "browser" && showBrowser;
-  const fullDiff = panels.full === "diff" && showDiff;
+  const fullFiles = panels.full === "files" && showFiles;
   const fullInfo = panels.full === "info" && showInfo;
-  const fullRight = fullBrowser || fullDiff || fullInfo;
-  const showRight = showBrowser || showDiff || showInfo;
+  const fullRight = fullBrowser || fullFiles || fullInfo;
+  const showRight = showBrowser || showFiles || showInfo;
 
   const show = (id: string) => {
     const node = findRun(projects, id);
     if (node !== undefined) tree.reveal(node);
     setSelectedId(id);
   };
-  const clearFollow = useFollow(projects, selectedId, fullTerminal || fullDiff, show);
+  const clearFollow = useFollow(projects, selectedId, fullTerminal || fullFiles, show);
   const select = (id: string) => {
     clearFollow();
     show(id);
@@ -109,7 +110,7 @@ export function App() {
   const into = openIn(config.values);
   const auto = autoShows(config.values);
   const { apply: applyOpens, prune } = browser;
-  const { show: showPanel } = panels;
+  const { show: showPanel, prune: prunePanels } = panels;
   const opens = run?.opens;
   const openerId = run?.id;
   useEffect(() => {
@@ -123,8 +124,10 @@ export function App() {
   // dropped is gone from the tree on purpose, and its tabs go with it.
   useEffect(() => {
     if (!published) return;
-    prune(new Set(projects.flatMap((project) => project.runs.flatMap(subtree))));
-  }, [projects, published, prune]);
+    const live = new Set(projects.flatMap((project) => project.runs.flatMap(subtree)));
+    prune(live);
+    prunePanels(live);
+  }, [projects, published, prune, prunePanels]);
 
   // A link someone clicked is a link they want to see, so it shows the panel whatever the setting
   // for a run's own urls says.
@@ -138,7 +141,8 @@ export function App() {
   };
 
   const hasRun = run !== undefined;
-  const { toggle } = panels;
+  const { toggle, setGlobal } = panels;
+  const sidebarOpen = panels.global.sidebarOpen;
   useEffect(() => {
     const open = (event: KeyboardEvent) => {
       if (event.ctrlKey && !event.metaKey && event.key === "/") {
@@ -147,7 +151,14 @@ export function App() {
         return;
       }
       if (!event.metaKey) return;
-      if (event.key.toLowerCase() === "k") {
+      const key = event.key.toLowerCase();
+      if (event.shiftKey && key === "r") {
+        event.preventDefault();
+        if (hasRun) toggle("files");
+      } else if (key === "\\") {
+        event.preventDefault();
+        setGlobal({ sidebarOpen: !sidebarOpen });
+      } else if (key === "k") {
         event.preventDefault();
         setPalette((showing) => !showing);
       } else if (event.key === ",") {
@@ -157,9 +168,7 @@ export function App() {
     };
     window.addEventListener("keydown", open);
     return () => window.removeEventListener("keydown", open);
-  }, [hasRun, toggle]);
-
-  const wrote = run === undefined ? 0 : run.output.length;
+  }, [hasRun, toggle, setGlobal, sidebarOpen]);
 
   return (
     <TooltipProvider delayDuration={2000} skipDelayDuration={0}>
@@ -252,12 +261,12 @@ export function App() {
               <GlobeIcon />
             </PanelButton>
             <PanelButton
-              label="Toggle diff"
-              showing={showDiff}
+              label="Toggle files"
+              showing={showFiles}
               disabled={run === undefined}
-              onClick={() => panels.toggle("diff")}
+              onClick={() => panels.toggle("files")}
             >
-              <FileDiffIcon />
+              <FilesIcon />
             </PanelButton>
             <PanelButton
               label="Toggle terminal"
@@ -333,7 +342,7 @@ export function App() {
                           resizeTargetMinimumSize={PANEL_GRAB}
                           onLayoutChanged={panels.onDragged}
                         >
-                          {showInfo && !fullBrowser && !fullDiff ? (
+                          {showInfo && !fullBrowser && !fullFiles ? (
                             <ResizablePanel
                               key="info"
                               id="info"
@@ -342,19 +351,20 @@ export function App() {
                             >
                               <InfoPanel
                                 run={run}
-                                wrote={wrote}
+                                root={root}
+                                base={panels.base}
                                 full={fullInfo}
                                 onOpenUrl={(url) => followLink(run.id, url)}
-                                onShowDiff={() => panels.show("diff")}
+                                onShowFiles={() => panels.show("files")}
                                 onToggleFull={() => panels.toggleFull("info")}
                                 onClose={() => panels.close("info")}
                               />
                             </ResizablePanel>
                           ) : null}
-                          {showInfo && (showBrowser || showDiff) && !fullRight ? (
+                          {showInfo && (showBrowser || showFiles) && !fullRight ? (
                             <PanelHandle key="info-handle" />
                           ) : null}
-                          {showBrowser && !fullDiff && !fullInfo ? (
+                          {showBrowser && !fullFiles && !fullInfo ? (
                             <ResizablePanel
                               key="browser"
                               id="browser"
@@ -378,26 +388,24 @@ export function App() {
                               />
                             </ResizablePanel>
                           ) : null}
-                          {showBrowser && showDiff && !fullRight ? (
+                          {showBrowser && showFiles && !fullRight ? (
                             <PanelHandle key="stack-handle" />
                           ) : null}
-                          {showDiff && !fullBrowser && !fullInfo ? (
+                          {showFiles && !fullBrowser && !fullInfo ? (
                             <ResizablePanel
-                              key="diff"
-                              id="diff"
-                              minSize={PANEL_MINIMUMS.diff}
+                              key="files"
+                              id="files"
+                              minSize={PANEL_MINIMUMS.files}
                               className="flex min-h-0 min-w-0 flex-col"
                             >
-                              <DiffWorkerPool>
-                                <DiffPanel
-                                  dir={run.dir}
-                                  wrote={wrote}
-                                  view={diffView}
-                                  full={fullDiff}
-                                  onToggleFull={() => panels.toggleFull("diff")}
-                                  onClose={() => panels.close("diff")}
-                                />
-                              </DiffWorkerPool>
+                              <FilesPanel
+                                runId={run.id}
+                                root={root}
+                                panels={panels}
+                                full={fullFiles}
+                                onToggleFull={() => panels.toggleFull("files")}
+                                onClose={() => panels.close("files")}
+                              />
                             </ResizablePanel>
                           ) : null}
                         </ResizablePanelGroup>

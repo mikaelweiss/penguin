@@ -90,15 +90,17 @@
 
     <h2>Panels</h2>
 
-    <p>Three buttons in the top right corner: terminal, web view, diff.</p>
+    <p>Three buttons in the top right corner: terminal, web view, files.</p>
 
     <ul role="list">
       <li>Terminal: opens in the selected run's directory.</li>
       <li>The terminal follows the selection, and follows the run when the run changes directory.</li>
       <li>Web view: a browser, with tabs.</li>
-      <li>Diff: file diffs for the run's directory, when it is a git directory.</li>
+      <li>Files: a Review tab, one tab per opened file, and a file browser.</li>
+      <li>Review lists what the run changed against its base: a worktree measures from the branch it forked from, a plain checkout from HEAD, and the picker overrides either.</li>
+      <li>Editing a file in another program updates the panel with no click in penguin.</li>
       <li>All three can be open at once.</li>
-      <li>Web view and diff stack on the right; the output area keeps the left.</li>
+      <li>Web view and files stack on the right; the output area keeps the left.</li>
       <li>The terminal spans the full width, under everything else.</li>
       <li>Drag a border to resize.</li>
       <li>Each panel has a full screen button that hides the others and animates it to fill the space.</li>
@@ -119,6 +121,20 @@
       <li>A link clicked in the terminal opens here.</li>
       <li>The page is a native view above everything the app draws, so it hides itself while a dialog is up.</li>
       <li>Only the selected run's tabs cost a page. A tab loads when first looked at and keeps its state until the tab closes or the run is left.</li>
+    </ul>
+
+    <h2>Files</h2>
+
+    <ul role="list">
+      <li>The Review tab is first and always there. Its sidebar lists every changed file, with a filter above it.</li>
+      <li>Single click previews a file in an italic tab that the next preview replaces. Double click pins it.</li>
+      <li>Middle click closes a tab, and so does the close button on it.</li>
+      <li>The plus button opens the file browser and puts the cursor in its filter.</li>
+      <li>The browser filter takes Escape to clear it and Enter to open the highlighted file.</li>
+      <li>Ignored entries are greyed. Expanding an ignored folder lists it like any other.</li>
+      <li>Unified or split, and show all lines or hide unchanged.</li>
+      <li>Previous and next file walk the change list and wrap around.</li>
+      <li>Open tabs, the active tab, the open panels, their sizes, and the sidebar width outlive a quit.</li>
     </ul>
 
     <h2>New workflow</h2>

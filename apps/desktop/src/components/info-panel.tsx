@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { InfoIcon } from "lucide-react";
 
 import { Badge } from "@workspace/ui/components/badge";
@@ -6,17 +5,18 @@ import { Button } from "@workspace/ui/components/button";
 import { Separator } from "@workspace/ui/components/separator";
 
 import { PanelChrome } from "@/components/panel-chrome";
-import { useRunDiff } from "@/hooks/use-run-diff";
-import { diffStat, parseDiff } from "@/lib/diff";
+import { useReview } from "@/hooks/use-review";
+import type { BaseChoice, ReviewRoot } from "@/lib/files";
 import { costLabel, subtreeCost, type Cost, type Run } from "@/lib/runs";
 
 type InfoPanelProps = {
   run: Run;
-  /** How much the run has written. A change means the files on disk may have moved with it. */
-  wrote: number;
+  /** The work tree the run reviews. undefined until review_root has answered. */
+  root: ReviewRoot | undefined;
+  base: BaseChoice;
   full: boolean;
   onOpenUrl: (url: string) => void;
-  onShowDiff: () => void;
+  onShowFiles: () => void;
   onToggleFull: () => void;
   onClose: () => void;
 };
@@ -81,18 +81,17 @@ function prState(pr: NonNullable<Run["pr"]>): string {
  */
 export function InfoPanel({
   run,
-  wrote,
+  root,
+  base,
   full,
   onOpenUrl,
-  onShowDiff,
+  onShowFiles,
   onToggleFull,
   onClose,
 }: InfoPanelProps) {
-  const { diff, plain } = useRunDiff(run.dir, wrote, false);
-  const stat = useMemo(() => {
-    const parsed = parseDiff(diff?.patch ?? "");
-    return parsed?.kind === "files" ? diffStat(parsed.files) : undefined;
-  }, [diff?.patch]);
+  // The same reading the Review tab shows, so the two never quote different figures.
+  const { base: against, stat, ready } = useReview(root?.root, base);
+  const plain = root?.git === false;
   const tree = subtreeCost(run);
   const own = costLabel(run.cost);
   const treeLabel = costLabel(tree);
@@ -147,7 +146,9 @@ export function InfoPanel({
         <Row label="Change">
           {plain ? (
             <span className="text-muted-foreground">not a git repository</span>
-          ) : stat === undefined || stat.files === 0 ? (
+          ) : !ready ? (
+            <span className="text-muted-foreground">reading the changes</span>
+          ) : stat.files === 0 ? (
             <span className="text-muted-foreground">no uncommitted changes</span>
           ) : (
             <>
@@ -155,11 +156,11 @@ export function InfoPanel({
                 {stat.files === 1 ? "1 file" : `${stat.files} files`}, +{stat.additions} −
                 {stat.deletions}
               </span>
-              {diff === undefined ? null : (
-                <span className="text-xs text-muted-foreground">against {diff.base}</span>
+              {against === "" ? null : (
+                <span className="text-xs text-muted-foreground">against {against}</span>
               )}
-              <Button variant="link" size="sm" className="h-auto p-0" onClick={onShowDiff}>
-                Open the diff
+              <Button variant="link" size="sm" className="h-auto p-0" onClick={onShowFiles}>
+                Open the files panel
               </Button>
             </>
           )}
