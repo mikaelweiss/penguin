@@ -177,13 +177,18 @@ engine has no idea agents exist.
 one. A workflow that races `listen()` against `turn.value` can hear a person
 and stop the agent, which is the whole steering story.
 
-## Resume
+## Pause and resume
 
-Workflows are reconcilers. They inspect the world through adapters before
-acting, and act only on what is missing, the way `commit` checks `vcs.dirty`
-first. So resuming an interrupted run is running the workflow again: its own
-checks skip what is already done. The world is the state store. There is no
-journal and no replay.
+A run that did not finish is paused, whatever ended it: a person, a usage
+limit, or a machine going down. It resumes in its own folder and takes up where
+it left off. Two kinds of state make that work. The world is the state store
+for the world: workflows are reconcilers, they ask adapters what is true before
+acting, the way `commit` checks `vcs.dirty` first, so a resumed run re-reads
+everything it asked of git, GitHub, or a shell. The run file is the state store
+for what people and agents said: the answers a person gave and the values
+agents returned replay from it, so nobody is asked twice and no turn is paid
+for twice. A usage limit pauses the run and a frontend brings it back when the
+limit clears.
 
 ## The engine
 
@@ -193,7 +198,8 @@ adapter, a new workflow, or out of scope:
 1. **Catalog.** Find workflow files, adapter files, and skill folders across catalog directories.
 2. **Ctx.** Validate params and wire installed adapter roles onto ctx.
 3. **Process.** Own the run's working directory and the processes it spawns.
-4. **Trace.** Append each adapter call and outcome to a log, for debugging.
+4. **Trace.** Append each adapter call and outcome to the run file, which is
+   what a frontend reads and what a resume replays from.
 5. **Recovery.** Run each adapter's preflight checks before a root run, and hold
    uncaught faults at a gate: fixer agent first when the fault asks for one,
    then the person, then the same call again.

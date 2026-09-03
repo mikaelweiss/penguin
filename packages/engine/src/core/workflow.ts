@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { messageOf, PenguinError, RunStopped } from "./errors.ts";
+import { messageOf, PenguinError, RunPaused, RunStopped } from "./errors.ts";
 import type { View } from "./view.ts";
 
 /** The roles the installed adapters put on ctx. penguin-env.d.ts merges them in. */
@@ -120,8 +120,10 @@ async function spawned<R>(
       return (await hooks.spawn(file, params, cwd)) as R;
     } catch (error) {
       const view = watching(ctx);
-      // A person who stopped the child meant to stop it, and a run with no view has nobody to ask.
-      if (view === undefined || error instanceof RunStopped) throw error;
+      // A stop or a pause is what it says, and a run with no view has nobody to ask.
+      if (view === undefined || error instanceof RunStopped || error instanceof RunPaused) {
+        throw error;
+      }
       const answer = await view.ask(
         `${name} did not finish: ${messageOf(error)}\n\nClear what stopped it. again runs it once more, stop ends this run.`,
         Again,

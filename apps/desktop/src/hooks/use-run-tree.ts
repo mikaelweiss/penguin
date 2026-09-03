@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { isLive } from "@/lib/runs";
+import { unfinished } from "@/lib/runs";
 import type { RunNode } from "@/lib/runs";
 
 export type RunTree = {
@@ -34,7 +34,7 @@ export function useRunTree(): RunTree {
         for (const ancestor of node.ancestors) next.delete(ancestor.id);
         return next.size === current.size ? current : next;
       });
-      if (isLive(node.run)) return;
+      if (unfinished(node.run)) return;
       setFinished((current) =>
         current.has(node.project.id) ? current : new Set(current).add(node.project.id),
       );

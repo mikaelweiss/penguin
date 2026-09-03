@@ -155,21 +155,22 @@ const commit = await turn.value;</code></pre>
       <code>~/.penguin/instructions.md</code> reaches every session, whichever CLI runs it.
     </p>
 
-    <h2>A usage limit waits, it does not fail</h2>
+    <h2>A usage limit pauses the run, it does not fail it</h2>
 
     <p>
       A usage limit is not a mistake the agent can correct, so correcting it wastes the one retry
-      and the run dies on a wall that clears itself. An adapter marks that failure instead:
+      and the run dies on a wall that clears itself. An adapter marks that failure instead, with
+      the reset time when the CLI names one:
     </p>
 
-    <pre><code>return { ok: false, error: "You've hit your session limit · resets 3pm", limited: true };</code></pre>
+    <pre><code>return { ok: false, error: "You've hit your session limit · resets 3pm", limited: true, until: "2026-09-02T15:00:00.000Z" };</code></pre>
 
     <p>
-      <code>sessions()</code> then parks the turn rather than counting it as a try. It notes the
-      pause to the run file, sleeps <code>limit-wait-seconds</code> from
-      <code>~/.penguin/config</code> (120 by default), and sends the same prompt again on the same
-      session, for as long as the limit holds. Stopping the run still ends a parked turn, and the
-      penguin app shows it as waiting, with the agent's own sentence about when the limit resets.
+      <code>sessions()</code> then throws <code>RunPaused</code>, which nothing in a workflow
+      catches: the run writes a paused note carrying the reason and <code>until</code>, parks its
+      children, and exits. The penguin app shows it as paused and resumes it when the limit
+      clears, and the resumed run replays the turns that had finished and sends the interrupted
+      one again on the same session.
     </p>
 
     <h2>Stopping a turn</h2>

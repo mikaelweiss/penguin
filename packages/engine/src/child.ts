@@ -1,24 +1,24 @@
-// The sub-run entrypoint. call() spawns `bun child.ts <json>` with the job's
-// file, params, cwd, id, parent, and catalogs; the run file carries the rest.
+// The run process entrypoint: `bun child.ts <json>`. A parent's call and a frontend's start
+// both spawn it with a job; a resume names only the run id and reads the rest from the run file.
+// What fails before the run file opens is said on stderr, which a frontend keeps as the start log.
 import fs from "node:fs";
 import path from "node:path";
-import { messageOf } from "./core/errors.ts";
+import { messageOf, RunPaused } from "./core/errors.ts";
 import { runDir } from "./paths.ts";
-import { run, type RunOptions } from "./run.ts";
+import { run, runHead, signalChildren, type RunOptions } from "./run.ts";
 
 type Job = {
-  file: string;
-  params: unknown;
-  cwd: string;
   id: string;
-  /** Absent when a frontend starts a root run this way. */
+  resume?: boolean;
+  file?: string;
+  params?: unknown;
+  cwd?: string;
   parent?: string;
-  catalogs: RunOptions["catalogs"];
+  catalogs?: RunOptions["catalogs"];
 };
 
 const job = JSON.parse(process.argv[2] ?? "") as Job;
 
-/** The closing line the parent reads. A run that dies without one is a crash nobody can explain. */
 function note(entry: Record<string, unknown>): void {
   const dir = runDir(job.id);
   fs.mkdirSync(dir, { recursive: true });
@@ -27,22 +27,44 @@ function note(entry: Record<string, unknown>): void {
 }
 
 process.on("SIGTERM", () => {
+  signalChildren("SIGTERM");
   note({ stopped: true });
   process.exit(143);
 });
 
-try {
-  await run(job.file, job.params, {
-    cwd: job.cwd,
+process.on("SIGINT", () => {
+  signalChildren("SIGINT");
+  note({ paused: { by: "user" } });
+  process.exit(130);
+});
+
+function started(): Job {
+  if (job.resume !== true) return job;
+  const head = runHead(job.id);
+  if (head === undefined) throw new Error(`${job.id} has no run to resume`);
+  return {
     id: job.id,
-    parent: job.parent,
-    catalogs: job.catalogs,
+    resume: true,
+    file: head["workflow"] as string,
+    params: head["params"],
+    cwd: head["cwd"] as string,
+    parent: head["parent"] as string | undefined,
+    catalogs: head["catalogs"] as RunOptions["catalogs"],
+  };
+}
+
+try {
+  const given = started();
+  await run(given.file ?? "", given.params, {
+    cwd: given.cwd,
+    id: given.id,
+    parent: given.parent,
+    catalogs: given.catalogs,
+    resume: given.resume,
   });
   process.exit(0);
 } catch (error) {
-  // run() records what threw once the run file is open. A failure before that has only this.
-  const said = messageOf(error);
-  note({ threw: said });
-  console.error(said);
+  if (error instanceof RunPaused) process.exit(130);
+  console.error(messageOf(error));
   process.exit(1);
 }

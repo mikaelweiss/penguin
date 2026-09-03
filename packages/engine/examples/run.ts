@@ -1,26 +1,59 @@
 // Runs one workflow in the foreground and presents its whole run tree from the
 // run files, the same way any frontend does: reading run.jsonl, writing inboxes.
 // usage: bun examples/run.ts examples/workflows/commit.ts '{"dir":"."}'
+//        bun examples/run.ts --resume <run id>
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { starterCatalog } from "../src/catalog/catalogs.ts";
-import { messageOf } from "../src/core/errors.ts";
+import { starterCatalog, type Catalog } from "../src/catalog/catalogs.ts";
+import { messageOf, RunPaused } from "../src/core/errors.ts";
 import { menuOfSchema, type Menu } from "../src/core/view.ts";
 import { runDir } from "../src/paths.ts";
 import { run, runId } from "../src/run.ts";
+import { livePid, runHead } from "../src/trace.ts";
 
-const [file, json] = process.argv.slice(2);
-if (file === undefined) {
-  process.stderr.write("usage: bun examples/run.ts <workflow.ts> ['{...params}']\n");
+type Start = { id: string; file: string; params: unknown; catalogs: Catalog[]; resume: boolean };
+
+function usage(): never {
+  process.stderr.write(
+    "usage: bun examples/run.ts <workflow.ts> ['{...params}']\n       bun examples/run.ts --resume <run id>\n",
+  );
   process.exit(2);
 }
+
+function starting(argv: string[]): Start {
+  const [first, second] = argv;
+  if (first === undefined) usage();
+  if (first !== "--resume") {
+    return {
+      id: runId(),
+      file: first,
+      params: second === undefined ? {} : JSON.parse(second),
+      catalogs: [starterCatalog()],
+      resume: false,
+    };
+  }
+  if (second === undefined) usage();
+  const head = runHead(second);
+  if (head === undefined) {
+    process.stderr.write(`penguin: no run named ${second}\n`);
+    process.exit(2);
+  }
+  return {
+    id: second,
+    file: head["workflow"] as string,
+    params: head["params"],
+    catalogs: (head["catalogs"] as Catalog[] | undefined) ?? [starterCatalog()],
+    resume: true,
+  };
+}
+
+const start = starting(process.argv.slice(2));
 
 type Watched = {
   id: string;
   label: string;
   offset: number;
-  pid: number | undefined;
   listening: boolean;
   done: boolean;
 };
@@ -40,8 +73,10 @@ let presented: Prompt | undefined;
 /** What the whole tree spent, summed from every run's usage notes. */
 const spent = { turns: 0, tokens: 0, usd: 0, priced: false };
 
-const rootId = runId();
-runs.set(rootId, { id: rootId, label: "", offset: 0, pid: undefined, listening: false, done: false });
+const rootId = start.id;
+/** A resumed run's story was already told; only what the new process writes prints. */
+const told = start.resume ? fs.statSync(path.join(runDir(rootId), "run.jsonl")).size : 0;
+runs.set(rootId, { id: rootId, label: "", offset: told, listening: false, done: false });
 
 const out = process.stdout;
 const reader = readline.createInterface({ input: process.stdin, output: out, terminal: false });
@@ -81,15 +116,14 @@ function drain(): void {
 }
 
 function consume(watched: Watched, entry: Record<string, unknown>): void {
-  if (typeof entry["pid"] === "number") watched.pid = entry["pid"];
   if (typeof entry["child"] === "string" && typeof entry["workflow"] === "string") {
+    if (runs.has(entry["child"])) return;
     const name = path.basename(entry["workflow"]).replace(/\.ts$/, "");
     const label = watched.label === "" ? name : `${watched.label}/${name}`;
     runs.set(entry["child"], {
       id: entry["child"],
       label,
       offset: 0,
-      pid: undefined,
       listening: false,
       done: false,
     });
@@ -152,7 +186,10 @@ function consume(watched: Watched, entry: Record<string, unknown>): void {
     out.write(`that answer does not fit: ${String(entry["problem"] ?? "")}\n> `);
     return;
   }
-  if (entry["call"] === undefined && ("outcome" in entry || "threw" in entry || entry["stopped"] === true)) {
+  if (
+    entry["call"] === undefined &&
+    ("outcome" in entry || "threw" in entry || "paused" in entry || entry["stopped"] === true)
+  ) {
     watched.done = true;
   }
 }
@@ -224,29 +261,35 @@ function answer(prompt: Prompt, value: { value: unknown } | string): void {
   present();
 }
 
-function stopTree(): void {
+/** Ctrl-C parks the whole tree where it stands. The root runs in this process, so its note is ours to write. */
+function pauseTree(): void {
   for (const watched of runs.values()) {
-    if (watched.id === rootId || watched.pid === undefined || watched.done) continue;
+    if (watched.id === rootId || watched.done) continue;
+    const pid = livePid(watched.id);
+    if (pid === undefined) continue;
     try {
-      process.kill(-watched.pid, "SIGTERM");
+      process.kill(-pid, "SIGINT");
     } catch {
       // already gone
     }
   }
+  const note = JSON.stringify({ at: new Date().toISOString(), paused: { by: "user" } });
+  fs.appendFileSync(path.join(runDir(rootId), "run.jsonl"), `${note}\n`);
 }
 
 process.on("SIGINT", () => {
-  stopTree();
-  out.write("\n");
+  pauseTree();
+  out.write(`\npaused. resume with: bun examples/run.ts --resume ${rootId}\n`);
   process.exit(130);
 });
 
 const ticker = setInterval(drain, 100);
 
 try {
-  const result = await run(file, json === undefined ? {} : JSON.parse(json), {
+  const result = await run(start.file, start.params, {
     id: rootId,
-    catalogs: [starterCatalog()],
+    catalogs: start.catalogs,
+    resume: start.resume,
   });
   drain();
   out.write(`\n${JSON.stringify(result, null, 2)}\n`);
@@ -257,6 +300,10 @@ try {
   process.exit(0);
 } catch (error) {
   drain();
+  if (error instanceof RunPaused) {
+    out.write(`\npaused: ${error.message}\nresume with: bun examples/run.ts --resume ${rootId}\n`);
+    process.exit(130);
+  }
   process.stderr.write(`penguin: ${messageOf(error)}\n`);
   process.exit(1);
 } finally {

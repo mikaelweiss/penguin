@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import {
   Channel,
   issuesOf,
   messageOf,
   PenguinError,
+  RunPaused,
   type Action,
   type AgentChoice,
   type Host,
@@ -32,8 +34,8 @@ export type Usage = {
 
 export type Attempt =
   | { ok: true; value: unknown; usage?: Usage }
-  /** `limited` means the agent hit a usage limit: the turn waits it out instead of retrying. */
-  | { ok: false; error: string; limited?: boolean; usage?: Usage };
+  /** `limited` means the agent hit a usage limit: the run pauses, until `until` when the CLI named it. */
+  | { ok: false; error: string; limited?: boolean; until?: string; usage?: Usage };
 
 export type TurnFn = {
   (session: string, ask: TurnAsk): Turn<null>;
@@ -58,6 +60,10 @@ export type Invocation<Options> = {
   prompt: string;
   schema: Record<string, unknown> | undefined;
   signal: AbortSignal;
+  /** The CLI's own name for the session, once a turn kept one. */
+  thread: string | undefined;
+  /** Records the CLI's own name for the session, for every later turn and process. */
+  keep(thread: string): void;
 };
 
 /** One CLI invocation: stream what the agent does through emit, return how it ended. */
@@ -116,12 +122,30 @@ export function targetIn(fields: string[]): (input: unknown) => string | undefin
   };
 }
 
-const LIMIT_WAIT_SECONDS = 120;
+type Kept<Options> = { options: Options; started: boolean; thread?: string };
+
+/**
+ * The sessions a run opened, kept in its folder so the process that resumes the
+ * run finds them and carries each conversation on where it stood.
+ */
+function ledger<Options>(dir: string): {
+  table: Record<string, Kept<Options>>;
+  save(): void;
+} {
+  const file = path.join(dir, "sessions.json");
+  let table: Record<string, Kept<Options>> = {};
+  try {
+    table = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, Kept<Options>>;
+  } catch {
+    table = {};
+  }
+  return { table, save: () => fs.writeFileSync(file, JSON.stringify(table)) };
+}
 
 /**
  * The session machinery every agent adapter shares: open handles, run a turn
- * with one corrected retry, wait out a usage limit, validate a typed result,
- * note what each attempt cost, and stop mid-flight. The adapter supplies
+ * with one corrected retry, pause the run on a usage limit, validate a typed
+ * result, note what each attempt cost, and stop mid-flight. The adapter supplies
  * runOnce, the one CLI invocation, and its name for the usage notes.
  */
 export function sessions<Options>(
@@ -129,68 +153,19 @@ export function sessions<Options>(
   runOnce: RunOnce<Options>,
   adapter: string,
 ): AgentApi<Options> {
-  const opened = new Map<string, Options>();
-  const started = new Set<string>();
+  const { table, save } = ledger<Options>(host.run.dir);
   const running = new Map<string, AbortController>();
   const stopped = new Set<string>();
-  let parked = 0;
-
-  const waitSeconds = (): number => {
-    const set = Number(host.config("limit-wait-seconds"));
-    return Number.isFinite(set) && set >= 0 ? set : LIMIT_WAIT_SECONDS;
-  };
-
-  /** Sleeps until the limit is worth testing again. Stopping the session cuts it short. */
-  async function sleep(session: string): Promise<void> {
-    const controller = new AbortController();
-    running.set(session, controller);
-    try {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, waitSeconds() * 1000);
-        controller.signal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          { once: true },
-        );
-      });
-    } finally {
-      running.delete(session);
-    }
-  }
-
-  /**
-   * The run's one open pause, however many turns are waiting. It stays open
-   * across a turn's repeated tries, so the run file records the wait once.
-   */
-  function parking(): { park: (reason: string) => void; release: () => void } {
-    let held = false;
-    return {
-      park: (reason) => {
-        if (held) return;
-        held = true;
-        if (parked++ === 0) host.note({ limit: { role: "agent", reason } });
-      },
-      release: () => {
-        if (!held) return;
-        held = false;
-        if (--parked === 0) host.note({ limit: { role: "agent", resolved: true } });
-      },
-    };
-  }
 
   const turn = ((session: string, ask: TurnAsk, options?: { result?: z.ZodObject }) => {
-    const settings = opened.get(session);
-    if (settings === undefined) {
+    const kept = table[session];
+    if (kept === undefined) {
       throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
     }
     const prompt = typeof ask === "string" ? ask : withSkill(host.skill(ask.skill), ask.prompt);
     const skill = typeof ask === "string" ? undefined : ask.skill;
     const output = new Channel<Chunk>();
     const schema = options?.result === undefined ? undefined : jsonSchema(options.result);
-    const pause = parking();
     const value = (async () => {
       try {
         stopped.delete(session);
@@ -202,8 +177,9 @@ export function sessions<Options>(
         let failure: string | undefined;
         let tries = 0;
         while (tries < 2) {
-          const first = !started.has(session);
-          started.add(session);
+          const first = !kept.started;
+          kept.started = true;
+          save();
           const sent =
             failure === undefined
               ? prompt
@@ -213,7 +189,19 @@ export function sessions<Options>(
           let attempt: Attempt;
           try {
             attempt = await runOnce(
-              { session, first, options: settings, prompt: sent, schema, signal: controller.signal },
+              {
+                session,
+                first,
+                options: kept.options,
+                prompt: sent,
+                schema,
+                signal: controller.signal,
+                thread: kept.thread,
+                keep: (thread) => {
+                  kept.thread = thread;
+                  save();
+                },
+              },
               (chunk) => output.push(chunk),
             );
           } finally {
@@ -227,12 +215,8 @@ export function sessions<Options>(
           }
           halt();
           if (!attempt.ok && attempt.limited === true) {
-            pause.park(attempt.error);
-            await sleep(session);
-            halt();
-            continue;
+            throw new RunPaused(attempt.error, { by: "limit", until: attempt.until });
           }
-          pause.release();
           tries++;
           if (!attempt.ok) {
             failure = attempt.error;
@@ -245,7 +229,6 @@ export function sessions<Options>(
         }
         throw new PenguinError(`the turn failed twice: ${failure}`);
       } finally {
-        pause.release();
         output.end();
       }
     })();
@@ -256,12 +239,13 @@ export function sessions<Options>(
   return {
     async open(options?: Options): Promise<string> {
       const id = crypto.randomUUID();
-      opened.set(id, options ?? ({} as Options));
+      table[id] = { options: options ?? ({} as Options), started: false };
+      save();
       return id;
     },
     turn,
     async stop(session: string): Promise<void> {
-      if (!opened.has(session)) {
+      if (table[session] === undefined) {
         throw new PenguinError(`no open session ${session}. ctx.agent.open() gives one.`);
       }
       stopped.add(session);
@@ -308,6 +292,7 @@ export async function narrated<T>(view: View, start: () => Turn<T>): Promise<T> 
     } finally {
       await shown;
     }
+    if (failure instanceof RunPaused) throw failure;
     await retried(view, failure);
   }
 }

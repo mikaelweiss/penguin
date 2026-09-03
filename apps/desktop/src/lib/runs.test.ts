@@ -3,12 +3,15 @@ import { expect, test } from "bun:test";
 import {
   blockedOn,
   costLabel,
-  isIdle,
+  isLive,
   needsYouNotice,
   newlyBlocked,
   nextView,
+  pausedReason,
+  resumable,
   subtreeCost,
   toProjects,
+  unfinished,
 } from "@/lib/runs";
 import type { Ask, Auth, Follow, Project, Run, RunFile, RunStatus } from "@/lib/runs";
 
@@ -98,7 +101,7 @@ test("a sibling that was already running when the watched run finished is a byst
   expect(nextView(before, after, "queue", up?.follow)).toBeUndefined();
 });
 
-test.each(["failed", "stopped", "crashed"] as const)("a %s run keeps the view", (status) => {
+test.each(["failed", "stopped", "paused"] as const)("a %s run keeps the view", (status) => {
   const before = tree({ id: "work", children: [{ id: "plan" }] });
   const after = tree({ id: "work", children: [{ id: "plan", status }] });
 
@@ -212,7 +215,7 @@ test("a long or many-lined question is flattened to one capped line", () => {
 function file(id: string, root: string, at: string): RunFile {
   return {
     id,
-    entries: [{ at, workflow: `${root}/ship.ts`, params: {}, cwd: root, root }],
+    entries: [{ at, run: id, workflow: `${root}/ship.ts`, params: {}, cwd: root, root }],
     alive: false,
   };
 }
@@ -237,16 +240,15 @@ test("a run newer than the hiding brings the project back", () => {
   expect(projects[0]?.runs.map((run) => run.id)).toEqual(["b"]);
 });
 
-/** A live run file, its start entry followed by the notes the run appended. */
-function live(...notes: Record<string, unknown>[]): RunFile {
-  return {
-    id: "a",
-    entries: [
-      { at: "t1", workflow: "/work/ship.ts", params: {}, cwd: "/work", root: "/work" },
-      ...notes,
-    ],
-    alive: true,
-  };
+const HEAD = { run: "a", workflow: "/work/ship.ts", params: {}, cwd: "/work", root: "/work" };
+
+/** A run file, its start entry followed by what the run appended, with or without a process behind it. */
+function written(alive: boolean, ...entries: Record<string, unknown>[]): RunFile {
+  return { id: "a", entries: [{ at: "t1", ...HEAD }, ...entries], alive };
+}
+
+function live(...entries: Record<string, unknown>[]): RunFile {
+  return written(true, ...entries);
 }
 
 function only(files: RunFile[]): Run {
@@ -255,32 +257,94 @@ function only(files: RunFile[]): Run {
   return found;
 }
 
-test("an unresolved limit note reads as a paused run, waiting rather than running", () => {
-  const paused = only([live({ at: "t2", limit: { role: "agent", reason: "resets 3pm" } })]);
+test("a dead process that wrote no ending leaves the run paused, interrupted", () => {
+  const run = only([written(false, { at: "t2", call: "view.show", args: ["hi"], pending: true })]);
 
-  expect(paused.paused).toEqual({ reason: "resets 3pm", at: "t2" });
-  expect(isIdle(paused)).toBe(true);
+  expect(run.status).toBe("paused");
+  expect(run.paused).toEqual({ by: "interrupted", at: "t2" });
+  expect(unfinished(run)).toBe(true);
+  expect(resumable(run)).toBe(true);
+  expect(isLive(run)).toBe(false);
 });
 
-test("the resolved note clears the pause and the run is plainly running again", () => {
-  const woken = only([
+test("a limit's paused note says who parked the run and when it comes back", () => {
+  const note = { by: "limit" as const, reason: "resets 3pm", until: "2026-09-02T15:00:00.000Z" };
+  const run = only([written(false, { at: "t2", paused: note })]);
+
+  expect(run.status).toBe("paused");
+  expect(run.paused).toEqual({ ...note, at: "t2" });
+  expect(pausedReason(run.paused!)).toBe("resets 3pm");
+});
+
+test("a person's pause needs no reason, and their stop of a parked run ends it", () => {
+  const paused = only([written(false, { at: "t2", paused: { by: "user" } })]);
+  expect(paused.paused).toEqual({ by: "user", at: "t2" });
+  expect(pausedReason(paused.paused!)).toBeUndefined();
+
+  const closed = only([written(false, { at: "t2", paused: { by: "user" } }, { at: "t3", stopped: true })]);
+  expect(closed.status).toBe("stopped");
+  expect(closed.paused).toBeUndefined();
+});
+
+test("a resumed run reads from its latest segment, the earlier pause being history", () => {
+  const ask = { call: "view.ask", args: ["which?"], id: "c1", pending: true };
+  const run = only([
     live(
-      { at: "t2", limit: { role: "agent", reason: "resets 3pm" } },
-      { at: "t3", limit: { role: "agent", resolved: true } },
+      { at: "t2", ...ask },
+      { at: "t3", paused: { by: "user" } },
+      { at: "t4", ...HEAD },
+      { at: "t5", call: "view.ask", args: ["which?"], id: "c2", pending: true },
     ),
   ]);
 
-  expect(woken.paused).toBeUndefined();
-  expect(isIdle(woken)).toBe(false);
+  expect(run.status).toBe("running");
+  expect(run.ask?.prompt).toBe("which?");
+  expect(run.output.map((item) => (item.type === "line" ? item.line.kind : item.type))).toEqual([
+    "ask",
+    "mark",
+    "mark",
+    "ask",
+  ]);
+  expect(run.output.flatMap((item) => (item.type === "mark" ? [item.text] : []))).toEqual([
+    "run paused",
+    "resumed",
+  ]);
 });
 
-test("a run that ended while paused is not shown as waiting", () => {
-  const ended = only([
-    live({ at: "t2", limit: { role: "agent", reason: "resets 3pm" } }, { at: "t3", stopped: true }),
+test("a run resumed after failing or stopping tells how each earlier segment ended", () => {
+  const run = only([
+    live(
+      { at: "t2", call: "view.show", args: ["one"], id: "c1", pending: true },
+      { at: "t3", threw: "boom" },
+      { at: "t4", ...HEAD },
+      { at: "t5", call: "view.show", args: ["two"], id: "c2", pending: true },
+      { at: "t6", stopped: true },
+      { at: "t7", ...HEAD },
+      { at: "t8", call: "view.show", args: ["three"], id: "c3", pending: true },
+    ),
   ]);
 
-  expect(ended.status).toBe("stopped");
-  expect(ended.paused).toBeUndefined();
+  expect(run.status).toBe("running");
+  expect(run.output.flatMap((item) => (item.type === "mark" ? [item.text] : []))).toEqual([
+    "run failed: boom",
+    "resumed",
+    "run stopped",
+    "resumed",
+  ]);
+});
+
+test("what a resume replayed is not told twice, and a turn's settlement is not a second turn", () => {
+  const run = only([
+    live(
+      { at: "t2", ...HEAD },
+      { at: "t3", call: "view.ask", args: ["which?"], outcome: "a", replayed: true },
+      { at: "t4", call: "agent.turn", args: ["s1", "go"], id: "c2", handle: true, pending: true },
+      { at: "t5", call: "agent.turn", args: ["s1", "go"], id: "c2", handle: true, outcome: { n: 1 } },
+      { at: "t6", call: "view.show", args: ["done"], id: "c3", pending: true },
+    ),
+  ]);
+
+  expect(run.output.map((item) => item.type)).toEqual(["mark", "turn", "line"]);
 });
 
 test("usage notes sum into the run's cost, and a child's spend joins the subtree's", () => {

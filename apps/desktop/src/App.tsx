@@ -30,6 +30,7 @@ import { RunSidebar } from "@/components/run-sidebar";
 import { RemoveProjectDialog } from "@/components/remove-project-dialog";
 import { RunTranscript } from "@/components/run-transcript";
 import { TerminalPanel } from "@/components/terminal-panel";
+import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useBrowser } from "@/hooks/use-browser";
 import { useConfig } from "@/hooks/use-config";
 import { useDirectories } from "@/hooks/use-directories";
@@ -106,6 +107,7 @@ export function App() {
   };
   const sound = notificationSound(config.values);
   useNeedsYou(projects, published, sound, selectedId, select);
+  useAutoResume(projects, published);
 
   const into = openIn(config.values);
   const auto = autoShows(config.values);

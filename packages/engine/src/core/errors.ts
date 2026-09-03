@@ -22,6 +22,22 @@ export class RunStopped extends PenguinError {}
 /** A sub-run's process died without recording an outcome. */
 export class RunCrashed extends PenguinError {}
 
+export type PausedBy = "user" | "limit";
+
+/**
+ * The run parks where it is, to be resumed later: a usage limit that clears at
+ * `until`, or a person who asked for the pause. Nothing in a workflow catches it.
+ */
+export class RunPaused extends PenguinError {
+  readonly by: PausedBy;
+  readonly until: string | undefined;
+  constructor(message: string, options: { by: PausedBy; until?: string | undefined }) {
+    super(message);
+    this.by = options.by;
+    this.until = options.until;
+  }
+}
+
 export function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);

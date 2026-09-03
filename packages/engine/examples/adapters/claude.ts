@@ -78,6 +78,8 @@ type StreamLine = {
   /** Running totals for the process, so a turn's share is the growth since the last result. */
   total_cost_usd?: number;
   modelUsage?: ModelUsage;
+  /** On a rate_limit_event: the window that applies and when it resets, in unix seconds. */
+  rate_limit_info?: { resetsAt?: number };
 };
 
 /** One claude process, kept open across the turns of a session that share a schema. */
@@ -89,6 +91,8 @@ type Live = {
   /** What the last result reported, so the next turn reports only its own growth. */
   costUsd: number;
   modelTokens: Map<string, number>;
+  /** When the usage window the CLI last reported resets, in unix seconds. */
+  resetsAt: number | undefined;
   /** The turn reading the stream now. */
   onLine: ((line: string) => void) | undefined;
   onExit: ((done: CommandResult) => void) | undefined;
@@ -254,6 +258,7 @@ export default adapter({
         exited: false,
         costUsd: 0,
         modelTokens: new Map(),
+        resetsAt: undefined,
         onLine: undefined,
         onExit: undefined,
       };
@@ -320,8 +325,13 @@ export default adapter({
         } catch {
           return false;
         }
+        if (event.type === "rate_limit_event") {
+          const resets = event.rate_limit_info?.resetsAt;
+          if (typeof resets === "number") live.resetsAt = resets;
+          return false;
+        }
         if (event.type === "assistant") {
-          // A limit says itself once. Letting it stream would repeat it on every retry.
+          // The limit is the pause's reason, not part of the story.
           if (event.is_api_error_message === true && event.error === "rate_limit") {
             limited = resultText(event.message?.content).trim();
             return false;
@@ -407,10 +417,11 @@ export default adapter({
         outcome.exit !== undefined && outcome.exit.code !== 0 ? exitFailure(outcome.exit) : settled();
       const spent = usage === undefined ? {} : { usage };
       if (failure === undefined) return { ok: true, value: value ?? null, ...spent };
-      // A limit clears on its own, so the turn waits it out rather than spending a retry.
       if (limited !== undefined) {
         const said = limited === "" ? "claude hit its usage limit" : limited;
-        return { ok: false, error: said, limited: true, ...spent };
+        const until =
+          live.resetsAt === undefined ? {} : { until: new Date(live.resetsAt * 1000).toISOString() };
+        return { ok: false, error: said, limited: true, ...until, ...spent };
       }
       return { ok: false, error: failure, ...spent };
     }

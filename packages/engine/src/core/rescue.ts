@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
-import { Fault, messageOf } from "./errors.ts";
+import { Fault, messageOf, RunPaused } from "./errors.ts";
 import type { View } from "./view.ts";
 
 /**
@@ -89,6 +89,7 @@ export function createRescue(world: World): <A>(role: string, api: A) => A {
       await shown;
       return Fixed.parse(value);
     } catch (error) {
+      if (error instanceof RunPaused) throw error;
       return { fixed: false, notes: `The fixer did not answer: ${messageOf(error)}` };
     }
   }

@@ -59,7 +59,7 @@
           </tr>
           <tr>
             <td><code>src/core/errors.ts</code></td>
-            <td><code>PenguinError</code>, <code>Fault</code>, <code>RunStopped</code>, <code>RunCrashed</code>, <code>messageOf</code>, <code>issuesOf</code></td>
+            <td><code>PenguinError</code>, <code>Fault</code>, <code>RunStopped</code>, <code>RunPaused</code>, <code>RunCrashed</code>, <code>messageOf</code>, <code>issuesOf</code></td>
           </tr>
           <tr>
             <td><code>src/core/channel.ts</code></td>
@@ -131,7 +131,7 @@
           </tr>
           <tr>
             <td><code>src/trace.ts</code></td>
-            <td><code>createTrace</code>, <code>openJournal</code>, <code>latestRun</code>, <code>runId</code>: the run file, and resume reading it back</td>
+            <td><code>createTrace</code>, <code>openJournal</code>, <code>runHead</code>, <code>closingOf</code>, <code>livePid</code>, <code>runId</code>: the run file, and resume reading it back</td>
           </tr>
         </tbody>
       </table>
@@ -283,9 +283,9 @@
             <td>The world refusing a call. The engine holds one at a gate; <code>{ fix: "agent" }</code> sends it to a fixer agent first.</td>
           </tr>
           <tr>
-            <td><code>RunStopped</code>, <code>RunCrashed</code></td>
+            <td><code>RunStopped</code>, <code>RunPaused</code>, <code>RunCrashed</code></td>
             <td><code>class extends PenguinError</code></td>
-            <td>How <code>call</code> rejects when a child was stopped, or died silently.</td>
+            <td>How <code>call</code> rejects when a child was stopped, paused, or died silently. <code>RunPaused</code> carries <code>by</code> and <code>until</code>.</td>
           </tr>
           <tr>
             <td><code>attempt</code></td>
@@ -473,8 +473,8 @@ type ExecOptions = ShellOptions &amp; {
             <td>A fresh run id with its folder claimed, so a frontend knows the folder before starting.</td>
           </tr>
           <tr>
-            <td><code>latestRun()</code></td>
-            <td>The newest run file, for <code>resume</code>.</td>
+            <td><code>runHead(id)</code></td>
+            <td>The run's first head line: how it was started, which is what a resume runs again.</td>
           </tr>
           <tr>
             <td><code>createHost(cwd, run, catalogs?)</code></td>

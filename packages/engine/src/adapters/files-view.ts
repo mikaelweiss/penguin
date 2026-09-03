@@ -11,6 +11,15 @@ type Pending = {
   resolve: (value: unknown) => void;
 };
 
+/** What the inbox holds when the view opens was answered by an earlier segment of the run. */
+function sizeOf(file: string): number {
+  try {
+    return fs.readFileSync(file, "utf8").length;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * The headless view. Shows land in run.jsonl through the trace, answers and
  * messages arrive as lines a frontend appends to inbox.jsonl: {"answer": ...}
@@ -21,7 +30,7 @@ export function createFilesView(dir: string): View {
   const inbox = path.join(dir, "inbox.jsonl");
   const asks: Pending[] = [];
   const listeners = new Set<Channel<Message>>();
-  let offset = 0;
+  let offset = sizeOf(inbox);
   let watching = false;
 
   const note = (entry: Record<string, unknown>): void => {

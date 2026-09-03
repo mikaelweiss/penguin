@@ -13,6 +13,10 @@
       "types": "./src/core/view.ts",
       "default": "./src/core/view.ts"
     },
+    "./segments": {
+      "types": "./src/core/segments.ts",
+      "default": "./src/core/segments.ts"
+    },
     "./catalog": {
       "types": "./src/catalog/index.ts",
       "default": "./src/catalog/index.ts"

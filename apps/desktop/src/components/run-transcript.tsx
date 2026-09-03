@@ -273,14 +273,8 @@ const ActionsRow = memo(function ActionsRow({ row, live, open, onToggle }: Actio
   );
 });
 
-/**
- * What the run waits on. A paused run wins over its last status and over an
- * unfinished action, because the limit is why neither of them is moving.
- */
+/** What the run waits on, unless an action of its own is what is moving. */
 function waitingOn(run: Run, acting: boolean): RunState | undefined {
-  if (run.paused !== undefined) {
-    return { text: run.paused.reason, at: run.paused.at, idle: true };
-  }
   return acting ? undefined : run.state;
 }
 
@@ -320,7 +314,7 @@ const TurnRow = memo(function TurnRow({ label }: { label: string }) {
 /** Work rows sit tight against each other; prose and turns get room to breathe. */
 function spacing(row: TranscriptRow): string {
   if (row.kind === "actions") return "pb-0.5";
-  if (row.kind === "closing") return "pt-2 pb-0.5";
+  if (row.kind === "closing" || row.kind === "mark") return "pt-2 pb-0.5";
   if (row.kind === "turn") return "pt-4 pb-4";
   return "pb-4";
 }
@@ -345,6 +339,7 @@ function Row({ row, live, open, onToggle }: RowProps) {
       return <ActionsRow row={row} live={live} open={open} onToggle={onToggle} />;
     case "turn":
       return <TurnRow label={row.label} />;
+    case "mark":
     case "closing":
       return <ClosingRow text={row.text} />;
   }

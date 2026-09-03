@@ -165,19 +165,13 @@ export default adapter({
   description:
     "runs prompts on the opencode CLI. A session is one conversation: the first turn opens it, later turns resume it over --session. The CLI takes no schema, so a typed result is asked for in the prompt and read back out of the reply.",
   build: (host) => {
-    /**
-     * opencode names its own sessions, so penguin's handle cannot be the session id.
-     * The first turn of a handle reads the id off the event stream and keeps it here.
-     */
-    const opened = new Map<string, string>();
-
     async function runOnce(
       invocation: Invocation<OpenOptions>,
       emit: (chunk: Chunk) => void,
     ): Promise<Attempt> {
-      const { session, options, prompt, schema, signal } = invocation;
+      const { options, prompt, schema, signal } = invocation;
       const argv = ["opencode", "run", "--auto", "--format", "json"];
-      const id = opened.get(session);
+      let id = invocation.thread;
       if (id !== undefined) argv.push("--session", id);
       const model = modelFor(options.model, "opencode", {}, host.config);
       if (model !== undefined) argv.push("--model", model);
@@ -196,7 +190,10 @@ export default adapter({
           return;
         }
         const opening = event.sessionID;
-        if (said(opening)) opened.set(session, opening);
+        if (said(opening) && opening !== id) {
+          id = opening;
+          invocation.keep(id);
+        }
         const part = event.part;
         const body = part?.text;
         if (event.type === "text" && said(body)) {

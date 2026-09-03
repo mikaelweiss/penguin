@@ -147,15 +147,13 @@ export default adapter({
   description:
     "runs prompts on the cursor-agent CLI. A session is one cursor chat: the first turn opens the chat, later turns resume it. The CLI takes no schema, so a typed result is asked for in the prompt and read back out of the reply.",
   build: (host) => {
-    const chats = new Map<string, string>();
-
     async function runOnce(
       invocation: Invocation<OpenOptions>,
       emit: (chunk: Chunk) => void,
     ): Promise<Attempt> {
-      const { session, options, schema, signal } = invocation;
+      const { options, schema, signal } = invocation;
       const argv = ["cursor-agent", "-p", "--force", "--output-format", "stream-json", "--trust"];
-      const chat = chats.get(session);
+      let chat = invocation.thread;
       if (chat !== undefined) argv.push("--resume", chat);
       const model = modelFor(options.model, "cursor", MODELS, host.config) ?? MODELS.normal;
       argv.push("--model", model);
@@ -177,8 +175,9 @@ export default adapter({
         } catch {
           return;
         }
-        if (typeof event.session_id === "string" && event.session_id !== "") {
-          chats.set(session, event.session_id);
+        if (said(event.session_id) && event.session_id !== chat) {
+          chat = event.session_id;
+          invocation.keep(chat);
         }
         if (event.type === "assistant") {
           for (const block of event.message?.content ?? []) {

@@ -6,7 +6,9 @@ import {
   FolderIcon,
   FolderPlusIcon,
   FunnelIcon,
+  PauseIcon,
   PencilIcon,
+  PlayIcon,
   PlusIcon,
   SettingsIcon,
   Trash2Icon,
@@ -53,11 +55,20 @@ import { SidebarHandle } from "@/components/sidebar-handle";
 import type { RunActions } from "@/hooks/use-run-actions";
 import type { RunTree } from "@/hooks/use-run-tree";
 import type { SidebarResize } from "@/hooks/use-sidebar-width";
-import { findBlocked, isIdle, isLive, needsYou, visibleRuns } from "@/lib/runs";
+import {
+  findBlocked,
+  isIdle,
+  isLive,
+  needsYou,
+  resumable,
+  unfinished,
+  visibleRuns,
+} from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
 
 function statusColor(run: Run): string {
   if (needsYou(run)) return "bg-warning";
+  if (run.status === "paused") return "border border-warning";
   if (isIdle(run)) return "border border-success";
   if (run.status === "running") return "bg-success animate-pulse";
   if (run.status === "done") return "bg-muted-foreground/40";
@@ -153,7 +164,15 @@ function RunRow({
         </SidebarMenuItem>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem disabled={!isLive(run)} onSelect={() => actions.stop(run)}>
+        <ContextMenuItem disabled={!isLive(run)} onSelect={() => actions.pause(run)}>
+          <PauseIcon />
+          Pause
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!resumable(run)} onSelect={() => actions.resume(run)}>
+          <PlayIcon />
+          Resume
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!unfinished(run)} onSelect={() => actions.stop(run)}>
           <CircleStopIcon />
           Stop
         </ContextMenuItem>

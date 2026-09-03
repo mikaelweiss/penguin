@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { z } from "zod";
 import type { CommandResult, ExecOptions, Host } from "../src/core/adapter.ts";
+import { RunPaused } from "../src/core/errors.ts";
 import definition from "../examples/adapters/copilot.ts";
 
 type Call = { argv: string[]; options: ExecOptions | undefined };
@@ -14,8 +18,8 @@ function fakeHost(
     cwd: "/",
     home: "/tmp",
     state: "/tmp",
-    run: { id: "test", dir: "/tmp" },
-    config: (key) => (key === "limit-wait-seconds" ? "0" : undefined),
+    run: { id: "test", dir: fs.mkdtempSync(path.join(os.tmpdir(), "penguin-copilot-")) },
+    config: () => undefined,
     secret: async () => undefined,
     note: (entry) => {
       notes.push(entry);
@@ -145,23 +149,20 @@ test("a rejected result retries once with a correction, same session id", async 
   expect(calls[1]?.argv.some((arg) => arg.includes("# Correction"))).toBe(true);
 });
 
-test("a usage limit waits and reruns the turn instead of spending a retry", async () => {
-  const { host, calls, notes } = fakeHost(async (call, count) => {
-    if (count < 3) {
-      emit(call, { type: "session.error", data: { errorType: "rate_limit", message: RESETS } });
-      return OK;
-    }
-    emit(call, { type: "assistant.message", data: { content: '{"n":7}' } });
+test("a usage limit pauses the run instead of spending a retry", async () => {
+  const { host, calls, notes } = fakeHost(async (call) => {
+    emit(call, { type: "session.error", data: { errorType: "rate_limit", message: RESETS } });
     return OK;
   });
   const agent = definition.build(host);
   const session = await agent.open();
   const turn = agent.turn(session, "go", { result: z.object({ n: z.number() }) });
-  expect(await turn.value).toEqual({ n: 7 });
-  expect(calls).toHaveLength(3);
-  expect(calls[2]?.argv.some((arg) => arg.includes("# Correction"))).toBe(false);
-  expect(notes).toEqual([
-    { limit: { role: "agent", reason: RESETS } },
-    { limit: { role: "agent", resolved: true } },
-  ]);
+  const failure = await turn.value.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).message).toBe(RESETS);
+  expect(calls).toHaveLength(1);
+  expect(notes).toEqual([]);
 });

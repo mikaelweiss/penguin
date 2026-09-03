@@ -116,7 +116,8 @@ return definition.run(reached(ctx));</code></pre>
       run folder, and this run recorded as its parent. The parent's file notes the child's id, and
       the child's outcome, throw, or stop comes back to the awaiting <code>call</code> from the
       child's own file. Stopping a run is killing its process group; each child is its own group,
-      so stopping a subtree is walking the head-line pids and killing each.
+      so stopping a subtree is walking the pid files and signalling each. Pausing is the same walk
+      with an interrupt instead, and the run writes a paused note on its way out.
     </p>
 
     <p>
@@ -128,35 +129,40 @@ return definition.run(reached(ctx));</code></pre>
     <h2>The run file</h2>
 
     <p>
-      Each run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>, holding two files.
-      <code>run.jsonl</code> is written by the run: a head line with the run's id, pid,
+      Each run owns <code>~/.local/state/penguin/runs/&lt;id&gt;/</code>. <code>pid</code> names
+      the process behind the run's latest segment.
+      <code>run.jsonl</code> is written by the run: a head line with the run's id,
       workflow, params, cwd, git root, and parent; a <code>pending</code> line when a call starts
       and a line with its <code>outcome</code> and <code>elapsedMs</code> when it settles, the two
       sharing an id; a note per spawned child; a <code>{"dir": ...}</code> note when the run moves
       its work into a worktree; a <code>{"usage": ...}</code> note per agent attempt with the
       tokens and dollars it spent; and the final result, error, or stop. Values are recorded
       whole, with a zod shape written as its JSON Schema so a frontend can render the control an
-      ask needs. A call that returns a live object (an open stream, a turn) is marked
-      <code>handle: true</code> instead, since an object like that cannot be written down. One
-      frontend note is allowed in: a <code>{"name": ...}</code> line renames the run, the newest
-      winning. Every writer appends whole single lines, which is what keeps two writers safe.
+      ask needs. A call that returns a handle (a turn: a stream and a promise) is marked
+      <code>handle: true</code>, and the value its promise settles with is written when it does.
+      Two frontend notes are allowed in: a <code>{"name": ...}</code> line renames the run, the
+      newest winning, and a <code>{"stopped": true}</code> line ends a parked run. Every writer
+      appends whole single lines, which is what keeps two writers safe.
     </p>
 
     <p>
       <code>inbox.jsonl</code> is the run's one way in, appended by frontends:
       <code>{"answer": ...}</code> settles the oldest pending ask, <code>{"message": "..."}</code>
-      reaches every listener. Everything else about a run is derived by reading:
-      running is a live pid, blocked is a pending ask with no outcome, done, failed, and stopped
-      are the closing note, and crashed is a dead pid with no closing note. No state lives anywhere
-      else, which is why any frontend can quit at any time and nothing changes.
+      reaches every listener. Everything else about a run is derived by reading its latest
+      segment, the lines after its last head: running is a live pid, blocked is a pending ask
+      with no outcome, done, failed, stopped, and paused are the closing note, and a dead pid
+      with no closing note is paused too, interrupted. No state lives anywhere else, which is
+      why any frontend can quit at any time and nothing changes.
     </p>
 
     <p>
-      The run file is also the resume journal. <code>run(file, params, { resume })</code> takes a
-      prior run file: each call that matches the next recorded one hands back the recorded
-      outcome without calling out, and the run goes live at the first call the file does not
-      hold, a mismatch, a throw, or a handle. From there every call runs for real.
-      <code>latestRun()</code> names the newest file.
+      A paused run resumes in its own folder: <code>run(file, params, { id, resume: true })</code>
+      appends a new head and replays the latest segment. What the person answered, what agents
+      returned, and what finished children came back with are handed back without calling out,
+      each at the position it was recorded; every other call runs for real, so the world is read
+      again. The first replayable call that does not match ends the replay. A child a paused
+      parent had spawned is resumed in place, not started again, and a child whose process is
+      still going is waited on.
     </p>
 
     <h2>Catalogs</h2>

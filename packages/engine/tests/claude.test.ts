@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { CommandResult, Host, Process, SpawnOptions } from "../src/core/adapter.ts";
+import { RunPaused } from "../src/core/errors.ts";
 import definition from "../examples/adapters/claude.ts";
 
 /** One spawned claude process: its argv, what the adapter wrote to it, and how it ended. */
@@ -29,9 +30,8 @@ function fakeHost(
     cwd: "/",
     home: "/tmp",
     state: "/tmp",
-    run: { id: "test", dir: "/tmp" },
-    // Tests never wait out a real limit.
-    config: (key) => (key === "limit-wait-seconds" ? "0" : undefined),
+    run: { id: "test", dir: fs.mkdtempSync(path.join(os.tmpdir(), "penguin-claude-")) },
+    config: () => undefined,
     secret: async () => undefined,
     note: (entry) => {
       notes.push(entry);
@@ -361,44 +361,49 @@ test("an unopened session is refused with the fix in the message", async () => {
   await expect(agent.stop("nope")).rejects.toThrow(/no open session/);
 });
 
-test("a usage limit waits and reruns the turn instead of spending a retry", async () => {
-  const { host, calls, notes } = fakeHost((call, _prompt, sent) => {
-    if (sent < 3) {
-      limit(call, "rate_limit", RESETS);
-      return;
-    }
-    emit(call, { type: "result", structured_output: { n: 7 } });
+/** A rejection settles as the error, so a test can read what the turn threw. */
+function thrown(value: Promise<unknown>): Promise<unknown> {
+  return value.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+}
+
+test("a usage limit pauses the run, naming when the window resets", async () => {
+  const { host, calls, notes } = fakeHost((call) => {
+    emit(call, { type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 1788393000 } });
+    limit(call, "rate_limit", RESETS);
   });
   const agent = definition.build(host);
   const session = await agent.open();
   const turn = agent.turn(session, "go", { result: z.object({ n: z.number() }) });
-  expect(await turn.value).toEqual({ n: 7 });
-  expect(calls).toHaveLength(1);
-  expect(calls[0]?.written).toHaveLength(3);
-  // The limit is not the agent's mistake, so the prompt is sent again untouched.
-  expect(prompt(calls[0], 2)).toBe("go");
-  expect(notes).toEqual([
-    { limit: { role: "agent", reason: RESETS } },
-    { limit: { role: "agent", resolved: true } },
-  ]);
+  const failure = await thrown(turn.value);
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).message).toBe(RESETS);
+  expect((failure as RunPaused).by).toBe("limit");
+  expect((failure as RunPaused).until).toBe(new Date(1788393000 * 1000).toISOString());
+  expect(calls[0]?.written).toHaveLength(1);
+  expect(notes).toEqual([]);
+});
+
+test("a limit the CLI gave no reset time for still pauses, with nothing to resume at", async () => {
+  const { host } = fakeHost((call) => limit(call, "rate_limit", RESETS));
+  const agent = definition.build(host);
+  const session = await agent.open();
+  const failure = await thrown(agent.turn(session, "go").value);
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).until).toBeUndefined();
 });
 
 test("the limit itself never reaches the story", async () => {
-  const { host } = fakeHost((call, _prompt, sent) => {
-    if (sent === 1) {
-      limit(call, "rate_limit", RESETS);
-      return;
-    }
-    emit(call, { type: "assistant", message: { content: [{ type: "text", text: "back" }] } });
-    emit(call, { type: "result" });
-  });
+  const { host } = fakeHost((call) => limit(call, "rate_limit", RESETS));
   const agent = definition.build(host);
   const session = await agent.open();
   const turn = agent.turn(session, "go");
   const chunks = [];
   for await (const chunk of turn.output) chunks.push(chunk);
-  await turn.value;
-  expect(chunks).toEqual([{ kind: "text", text: "back" }]);
+  expect(await thrown(turn.value)).toBeInstanceOf(RunPaused);
+  expect(chunks).toEqual([]);
 });
 
 test("a limit the CLI recovered from does not pause the turn", async () => {
@@ -428,24 +433,6 @@ test("an error that no wait can clear still fails after two tries", async () => 
   await expect(turn.value).rejects.toThrow("You're out of usage credits.");
   expect(calls[0]?.written).toHaveLength(2);
   expect(notes).toEqual([]);
-});
-
-test("stop ends a turn that is waiting out a limit", async () => {
-  const { host, notes } = fakeHost((call) => {
-    limit(call, "rate_limit", RESETS);
-  });
-  // Long enough that only the stop can end the wait.
-  host.config = (key) => (key === "limit-wait-seconds" ? "60" : undefined);
-  const agent = definition.build(host);
-  const session = await agent.open();
-  const turn = agent.turn(session, "go");
-  await Bun.sleep(20);
-  await agent.stop(session);
-  await expect(turn.value).rejects.toThrow("the turn was stopped");
-  expect(notes).toEqual([
-    { limit: { role: "agent", reason: RESETS } },
-    { limit: { role: "agent", resolved: true } },
-  ]);
 });
 
 test("an error result without a result field says what claude reported", async () => {

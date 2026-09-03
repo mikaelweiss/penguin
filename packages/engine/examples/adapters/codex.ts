@@ -257,14 +257,12 @@ export default adapter({
   description:
     "runs prompts on the codex CLI. A session is one conversation: the first turn starts a codex thread, later turns resume it.",
   build: (host) => {
-    const threads = new Map<string, string>();
-
     async function runOnce(
       invocation: Invocation<OpenOptions>,
       emit: (chunk: Chunk) => void,
     ): Promise<Attempt> {
-      const { session, options, prompt, schema, signal } = invocation;
-      const thread = threads.get(session);
+      const { options, prompt, schema, signal } = invocation;
+      let thread = invocation.thread;
       const argv = ["codex", "exec"];
       if (thread !== undefined) argv.push("resume", thread);
       argv.push("--json", "--skip-git-repo-check");
@@ -295,7 +293,10 @@ export default adapter({
           const parsed = readJson(line);
           if (!isObject(parsed)) return;
           const event = parsed as StreamLine;
-          if (said(event.thread_id)) threads.set(session, event.thread_id);
+          if (said(event.thread_id) && event.thread_id !== thread) {
+            thread = event.thread_id;
+            invocation.keep(thread);
+          }
           if (event.type === "turn.completed" && event.usage !== undefined) {
             usage = priced(usageOf(event.usage, model), host.config);
           }

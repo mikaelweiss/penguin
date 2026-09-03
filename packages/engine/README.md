@@ -11,3 +11,5 @@ The model, what a workflow and an adapter are and what the engine does, is in [s
 ```sh
 bun examples/run.ts examples/workflows/commit.ts '{"dir":"."}'
 ```
+
+Ctrl-C pauses the run tree where it stands. `bun examples/run.ts --resume <run id>` takes it up again.

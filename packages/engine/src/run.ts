@@ -7,7 +7,14 @@ import { installedIn, pick } from "./catalog/adapters.ts";
 import { builtinCatalog, checkoutOf, roots, type Catalog } from "./catalog/catalogs.ts";
 import { load } from "./catalog/loader.ts";
 import { skillLookup } from "./catalog/skills.ts";
-import { Fault, messageOf, PenguinError, RunCrashed, RunStopped } from "./core/errors.ts";
+import {
+  Fault,
+  messageOf,
+  PenguinError,
+  RunCrashed,
+  RunPaused,
+  RunStopped,
+} from "./core/errors.ts";
 import { createRescue, worldOf } from "./core/rescue.ts";
 import type { Adapter, Host } from "./core/adapter.ts";
 import { settledStatus, type View } from "./core/view.ts";
@@ -15,10 +22,20 @@ import { RUN, type RunHooks } from "./core/workflow.ts";
 import { z } from "zod";
 import { createHost } from "./host.ts";
 import { projectRoot, runDir } from "./paths.ts";
-import { createTrace, openJournal, runId, type Trace } from "./trace.ts";
+import {
+  closingOf,
+  createTrace,
+  livePid,
+  openJournal,
+  runHead,
+  runId,
+  safe,
+  type Entry,
+  type Trace,
+} from "./trace.ts";
 
 export { createHost } from "./host.ts";
-export { latestRun, runId } from "./trace.ts";
+export { runHead, runId } from "./trace.ts";
 
 export type RunOptions = {
   /** The run's invoking folder. Defaults to the process's. */
@@ -29,8 +46,11 @@ export type RunOptions = {
   id?: string;
   /** The parent run's id. The engine sets it when it spawns a sub-run. */
   parent?: string;
-  /** A prior run's file. Recorded calls replay from it; the run goes live at the first call it does not hold. */
-  resume?: string;
+  /**
+   * Continue the run `id` names in its own folder. What the person answered and what
+   * the agents returned replay from the run file; the world is read again.
+   */
+  resume?: boolean;
 };
 
 /** Loads one workflow file, validates its params, wires the installed adapters onto ctx, and runs it. */
@@ -42,13 +62,24 @@ export async function run(
   const { cwd, list } = where(file, options?.cwd ?? process.cwd(), options?.catalogs);
   const definition = await load(file, list);
   const parsed: unknown = definition.params.parse(params);
+  if (options?.resume === true && options.id === undefined) {
+    throw new PenguinError("resume needs the id of the run to continue");
+  }
   const id = options?.id ?? runId();
-  const journal =
-    options?.resume === undefined ? undefined : openJournal(options.resume, file, parsed);
+  const journal = options?.resume === true ? openJournal(id, file, parsed) : undefined;
   const trace = createTrace(
-    { id, workflow: file, params: parsed, cwd, root: projectRoot(cwd), parent: options?.parent },
+    {
+      id,
+      workflow: file,
+      params: parsed,
+      cwd,
+      root: projectRoot(cwd),
+      parent: options?.parent,
+      catalogs: options?.catalogs,
+    },
     journal,
   );
+  let children: Children | undefined;
   // Wiring the adapters is inside the try: a catalog that will not load is a failure of this run,
   // and a caller reads what stopped it from the run file like any other.
   try {
@@ -74,7 +105,8 @@ export async function run(
       else if (role === "agent") ctx[role] = traced;
       else ctx[role] = rescue(role, traced);
     }
-    ctx[RUN] = hooks(trace, id, cwd, list);
+    children = childrenOf(trace, id, cwd, list);
+    ctx[RUN] = children.hooks;
     // A child run works where its parent already checked, so only a root run pays for preflight.
     if (options?.parent === undefined) await preflight(installed, host, ctx);
     // The loader duck-typed the definition, so its schema's static type is gone here.
@@ -82,9 +114,22 @@ export async function run(
     trace.note({ outcome: result ?? null });
     return result;
   } catch (error) {
-    trace.note({ threw: messageOf(error) });
+    if (error instanceof RunPaused) {
+      children?.pause();
+      trace.note({ paused: pausedNote(error) });
+    } else {
+      trace.note({ threw: messageOf(error) });
+    }
     throw error;
   }
+}
+
+function pausedNote(error: RunPaused): Entry {
+  return {
+    by: error.by,
+    reason: error.message,
+    ...(error.until === undefined ? {} : { until: error.until }),
+  };
 }
 
 /**
@@ -155,81 +200,162 @@ async function preflight(
 
 type Job = { workflow: string; params: unknown; cwd?: string };
 
-function hooks(trace: Trace, parent: string, cwd: string, catalogs: Catalog[]): RunHooks {
-  const perform = async (job: Job): Promise<unknown> => {
-    const child = runId();
-    trace.note({ child, workflow: job.workflow });
-    return spawnRun({
-      file: job.workflow,
-      params: job.params,
-      cwd: job.cwd ?? cwd,
-      id: child,
-      parent,
-      catalogs,
-    });
+/** Every child run this process waits on, spawned or attached. Each leads its own group, so a signal names the group. */
+const running = new Set<number>();
+
+/** Passes a stop or a pause down to every running child, so this process never leaves work behind. */
+export function signalChildren(signal: "SIGINT" | "SIGTERM"): void {
+  for (const pid of running) {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      // already gone
+    }
+  }
+}
+
+type Children = {
+  hooks: RunHooks;
+  pause(): void;
+};
+
+function childrenOf(trace: Trace, parent: string, cwd: string, catalogs: Catalog[]): Children {
+  let spawned = 0;
+  const perform = async (job: Job, ordinal: number): Promise<unknown> => {
+    const at = job.cwd ?? cwd;
+    const child = childOf(parent, ordinal, { file: job.workflow, params: job.params, cwd: at });
+    trace.note({ child: child.id, workflow: job.workflow });
+    if (child.attach) return attached(job.workflow, child.id);
+    const config: ChildJob = child.resume
+      ? { id: child.id, resume: true }
+      : { id: child.id, file: job.workflow, params: job.params, cwd: at, parent, catalogs };
+    return spawnRun(job.workflow, config, at);
   };
   const wrapped = trace.wrapCall("run", perform);
-  // A child without a folder of its own records the job it always did, so prior runs still replay.
   return {
-    spawn: (file, params, at) =>
-      wrapped(at === undefined
-        ? { workflow: file, params }
-        : { workflow: file, params, cwd: path.resolve(cwd, at) }),
+    hooks: {
+      spawn: (file, params, at) =>
+        wrapped(
+          at === undefined
+            ? { workflow: file, params }
+            : { workflow: file, params, cwd: path.resolve(cwd, at) },
+          ++spawned,
+        ),
+    },
+    pause: () => signalChildren("SIGINT"),
   };
 }
 
-type ChildConfig = {
-  file: string;
-  params: unknown;
-  cwd: string;
-  id: string;
-  parent: string;
-  catalogs: Catalog[];
-};
+type Placed = { id: string; resume: boolean; attach: boolean };
+
+/**
+ * The folder the nth child of a run works in. A run resumed after a pause finds the child it
+ * had spawned there, still running or not, and continues it rather than starting another.
+ */
+function childOf(
+  parent: string,
+  ordinal: number,
+  job: { file: string; params: unknown; cwd: string },
+): Placed {
+  const base = `${parent}-c${ordinal}`;
+  for (let extra = 1; ; extra++) {
+    const id = extra === 1 ? base : `${base}-${extra}`;
+    const head = runHead(id);
+    if (head === undefined) {
+      fs.mkdirSync(runDir(id), { recursive: true });
+      return { id, resume: false, attach: false };
+    }
+    const same =
+      canonical(String(head["workflow"])) === canonical(job.file) &&
+      JSON.stringify(head["params"]) === JSON.stringify(safe(job.params)) &&
+      canonical(String(head["cwd"])) === canonical(job.cwd);
+    if (!same) continue;
+    const going = livePid(id) !== undefined && closingOf(id) === undefined;
+    return { id, resume: !going, attach: going };
+  }
+}
+
+/** One name for a path, whichever way a process wrote it: through a symlink or not. */
+function canonical(file: string): string {
+  try {
+    return fs.realpathSync.native(file);
+  } catch {
+    return file;
+  }
+}
+
+type ChildJob =
+  | { id: string; resume: true }
+  | {
+      id: string;
+      file: string;
+      params: unknown;
+      cwd: string;
+      parent: string;
+      catalogs: Catalog[];
+    };
 
 /** Runs a child workflow as its own process and settles with the outcome its run file records. */
-function spawnRun(config: ChildConfig): Promise<unknown> {
+function spawnRun(workflow: string, job: ChildJob, cwd: string): Promise<unknown> {
   const entry = fileURLToPath(new URL("./child.ts", import.meta.url));
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entry, JSON.stringify(config)], {
-      cwd: config.cwd,
+    const child = spawn(process.execPath, [entry, JSON.stringify(job)], {
+      cwd,
       detached: true,
       stdio: ["ignore", "ignore", "pipe"],
     });
+    if (child.pid !== undefined) running.add(child.pid);
     let stderr = "";
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (child.pid !== undefined) running.delete(child.pid);
+      reject(error);
+    });
     child.on("close", (code, signal) => {
-      const name = path.basename(config.file);
-      const last = finalNote(config.id);
-      if (last === undefined) {
-        const said = stderr.trim() === "" ? "" : `: ${stderr.trim()}`;
-        reject(new RunCrashed(`${name} died with ${signal ?? code}${said}`));
-      } else if (last["stopped"] === true) {
-        reject(new RunStopped(`${name} was stopped`));
-      } else if ("outcome" in last) {
-        resolve(last["outcome"]);
-      } else {
-        reject(new PenguinError(String(last["threw"])));
+      if (child.pid !== undefined) running.delete(child.pid);
+      const said = stderr.trim() === "" ? "" : `: ${stderr.trim()}`;
+      try {
+        resolve(ended(workflow, closingOf(job.id), `died with ${signal ?? code}${said}`));
+      } catch (error) {
+        reject(error);
       }
     });
   });
 }
 
-/** The child run file's closing entry: outcome, threw, or stopped. */
-function finalNote(id: string): Record<string, unknown> | undefined {
-  const file = path.join(runDir(id), "run.jsonl");
-  if (!fs.existsSync(file)) return undefined;
-  const entries = fs
-    .readFileSync(file, "utf8")
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-  return entries
-    .filter((entry) => entry["call"] === undefined)
-    .findLast(
-      (entry) => "outcome" in entry || "threw" in entry || entry["stopped"] === true,
-    );
+/** Waits on a child whose process is still going, and settles with what it records. */
+async function attached(workflow: string, id: string): Promise<unknown> {
+  const pid = livePid(id);
+  if (pid !== undefined) running.add(pid);
+  try {
+    for (;;) {
+      const last = closingOf(id);
+      if (last !== undefined || livePid(id) === undefined) {
+        return ended(workflow, last, "died without a word");
+      }
+      await new Promise((wake) => setTimeout(wake, 250));
+    }
+  } finally {
+    if (pid !== undefined) running.delete(pid);
+  }
+}
+
+/** A child run's outcome, or the error its closing note stands for. */
+function ended(workflow: string, last: Entry | undefined, died: string): unknown {
+  const name = path.basename(workflow);
+  if (last === undefined) throw new RunCrashed(`${name} ${died}`);
+  if (last["stopped"] === true) throw new RunStopped(`${name} was stopped`);
+  const paused = last["paused"];
+  if (paused !== null && typeof paused === "object") {
+    const note = paused as Record<string, unknown>;
+    const reason = typeof note["reason"] === "string" ? note["reason"] : `${name} was paused`;
+    throw new RunPaused(reason, {
+      by: note["by"] === "limit" ? "limit" : "user",
+      until: typeof note["until"] === "string" ? note["until"] : undefined,
+    });
+  }
+  if ("outcome" in last) return last["outcome"];
+  throw new PenguinError(String(last["threw"]));
 }

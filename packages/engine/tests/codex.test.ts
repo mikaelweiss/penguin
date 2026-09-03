@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { CommandResult, ExecOptions, Host } from "../src/core/adapter.ts";
 import definition from "../examples/adapters/codex.ts";
 
@@ -14,7 +17,7 @@ function fakeHost(): { host: Host; calls: Call[] } {
       cwd: "/",
       home: "/tmp",
       state: "/tmp",
-      run: { id: "test", dir: "/tmp" },
+      run: { id: "test", dir: fs.mkdtempSync(path.join(os.tmpdir(), "penguin-codex-")) },
       config: () => undefined,
       secret: async () => undefined,
       note: () => {},
@@ -78,4 +81,23 @@ test("a session that asks for no compaction passes no limit", async () => {
   const session = await agent.open({});
   await agent.turn(session, "go").value;
   expect(calls[0]?.argv.join(" ")).not.toContain("model_auto_compact_token_limit");
+});
+
+test("a later turn resumes the thread the first one started, in this process or the next", async () => {
+  const { host, calls } = fakeHost();
+  host.exec = async (argv, options) => {
+    calls.push({ argv, options });
+    options?.onOutput?.(`${JSON.stringify({ type: "thread.started", thread_id: "t-1" })}\n`, "stdout");
+    return OK;
+  };
+  const agent = definition.build(host);
+  const session = await agent.open();
+  await agent.turn(session, "go").value;
+  await agent.turn(session, "again").value;
+  expect(calls[0]?.argv.slice(0, 2)).toEqual(["codex", "exec"]);
+  expect(calls[1]?.argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "t-1"]);
+
+  const later = definition.build(host);
+  await later.turn(session, "once more").value;
+  expect(calls[2]?.argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "t-1"]);
 });

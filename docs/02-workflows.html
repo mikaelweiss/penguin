@@ -264,10 +264,12 @@ if (files.length === 0) {
       The child builds its own adapters and gets its own params. Because it is a process, it can be
       stopped without touching its parent, and it can die without taking the parent down. The
       parent sees each of those as a typed rejection: <code>RunStopped</code> when a person or a
-      parent stopped it, <code>RunCrashed</code> when the process died without recording an
-      outcome, and a plain error carrying the child's message when the child threw. A parent that
-      wants to survive wraps the call in try/catch; one that does not care rejects too, which is the
-      right default. <code>call</code> needs the whole <code>ctx</code>, so a workflow that
+      parent stopped it, <code>RunPaused</code> when it parked on a usage limit or a person's
+      pause, <code>RunCrashed</code> when the process died without recording an outcome, and a
+      plain error carrying the child's message when the child threw. A parent that wants to
+      survive wraps the call in try/catch; one that does not care rejects too, which is the right
+      default. A pause is never caught: it parks the parent too, and the whole tree comes back
+      with one resume. <code>call</code> needs the whole <code>ctx</code>, so a workflow that
       composes takes <code>ctx</code> as one argument and destructures inside:
     </p>
 
@@ -362,8 +364,8 @@ import openPr from "penguin:open-pr";    // whichever catalog the run resolves</
       A journal has to be right about the outside world, and it never stays right. The commit that
       landed after the process died, the branch someone else pushed, the file a person edited by
       hand: all of it goes stale in a journal and none of it bothers a workflow that asks first.
-      Resume respects this: replay only hands back what the run already saw and acted on, and
-      everything after the first new call runs live, asking the world again.
+      Resume respects this: replay hands back only what the person answered and what agents
+      returned, and every call on the world runs live, asking it again.
     </p>
 
     <h2>Writing prompts</h2>

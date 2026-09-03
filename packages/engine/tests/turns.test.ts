@@ -1,10 +1,15 @@
 import { expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { Host } from "../src/core/adapter.ts";
+import { RunPaused } from "../src/core/errors.ts";
 import type { View } from "../src/core/view.ts";
 import {
   compactTokens,
   narrated,
   sessions,
+  type Invocation,
   type Turn,
   type Usage,
 } from "../examples/helpers/turns.ts";
@@ -61,12 +66,12 @@ test("a turn that finishes never asks", async () => {
   expect(asked).toHaveLength(0);
 });
 
-function hostWith(notes: Record<string, unknown>[]): Host {
+function hostWith(notes: Record<string, unknown>[], dir?: string): Host {
   return {
     cwd: "/",
     home: "/tmp",
     state: "/tmp",
-    run: { id: "test", dir: "/tmp" },
+    run: { id: "test", dir: dir ?? fs.mkdtempSync(path.join(os.tmpdir(), "penguin-turns-")) },
     config: () => undefined,
     secret: async () => undefined,
     note: (entry) => {
@@ -132,4 +137,50 @@ test("an autocompact option reads as a token count, and rejects what is not one"
   expect(compactTokens("0")).toBeUndefined();
   expect(compactTokens("")).toBeUndefined();
   expect(compactTokens(undefined)).toBeUndefined();
+});
+
+test("a usage limit pauses the run, carrying when the window resets", async () => {
+  const notes: Record<string, unknown>[] = [];
+  let tries = 0;
+  const agent = sessions(
+    hostWith(notes),
+    async () => {
+      tries += 1;
+      return { ok: false, error: "resets 3pm", limited: true, until: "2026-09-02T15:00:00.000Z" };
+    },
+    "fake",
+  );
+  const session = await agent.open();
+  const turn = agent.turn(session, "go");
+  const failure = await turn.value.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(RunPaused);
+  expect((failure as RunPaused).by).toBe("limit");
+  expect((failure as RunPaused).until).toBe("2026-09-02T15:00:00.000Z");
+  expect(tries).toBe(1);
+});
+
+test("the sessions a run opened outlive its process, so a resume carries each one on", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-turns-"));
+  const seen: { first: boolean; thread: string | undefined }[] = [];
+  const runOnce = async (invocation: Invocation<{ model?: string }>) => {
+    seen.push({ first: invocation.first, thread: invocation.thread });
+    if (invocation.thread === undefined) invocation.keep("thread-9");
+    return { ok: true as const, value: null };
+  };
+
+  const before = sessions(hostWith([], dir), runOnce, "fake");
+  const session = await before.open({ model: "small" });
+  await before.turn(session, "go").value;
+
+  const after = sessions(hostWith([], dir), runOnce, "fake");
+  await after.turn(session, "again").value;
+
+  expect(seen).toEqual([
+    { first: true, thread: undefined },
+    { first: false, thread: "thread-9" },
+  ]);
+  expect(() => after.turn("nobody", "go")).toThrow(/no open session/);
 });

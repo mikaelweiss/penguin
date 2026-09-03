@@ -1,8 +1,10 @@
+import { isClosing, isHead, lastSegment } from "@mikaelweiss/penguin-engine/segments";
+
 import { plain } from "@/lib/ansi";
 import type { Attachment } from "@/lib/attachments";
 import type { Hidden } from "@/lib/directories";
 
-export type RunStatus = "running" | "done" | "failed" | "stopped" | "crashed";
+export type RunStatus = "running" | "done" | "failed" | "stopped" | "paused";
 
 export type OutputLine = {
   /** The call that wrote the line. A question and its answer share one, so both key on the kind too. */
@@ -49,7 +51,15 @@ export type TurnMark = {
   at: string;
 };
 
-export type TranscriptItem = { type: "line"; line: OutputLine } | ActionItem | TurnMark;
+/** A pause or a resume in an earlier segment of the run, where the story broke off and took up again. */
+export type Mark = {
+  type: "mark";
+  id: string;
+  text: string;
+  at: string;
+};
+
+export type TranscriptItem = { type: "line"; line: OutputLine } | ActionItem | TurnMark | Mark;
 
 export type Ask = {
   prompt: string;
@@ -67,10 +77,13 @@ export type Auth = {
   at: string;
 };
 
-/** The usage limit a run's agent is waiting out, from its unresolved limit note. */
+/** Why a run is parked: a person paused it, a usage limit did, or its process ended without a word. */
 export type Paused = {
-  /** What the agent said it hit, in its own words. It usually names the reset time. */
-  reason: string;
+  by: "user" | "limit" | "interrupted";
+  /** What the agent said it hit, in its own words, when a limit did it. */
+  reason?: string;
+  /** When the limit clears, when the agent named it. */
+  until?: string;
   at: string;
 };
 
@@ -121,7 +134,7 @@ export type Run = {
   at: string;
   ask?: Ask;
   auth?: Auth;
-  /** The agent hit a usage limit and the run is waiting for it to reset. */
+  /** Set exactly when the status is paused. */
   paused?: Paused;
   /** Why the run ended badly, when its own file says. */
   problem?: string;
@@ -155,18 +168,38 @@ export type RunNode = {
   ancestors: Run[];
 };
 
+/** The run, or a run inside it, has work left: it is running or parked, not ended. */
+export function unfinished(run: Run): boolean {
+  return run.status === "running" || run.status === "paused" || run.children.some(unfinished);
+}
+
+export function isIdle(run: Run): boolean {
+  return run.status === "running" && !needsYou(run) && run.state?.idle === true;
+}
+
+/** The run, or a run inside it, has a process to signal. */
 export function isLive(run: Run): boolean {
   return run.status === "running" || run.children.some(isLive);
 }
 
-export function isIdle(run: Run): boolean {
-  if (run.status !== "running" || needsYou(run)) return false;
-  return run.paused !== undefined || run.state?.idle === true;
+export function resumable(run: Run): boolean {
+  return run.status === "paused" || run.status === "failed" || run.status === "stopped";
 }
 
-/** A run and every run inside it, outermost first, the order stopping sends them in. */
+/** A run and every run inside it, outermost first, the order signals reach them in. */
+export function withDescendants(run: Run): Run[] {
+  return [run, ...run.children.flatMap(withDescendants)];
+}
+
 export function subtree(run: Run): string[] {
-  return [run.id, ...run.children.flatMap(subtree)];
+  return withDescendants(run).map((each) => each.id);
+}
+
+/** What to tell a person about a parked run. A pause they asked for needs no explaining. */
+export function pausedReason(paused: Paused): string | undefined {
+  if (paused.by === "limit") return paused.reason ?? "the agent hit its usage limit";
+  if (paused.by === "interrupted") return "the process ended before the run finished";
+  return undefined;
 }
 
 function addCost(total: Cost | undefined, more: Cost | undefined): Cost | undefined {
@@ -281,7 +314,7 @@ export function visibleRuns(project: Project, options: VisibleOptions): RunNode[
 
   const walk = (runs: Run[], depth: number, ancestors: Run[]) => {
     for (const run of runs) {
-      if (!options.showFinished && !isLive(run)) continue;
+      if (!options.showFinished && !unfinished(run)) continue;
       rows.push({ run, project, depth, ancestors });
       if (options.collapsed.has(run.id)) continue;
       walk(run.children, depth + 1, [...ancestors, run]);
@@ -384,18 +417,48 @@ function workflowName(file: string): string {
   return baseName(file).replace(/\.[^.]+$/, "");
 }
 
-type Closing = {
-  status: RunStatus;
-  /** What the run threw. A crashed run left nothing here, only a start log. */
-  problem?: string;
+const CLOSING_TEXT: Partial<Record<RunStatus, string>> = {
+  done: "run finished",
+  failed: "run failed",
+  stopped: "run stopped",
+  paused: "run paused",
 };
 
-function closingOf(notes: Entry[], alive: boolean): Closing {
-  const closing = notes.findLast(
-    (note) => "outcome" in note || "threw" in note || note["stopped"] === true,
-  );
-  if (closing === undefined) return { status: alive ? "running" : "crashed" };
+/** The words a transcript ends a segment with, none while it runs. */
+export function closingText(status: RunStatus): string | undefined {
+  return CLOSING_TEXT[status];
+}
+
+type Closing = {
+  status: RunStatus;
+  /** What the run threw. */
+  problem?: string;
+  paused?: Paused;
+};
+
+function pausedOf(note: Entry): Paused {
+  const held = note["paused"];
+  const said = held !== null && typeof held === "object" ? (held as Record<string, unknown>) : {};
+  const reason = shown(said["reason"]);
+  const until = text(said["until"]);
+  return {
+    by: said["by"] === "limit" ? "limit" : "user",
+    ...(reason === undefined ? {} : { reason }),
+    ...(until === undefined ? {} : { until }),
+    at: text(note["at"]) ?? "",
+  };
+}
+
+/** How the run's latest segment ended. A dead process that wrote no ending is a pause too. */
+function closingOf(segment: Entry[], alive: boolean): Closing {
+  const closing = segment.findLast(isClosing);
+  if (closing === undefined) {
+    if (alive) return { status: "running" };
+    const last = segment.at(-1);
+    return { status: "paused", paused: { by: "interrupted", at: text(last?.["at"]) ?? "" } };
+  }
   if (closing["stopped"] === true) return { status: "stopped" };
+  if ("paused" in closing) return { status: "paused", paused: pausedOf(closing) };
   if ("threw" in closing) return { status: "failed", problem: display(closing["threw"]) };
   return { status: "done" };
 }
@@ -431,16 +494,6 @@ function authOf(notes: Entry[]): Auth | undefined {
   const role = text(asked["role"]);
   if (asked["resolved"] === true || role === undefined) return undefined;
   return { role, reason: text(asked["reason"]) ?? "", at: text(last?.["at"]) ?? "" };
-}
-
-/** The usage limit the run is waiting out, when the last limit note is unresolved. */
-function pausedOf(notes: Entry[]): Paused | undefined {
-  const last = notes.findLast((note) => note["limit"] !== undefined);
-  const limit = last?.["limit"];
-  if (limit === null || typeof limit !== "object") return undefined;
-  const held = limit as Record<string, unknown>;
-  if (held["resolved"] === true) return undefined;
-  return { reason: text(held["reason"]) ?? "", at: text(last?.["at"]) ?? "" };
 }
 
 function number(value: unknown): number {
@@ -607,19 +660,42 @@ function turnOf(entry: Entry, agents: Map<string, number>, id: string): TurnMark
   };
 }
 
+/** The turn's opening entry, whichever way the engine wrote it, never its settlement. */
+function opensTurn(entry: Entry): boolean {
+  return (
+    entry["call"] === "agent.turn" &&
+    entry["handle"] === true &&
+    !("outcome" in entry) &&
+    !("threw" in entry)
+  );
+}
+
 function outputOf(entries: Entry[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const actions = new Map<string, ActionItem>();
   const agents = new Map<string, number>();
+  const latest = entries.findLastIndex(isHead);
   let turns = 0;
-  for (const entry of entries) {
+  let marks = 0;
+  for (const [index, entry] of entries.entries()) {
+    // A resumed segment writes down what it replayed. The story already told it.
+    if (entry["replayed"] === true) continue;
     const args = argsOf(entry);
     const at = text(entry["at"]) ?? "";
     const id = text(entry["id"]) ?? at;
     const line = (kind: OutputLine["kind"], value: string): void => {
       items.push({ type: "line", line: { id, kind, text: value, at } });
     };
-    if (entry["call"] === "view.show" && entry["pending"] === true && args[1] === undefined) {
+    const mark = (value: string): void => {
+      items.push({ type: "mark", id: `m${++marks}`, text: value, at });
+    };
+    if (index < latest && isClosing(entry)) {
+      const ended = closingOf([entry], false);
+      const label = closingText(ended.status) ?? "run ended";
+      mark(ended.problem === undefined ? label : `${label}: ${ended.problem}`);
+    } else if (index > 0 && index <= latest && isHead(entry)) {
+      mark("resumed");
+    } else if (entry["call"] === "view.show" && entry["pending"] === true && args[1] === undefined) {
       line("show", display(args[0]));
     } else if (entry["call"] === "view.act" && entry["pending"] === true) {
       const action = actionOf(entry, actions);
@@ -628,9 +704,9 @@ function outputOf(entries: Entry[]): TranscriptItem[] {
       line("ask", display(args[0]));
     } else if (entry["call"] === "view.ask" && "outcome" in entry) {
       line("answer", display(entry["outcome"]));
-    } else if (entry["call"] === "agent.turn" && entry["handle"] === true) {
-      const mark = turnOf(entry, agents, `t${++turns}`);
-      if (mark !== undefined) items.push(mark);
+    } else if (opensTurn(entry)) {
+      const turn = turnOf(entry, agents, `t${++turns}`);
+      if (turn !== undefined) items.push(turn);
     }
   }
   return items;
@@ -684,7 +760,7 @@ type Placed = {
 };
 
 function place(file: RunFile): Placed | undefined {
-  const head = file.entries.find((entry) => "workflow" in entry && "params" in entry);
+  const head = file.entries.find(isHead);
   const workflow = text(head?.["workflow"]);
   const cwd = text(head?.["cwd"]);
   const root = text(head?.["root"]);
@@ -695,16 +771,18 @@ function place(file: RunFile): Placed | undefined {
   const notes = file.entries.filter((entry) => entry["call"] === undefined);
   const moved = notes.findLast((note) => text(note["dir"]) !== undefined);
   const renamed = notes.findLast((note) => text(note["name"]) !== undefined);
-  const closing = closingOf(notes, file.alive);
+  const segment = lastSegment(file.entries);
+  const latest = segment.filter((entry) => entry["call"] === undefined);
+  const closing = closingOf(segment, file.alive);
   const status = closing.status;
-  const heard = notes.findLast((note) => typeof note["listening"] === "boolean");
+  const heard = latest.findLast((note) => typeof note["listening"] === "boolean");
   // A run that is no longer running cannot take an answer or a message, whatever its notes say.
-  const waiting = status === "running" ? waitingAsk(file.entries) : undefined;
-  const ask = waiting === undefined ? undefined : askOf(file.entries, waiting);
-  const auth = status === "running" ? authOf(notes) : undefined;
-  const paused = status === "running" ? pausedOf(notes) : undefined;
+  const waiting = status === "running" ? waitingAsk(segment) : undefined;
+  const ask = waiting === undefined ? undefined : askOf(segment, waiting);
+  const auth = status === "running" ? authOf(latest) : undefined;
+  const paused = closing.paused;
   const listening = status === "running" && heard?.["listening"] === true;
-  const state = status === "running" ? stateOf(file.entries) : undefined;
+  const state = status === "running" ? stateOf(segment) : undefined;
   const cost = costOf(notes);
   const pr = prOf(file.entries);
   const ticket = ticketOf(file.entries);

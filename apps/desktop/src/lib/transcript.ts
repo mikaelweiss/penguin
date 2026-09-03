@@ -1,3 +1,4 @@
+import { closingText, pausedReason } from "@/lib/runs";
 import type {
   ActionItem,
   ActionKind,
@@ -13,14 +14,8 @@ export type TranscriptRow =
   | { kind: "line"; key: string; line: OutputLine }
   | { kind: "actions"; key: string; actions: ActionItem[]; summary: string; failures: number }
   | { kind: "turn"; key: string; label: string }
+  | { kind: "mark"; key: string; text: string }
   | { kind: "closing"; key: string; text: string };
-
-const CLOSING: Partial<Record<Run["status"], string>> = {
-  done: "run finished",
-  failed: "run failed",
-  stopped: "run stopped",
-  crashed: "run crashed",
-};
 
 const NOUNS: Record<ActionKind, [one: string, many: string]> = {
   run: ["command", "commands"],
@@ -109,6 +104,10 @@ export function toRows(run: Run, sent: OutputLine[]): TranscriptRow[] {
       rows.push({ kind: "turn", key: `turn:${item.id}`, label: labelTurn(item, agents.size) });
       continue;
     }
+    if (item.type === "mark") {
+      rows.push({ kind: "mark", key: `mark:${item.id}`, text: item.text });
+      continue;
+    }
     if (item.type === "action") {
       const tail = rows.at(-1);
       if (tail?.kind === "actions") {
@@ -134,10 +133,10 @@ export function toRows(run: Run, sent: OutputLine[]): TranscriptRow[] {
     row.failures = row.actions.filter((action) => action.status === "failed").length;
   }
 
-  const closing = CLOSING[run.status];
+  const closing = closingText(run.status);
   if (closing !== undefined) rows.push({ kind: "closing", key: "closing", text: closing });
 
-  const reason = run.problem;
+  const reason = run.problem ?? (run.paused === undefined ? undefined : pausedReason(run.paused));
   if (reason !== undefined) {
     rows.push({
       kind: "line",
@@ -195,6 +194,7 @@ function same(a: TranscriptRow, b: TranscriptRow): boolean {
     }
     case "turn":
       return a.label === (b as typeof a).label;
+    case "mark":
     case "closing":
       return a.text === (b as typeof a).text;
   }
