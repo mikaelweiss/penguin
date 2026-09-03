@@ -96,3 +96,32 @@ test("rewrites nothing when the answer has not changed", async () => {
   await writeEditorFiles([project]);
   expect(fs.statSync(file).mtimeMs).toBe(before);
 });
+
+test("leaves a folder that holds no definitions alone", async () => {
+  const empty = catalog("project");
+  await writeEditorFiles([empty]);
+  expect(fs.readdirSync(empty.dir)).toEqual([]);
+});
+
+test("drops what it wrote once a catalog's definitions are gone", async () => {
+  const project = catalog("project", { vcs: "git" });
+  await writeEditorFiles([project]);
+  fs.rmSync(path.join(project.dir, "adapters"), { recursive: true });
+  await writeEditorFiles([project]);
+  expect(fs.existsSync(path.join(project.dir, "tsconfig.json"))).toBe(false);
+  expect(fs.existsSync(path.join(project.dir, "penguin-env.d.ts"))).toBe(false);
+});
+
+test("never drops a tsconfig it did not write", async () => {
+  const project = catalog("project");
+  fs.writeFileSync(path.join(project.dir, "tsconfig.json"), "{}\n");
+  await writeEditorFiles([project]);
+  expect(fs.readFileSync(path.join(project.dir, "tsconfig.json"), "utf8")).toBe("{}\n");
+});
+
+test("counts a skills-only catalog as nothing to type", async () => {
+  const project = catalog("project");
+  fs.mkdirSync(path.join(project.dir, "skills", "review"), { recursive: true });
+  await writeEditorFiles([project]);
+  expect(fs.existsSync(path.join(project.dir, "tsconfig.json"))).toBe(false);
+});

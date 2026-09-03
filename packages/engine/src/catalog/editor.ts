@@ -16,19 +16,52 @@ const TSCONFIG = "tsconfig.json";
 const ENV = "penguin-env.d.ts";
 const IGNORE = ".gitignore";
 const WRITTEN = [TSCONFIG, ENV];
+const MARK = "// penguin writes this file";
 
 /** Catalogs inside the install are the package's own files; a person authors the rest. */
 const AUTHORED = new Set<CatalogScope>(["project", "home", "catalog"]);
+
+/** The folders the written tsconfig includes, so the gate and the config agree on what source is. */
+const SOURCES = ["adapters", "helpers", "workflows"];
 
 /** Refreshes the editor's half of every catalog a person authors, in place. */
 export async function writeEditorFiles(list: Catalog[]): Promise<void> {
   for (const [index, catalog] of list.entries()) {
     if (!AUTHORED.has(catalog.scope) || !fs.existsSync(catalog.dir)) continue;
+    if (!holdsSource(catalog.dir)) {
+      sweep(catalog.dir);
+      continue;
+    }
     // A catalog is typed against itself and what it shadows, never against a
     // caller's folder, so the same catalog reads the same from every project.
     put(path.join(catalog.dir, ENV), env(await installedIn(list.slice(index))));
     put(path.join(catalog.dir, TSCONFIG), tsconfig(list.slice(index)));
     ignore(path.join(catalog.dir, IGNORE));
+  }
+}
+
+/** An empty .penguin is a folder someone made, not a catalog, and it gets nothing to type. */
+function holdsSource(dir: string): boolean {
+  if (typescript(dir).some((name) => !WRITTEN.includes(name))) return true;
+  return SOURCES.some((name) => typescript(path.join(dir, name)).length > 0);
+}
+
+function typescript(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir).filter((name) => name.endsWith(".ts"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A stale answer still answers, so a catalog that loses its source loses the types written for it.
+ * Only penguin's own files go, which is what the header on each of them is for.
+ */
+function sweep(dir: string): void {
+  for (const name of WRITTEN) {
+    const file = path.join(dir, name);
+    if (fs.existsSync(file) && fs.readFileSync(file, "utf8").startsWith(MARK)) fs.rmSync(file);
   }
 }
 
@@ -55,7 +88,7 @@ function tsconfig(list: Catalog[]): string {
     },
     include: ["*.ts", "adapters/*.ts", "helpers/*.ts", "workflows/*.ts"],
   };
-  return `// penguin writes this file from the running install. Do not edit, do not commit.\n${JSON.stringify(body, undefined, 2)}\n`;
+  return `${header("running install")}\n${JSON.stringify(body, undefined, 2)}\n`;
 }
 
 /** Declaration merging is how ctx gets its type: one member per role the catalog resolves. */
@@ -70,7 +103,7 @@ function env(found: AdapterFound[]): string {
     imports.push(`import type adapter${imports.length} from "${picked.found.file}";`);
   }
   return [
-    "// penguin writes this file from the installed adapters. Do not edit, do not commit.",
+    header("installed adapters"),
     ...imports,
     "",
     'declare module "penguin" {',
@@ -80,6 +113,11 @@ function env(found: AdapterFound[]): string {
     "}",
     "",
   ].join("\n");
+}
+
+/** Marks a file as penguin's, to rewrite and to remove. */
+function header(source: string): string {
+  return `${MARK} from the ${source}. Do not edit, do not commit.`;
 }
 
 /** The engine package, wherever this copy of it runs from. */
