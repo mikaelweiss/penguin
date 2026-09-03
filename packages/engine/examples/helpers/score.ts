@@ -51,7 +51,7 @@
  *
  * The prompt for an implement case is the first implement turn, the brief as the plan
  * handed it over, because that is what a replay would run again. Its artifact is the
- * acceptance the person checked the tree against, or the reviewer's notes when no
+ * walkthrough the person checked the tree against, or the reviewer's notes when no
  * person judged it: the tree itself is not journaled, and root plus head recreate it.
  */
 

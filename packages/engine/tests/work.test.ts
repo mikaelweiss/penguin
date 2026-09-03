@@ -89,6 +89,7 @@ function harness(options: Options) {
         });
       }
       if (name === "plan.ts") return Promise.resolve({ plan: "the plan", acceptance: "it works" });
+      if (name === "walkthrough.ts") return Promise.resolve({ walkthrough: "Open: the widget" });
       if (name === "implement.ts") {
         return Promise.resolve({
           approved: options.approved ?? true,
@@ -114,9 +115,11 @@ test("triage and every plan run as children, and the run itself opens no session
     "plan.ts",
     "implement.ts",
     "commit.ts",
+    "walkthrough.ts",
     "plan.ts",
     "implement.ts",
     "commit.ts",
+    "walkthrough.ts",
   ]);
   expect(run.turns).toEqual([]);
   expect(run.sessions).toEqual([]);
@@ -179,6 +182,18 @@ test("the try gate asks once per task", async () => {
   expect(run.asked.filter((question) => question.includes("Try it."))).toHaveLength(2);
 });
 
+test("the try gate shows the walkthrough of this task's change, not its acceptance", async () => {
+  const run = harness({ tasks: ["build the model"] });
+
+  await run.run();
+
+  const walked = run.children.filter((child) => child.name === "walkthrough.ts");
+  expect(walked.map((child) => child.params)).toEqual([{ acceptance: "it works", base: "f00d" }]);
+  const gate = run.asked.find((question) => question.includes("Try it."));
+  expect(gate).toContain("Try it.\n\nOpen: the widget\n\ndone accepts it.");
+  expect(gate).not.toContain("it works");
+});
+
 test("a review that did not approve is acknowledged before the try gate", async () => {
   const run = harness({ tasks: ["build the model"], approved: false });
 
@@ -206,6 +221,7 @@ test("what the person asks for at the try gate is implemented and committed agai
     .map((child) => child.params["task"]);
   expect(tasks).toEqual(["the plan", "make the toggle green"]);
   expect(run.children.filter((child) => child.name === "commit.ts")).toHaveLength(2);
+  expect(run.children.filter((child) => child.name === "walkthrough.ts")).toHaveLength(2);
 });
 
 test("a project with no gate file settles them in a session of its own", async () => {
@@ -232,6 +248,7 @@ test("triage runs in the checkout, and every child after it in the worktree", as
 
   expect(run.children.map((child) => child.cwd)).toEqual([
     undefined,
+    "/tmp/trees/widget-sidebar-toggle",
     "/tmp/trees/widget-sidebar-toggle",
     "/tmp/trees/widget-sidebar-toggle",
     "/tmp/trees/widget-sidebar-toggle",

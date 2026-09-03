@@ -7,6 +7,7 @@ import commit from "./commit.ts";
 import implement from "./implement.ts";
 import plan from "./plan.ts";
 import triage from "./triage.ts";
+import walkthrough from "./walkthrough.ts";
 
 const Ack = z.enum(["ok"]);
 const Tried = z.union([z.enum(["done"]), z.string()]);
@@ -97,6 +98,8 @@ export default workflow({
     const total = triaged.tasks.length;
     for (const [index, task] of triaged.tasks.entries()) {
       await view.show(`task ${index + 1} of ${total}`);
+      // Where this task starts, so its walkthrough reads this change and not the whole branch.
+      const start = await vcs.head({ cwd: dir });
       const planned = await call(ctx, plan, { ticket: task }, { cwd: dir });
       checks.push(planned.acceptance);
       const built = await call(
@@ -119,8 +122,15 @@ export default workflow({
       await call(ctx, commit, {}, { cwd: dir });
 
       for (;;) {
+        // The person reads a screen, not the acceptance: where to open it, what to do, what to expect.
+        const tried = await call(
+          ctx,
+          walkthrough,
+          { acceptance: planned.acceptance, base: start.sha },
+          { cwd: dir },
+        );
         const answer = await view.ask(
-          `Task ${index + 1} of ${total} is in ${dir}. Try it.\n\n${planned.acceptance}\n\ndone accepts it. Anything else says what to change.`,
+          `Task ${index + 1} of ${total} is in ${dir}. Try it.\n\n${tried.walkthrough}\n\ndone accepts it. Anything else says what to change.`,
           Tried,
         );
         if (answer === "done") break;
