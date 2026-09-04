@@ -40,7 +40,7 @@ import { useFollow } from "@/hooks/use-follow";
 import { useInbox } from "@/hooks/use-inbox";
 import { useNeedsYou } from "@/hooks/use-needs-you";
 import { useOverlay } from "@/hooks/use-overlay";
-import { PANEL_DEFAULTS, PANEL_MINIMUMS, usePanels } from "@/hooks/use-panels";
+import { PANEL_DEFAULTS, PANEL_MINIMUMS, usePanels, type PanelName } from "@/hooks/use-panels";
 import { useRemoveProject } from "@/hooks/use-remove-project";
 import { useReviewRoot } from "@/hooks/use-review-root";
 import { useRunActions } from "@/hooks/use-run-actions";
@@ -85,10 +85,12 @@ export function App() {
   const browser = useBrowser();
   const overlay = useOverlay();
   useWatchRoot(root?.root);
-  const showTerminal = panels.open("terminal") && run !== undefined;
-  const showBrowser = panels.open("browser") && run !== undefined;
-  const showFiles = panels.open("files") && run !== undefined;
-  const showInfo = panels.open("info") && run !== undefined;
+  // A full screen pane shows even if it was shut: full screen is a view over the run's layout,
+  // never a change to it, so leaving full screen puts every open and hidden pane back.
+  const showTerminal = (panels.open("terminal") || panels.full === "terminal") && run !== undefined;
+  const showBrowser = (panels.open("browser") || panels.full === "browser") && run !== undefined;
+  const showFiles = (panels.open("files") || panels.full === "files") && run !== undefined;
+  const showInfo = (panels.open("info") || panels.full === "info") && run !== undefined;
   const fullTerminal = panels.full === "terminal" && showTerminal;
   const fullBrowser = panels.full === "browser" && showBrowser;
   const fullFiles = panels.full === "files" && showFiles;
@@ -144,7 +146,13 @@ export function App() {
   };
 
   const hasRun = run !== undefined;
-  const { toggle, setGlobal } = panels;
+  const { toggle, setGlobal, toggleFull } = panels;
+  // In full screen the rail is the switcher: the full pane is the only one lit, and picking
+  // another moves full screen to it. Picking the lit one leaves full screen.
+  const full = panels.full;
+  const railShows = (name: PanelName) => (full === undefined ? panels.open(name) : full === name);
+  const pickPanel = (name: PanelName) =>
+    full === undefined ? panels.toggle(name) : panels.toggleFull(name);
   const sidebarOpen = panels.global.sidebarOpen;
   useEffect(() => {
     const open = (event: KeyboardEvent) => {
@@ -153,7 +161,13 @@ export function App() {
         if (hasRun) toggle("terminal");
         return;
       }
-      if (!event.metaKey) return;
+      if (!event.metaKey) {
+        if (event.key === "Escape" && full !== undefined) {
+          event.preventDefault();
+          toggleFull(full);
+        }
+        return;
+      }
       const key = event.key.toLowerCase();
       if (event.shiftKey && key === "r") {
         event.preventDefault();
@@ -171,7 +185,7 @@ export function App() {
     };
     window.addEventListener("keydown", open);
     return () => window.removeEventListener("keydown", open);
-  }, [hasRun, toggle, setGlobal, sidebarOpen]);
+  }, [hasRun, toggle, setGlobal, sidebarOpen, full, toggleFull]);
 
   return (
     <TooltipProvider delayDuration={2000} skipDelayDuration={0}>
@@ -249,33 +263,33 @@ export function App() {
             <span className="flex-1" />
             <PanelButton
               label="Toggle info"
-              showing={showInfo}
+              showing={railShows("info")}
               disabled={run === undefined}
-              onClick={() => panels.toggle("info")}
+              onClick={() => pickPanel("info")}
             >
               <InfoIcon />
             </PanelButton>
             <PanelButton
               label="Toggle browser"
-              showing={showBrowser}
+              showing={railShows("browser")}
               disabled={run === undefined}
-              onClick={() => panels.toggle("browser")}
+              onClick={() => pickPanel("browser")}
             >
               <GlobeIcon />
             </PanelButton>
             <PanelButton
               label="Toggle files"
-              showing={showFiles}
+              showing={railShows("files")}
               disabled={run === undefined}
-              onClick={() => panels.toggle("files")}
+              onClick={() => pickPanel("files")}
             >
               <FilesIcon />
             </PanelButton>
             <PanelButton
               label="Toggle terminal"
-              showing={showTerminal}
+              showing={railShows("terminal")}
               disabled={run === undefined}
-              onClick={() => panels.toggle("terminal")}
+              onClick={() => pickPanel("terminal")}
             >
               <SquareTerminalIcon />
             </PanelButton>
