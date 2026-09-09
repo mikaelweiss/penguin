@@ -15,6 +15,7 @@ type Job = {
   cwd?: string;
   parent?: string;
   catalogs?: RunOptions["catalogs"];
+  agent?: string;
 };
 
 const job = JSON.parse(process.argv[2] ?? "") as Job;
@@ -50,6 +51,7 @@ function started(): Job {
     cwd: head["cwd"] as string,
     parent: head["parent"] as string | undefined,
     catalogs: head["catalogs"] as RunOptions["catalogs"],
+    agent: head["agent"] as string | undefined,
   };
 }
 
@@ -60,6 +62,7 @@ try {
     id: given.id,
     parent: given.parent,
     catalogs: given.catalogs,
+    agent: given.agent,
     resume: given.resume,
   });
   process.exit(0);

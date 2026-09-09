@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@workspace/ui/components/alert";
@@ -20,16 +20,39 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@workspace/ui/components/dialog";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@workspace/ui/components/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select";
 import { Spinner } from "@workspace/ui/components/spinner";
 import { cn } from "@workspace/ui/lib/utils";
 
 import { ReadingCatalogs } from "@/components/reading-catalogs";
 import { WorkflowParams } from "@/components/workflow-params";
+import type { Config } from "@/hooks/use-config";
 import { useParamAttachments } from "@/hooks/use-param-attachments";
 import { fill, initialValues, paramsOf, withAttachments } from "@/lib/params";
 import type { Values } from "@/lib/params";
-import { claimRun, describe, discardRun, shelves, startRun } from "@/lib/workflows";
-import type { Workflow } from "@/lib/workflows";
+import {
+  AGENT,
+  agentsIn,
+  claimRun,
+  describe,
+  discardRun,
+  shelves,
+  startRun,
+} from "@/lib/workflows";
+import type { Adapter, Workflow } from "@/lib/workflows";
 
 type Trouble = { title: string; detail: string };
 
@@ -42,16 +65,62 @@ type NewWorkflowDialogProps = {
   dir: string | undefined;
   /** The workflow the palette already picked, so the search step is skipped. */
   preset: Workflow | undefined;
+  /** The shared config, for the agent adapter a run starts with unless the picker says otherwise. */
+  config: Config;
   onClose: () => void;
   onStarted: (id: string) => void;
 };
 
-export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkflowDialogProps) {
+type AgentPickerProps = {
+  agents: Adapter[];
+  reading: boolean;
+  value: string;
+  onChange: (name: string) => void;
+};
+
+/** Which agent adapter this run defaults to. A session naming another adapter still gets it. */
+function AgentPicker({ agents, reading, value, onChange }: AgentPickerProps) {
+  const id = useId();
+  return (
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldLabel htmlFor={id}>Agent</FieldLabel>
+        <FieldDescription>
+          {!reading && agents.length === 0
+            ? "No agent adapter is installed."
+            : "The agent adapter this run starts with."}
+        </FieldDescription>
+      </FieldContent>
+      <Select value={value} disabled={reading || agents.length === 0} onValueChange={onChange}>
+        <SelectTrigger id={id} className="w-40">
+          <SelectValue placeholder="Not chosen" />
+        </SelectTrigger>
+        <SelectContent>
+          {agents.map((adapter) => (
+            <SelectItem key={adapter.file} value={adapter.name}>
+              {adapter.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+export function NewWorkflowDialog({
+  dir,
+  preset,
+  config,
+  onClose,
+  onStarted,
+}: NewWorkflowDialogProps) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [agents, setAgents] = useState<Adapter[]>([]);
   const [reading, setReading] = useState(false);
   const [trouble, setTrouble] = useState<Trouble | undefined>(undefined);
   const [picked, setPicked] = useState<Workflow | undefined>(undefined);
   const [values, setValues] = useState<Values>({});
+  const [agent, setAgent] = useState("");
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [starting, setStarting] = useState(false);
   const claimed = useRef<Promise<string> | undefined>(undefined);
@@ -69,12 +138,14 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
   const attach = useParamAttachments(claim);
 
   useEffect(() => {
-    if (dir === undefined || preset !== undefined) return;
+    if (dir === undefined) return;
     setWorkflows([]);
+    setAgents([]);
     setReading(true);
     describe(dir).then(
       (catalogs) => {
         setWorkflows(catalogs.workflows);
+        setAgents(agentsIn(catalogs.adapters));
         const first = catalogs.errors[0];
         setTrouble(first === undefined ? undefined : { title: "Cannot read the catalogs", detail: first });
         setReading(false);
@@ -84,7 +155,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
         setReading(false);
       },
     );
-  }, [dir, preset]);
+  }, [dir]);
 
   const drop = (held: Promise<string> | undefined) => {
     if (held !== undefined) held.then(discardRun).catch(() => undefined);
@@ -108,7 +179,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
     setStarting(true);
     const folder = claimed.current?.catch(() => undefined) ?? Promise.resolve(undefined);
     folder
-      .then((id) => startRun(workflow.file, params, dir, id))
+      .then((id) => startRun(workflow.file, params, dir, id, agent === "" ? undefined : agent))
       .then(
         (id) => {
           parked.current = undefined;
@@ -131,13 +202,10 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
       );
   };
 
+  // Every start passes through the form, params or none, so the agent picker is always in reach.
   const choose = (workflow: Workflow) => {
-    const params = paramsOf(workflow.params);
-    if (params.length === 0) {
-      start(workflow, {});
-      return;
-    }
-    setValues(initialValues(params));
+    setValues(initialValues(paramsOf(workflow.params)));
+    setAgent(config.values[AGENT] ?? "");
     setProblems({});
     setTrouble(undefined);
     attach.reset();
@@ -197,15 +265,22 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
               <DialogDescription>{picked.description}</DialogDescription>
             </DialogHeader>
             <DialogBody>
-              <WorkflowParams
-                params={paramsOf(picked.params)}
-                values={values}
-                problems={problems}
-                attachments={attach.files}
-                onChange={(name, value) => setValues((current) => ({ ...current, [name]: value }))}
-                onPaste={attach.paste}
-                onRemove={attach.remove}
-              />
+              <FieldGroup>
+                {paramsOf(picked.params).length === 0 ? null : (
+                  <WorkflowParams
+                    params={paramsOf(picked.params)}
+                    values={values}
+                    problems={problems}
+                    attachments={attach.files}
+                    onChange={(name, value) =>
+                      setValues((current) => ({ ...current, [name]: value }))
+                    }
+                    onPaste={attach.paste}
+                    onRemove={attach.remove}
+                  />
+                )}
+                <AgentPicker agents={agents} reading={reading} value={agent} onChange={setAgent} />
+              </FieldGroup>
             </DialogBody>
             {alert}
             <DialogFooter>
@@ -228,12 +303,7 @@ export function NewWorkflowDialog({ dir, preset, onClose, onStarted }: NewWorkfl
               <DialogTitle>{preset.name}</DialogTitle>
               <DialogDescription>{preset.description}</DialogDescription>
             </DialogHeader>
-            {alert ?? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner />
-                Starting {preset.name}
-              </div>
-            )}
+            {alert ?? <Spinner />}
           </>
         ) : (
           <>

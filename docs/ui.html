@@ -144,7 +144,7 @@
       <li>A sheet to search and pick a workflow.</li>
       <li>Workflows are sorted by catalog.</li>
       <li>The run's directory is the project it started from, never a param.</li>
-      <li>Picking a workflow with params asks for them, then starts the run. One without params starts on the pick.</li>
+      <li>Picking a workflow asks for its params and the agent adapter the run starts with, then starts the run. The agent picker opens on the settings default; a session that names another adapter still gets it.</li>
       <li>Pasting a file onto a text or multi-line param attaches it. The path rides the value, one path per line, then the typed text.</li>
       <li>The sheet's data comes from an engine describe run: each workflow's name, description, and params as JSON Schema, printed as JSON.</li>
     </ul>
@@ -178,7 +178,7 @@
       <li>Holds where links open: the web view, or the default browser.</li>
       <li>Holds whether a url a run opens also shows the web view. On by default; off still makes the tab.</li>
       <li>Holds the worktrees directory. Default <code>~/.penguin/worktrees/&lt;project&gt;/&lt;run&gt;</code>.</li>
-      <li>Holds the default agent adapter. Both write <code>~/.penguin/config</code>.</li>
+      <li>Holds the default agent adapter, what the new workflow picker opens on. Both write <code>~/.penguin/config</code>.</li>
       <li>App-only settings, the directory list and theme, live in Tauri's app config dir.</li>
     </ul>
 

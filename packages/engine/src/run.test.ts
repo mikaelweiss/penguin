@@ -888,14 +888,30 @@ export default workflow({
 });
 `;
 
+const OPENS = `import { workflow } from "penguin";
+import { z } from "zod";
+type Agent = { open(): Promise<string> };
+export default workflow({
+  description: "opens a session on whichever agent adapter the run defaults to",
+  params: z.object({}),
+  async run(ctx) {
+    const agent = (ctx as unknown as { agent: Agent }).agent;
+    return agent.open();
+  },
+});
+`;
+
 /** Two agent adapters with a config line choosing the first, the shape routing needs. */
-function agents(second: string): { list: { dir: string; scope: "project" }[]; workflow: string } {
+function agents(
+  second: string,
+  workflow: string = NAMES,
+): { list: { dir: string; scope: "project" }[]; workflow: string } {
   bare();
   fs.writeFileSync(path.join(process.env["PENGUIN_HOME"] ?? "", "config"), "agent one\n");
   return catalog({
     "adapters/one.ts": AGENT.replaceAll("NAME", "one"),
     "adapters/two.ts": second.replaceAll("NAME", "two"),
-    "workflows/hello.ts": NAMES,
+    "workflows/hello.ts": workflow,
   });
 }
 
@@ -930,6 +946,57 @@ test("a named agent adapter that is not ready falls back, and never blocks the r
     reason: "two is not installed or not on PATH.",
   });
 });
+
+test("a run started with an agent adapter defaults to it over the config line", async () => {
+  const { list, workflow } = agents(AGENT, OPENS);
+  expect(await run(workflow, {}, { catalogs: list, agent: "two" })).toBe("two-session");
+  expect(head()["agent"]).toBe("two");
+});
+
+test("a session that names an adapter gets it over the run's agent adapter", async () => {
+  const { list, workflow } = agents(AGENT);
+  const result = await run(workflow, { adapter: "one" }, { catalogs: list, agent: "two" });
+  expect(result).toBe("one-session");
+});
+
+test("an agent adapter the run names but the catalogs lack stops the run", async () => {
+  const { list, workflow } = agents(AGENT, OPENS);
+  await expect(run(workflow, {}, { catalogs: list, agent: "three" })).rejects.toThrow(
+    /no agent adapter named three/,
+  );
+});
+
+test("a child run inherits its parent's agent adapter", async () => {
+  const { list, workflow } = catalog({
+    "adapters/echo.ts": ECHO,
+    "workflows/hello.ts": PARENT,
+    "workflows/child.ts": CHILD,
+  });
+  await run(workflow, { name: "pip" }, { catalogs: list, agent: "two" });
+  const heads = fs.readdirSync(runsDir()).map((dir) => {
+    const line = fs.readFileSync(path.join(runsDir(), dir, "run.jsonl"), "utf8").split("\n")[0];
+    return JSON.parse(line ?? "{}") as Record<string, unknown>;
+  });
+  expect(heads).toHaveLength(2);
+  expect(heads.map((entry) => entry["agent"])).toEqual(["two", "two"]);
+}, 20000);
+
+test("a resume reads the agent adapter back from the run's head", async () => {
+  const { list, workflow } = agents(AGENT, OPENS);
+  const id = runId();
+  expect(await run(workflow, {}, { catalogs: list, id, agent: "two" })).toBe("two-session");
+
+  const entry = fileURLToPath(new URL("./child.ts", import.meta.url));
+  const child = spawn(process.execPath, [entry, JSON.stringify({ id, resume: true })], {
+    stdio: "ignore",
+  });
+
+  expect(await closed(child)).toBe(0);
+  const heads = readEntries(runFile(id)).filter(isHead);
+  expect(heads).toHaveLength(2);
+  expect(heads[1]?.["agent"]).toBe("two");
+  expect(readEntries(runFile(id)).findLast((e) => "outcome" in e)?.["outcome"]).toBe("two-session");
+}, 20000);
 
 test("a resume that dies in setup keeps the memory of the segment before it", async () => {
   const tally = tallyFile();

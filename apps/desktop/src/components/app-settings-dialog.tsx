@@ -42,6 +42,7 @@ import type { Config } from "@/hooks/use-config";
 import { useDark } from "@/hooks/use-dark";
 import type { Directories } from "@/hooks/use-directories";
 import { playSound } from "@/lib/notifications";
+import { AGENT, agentsIn } from "@/lib/workflows";
 import {
   autoShows,
   AUTO_SHOW,
@@ -58,9 +59,6 @@ const SECTIONS = [
 ];
 
 const WORKTREES_DEFAULT = "~/.penguin/worktrees/<project>/<run>";
-
-/** The role the engine reads a run's coding agent from. */
-const AGENT = "agent";
 
 function useHome(open: boolean): string | undefined {
   const [dir, setDir] = useState<string | undefined>(undefined);
@@ -93,7 +91,7 @@ export function AppSettingsDialog({
   const { catalogs, error } = useCatalogs(open ? home : undefined);
   const [worktrees, setWorktrees] = useState<string | undefined>(undefined);
 
-  const agents = catalogs.adapters.filter((adapter) => adapter.role === AGENT);
+  const agents = agentsIn(catalogs.adapters);
   const saved = config.values["worktrees"] ?? "";
   const typed = worktrees ?? saved;
 
@@ -130,7 +128,7 @@ export function AppSettingsDialog({
               <FieldDescription>
                 {agents.length === 0
                   ? "No agent adapter is installed."
-                  : "The agent adapter a new run uses."}
+                  : "The agent adapter a new run starts with. Each run can pick another."}
               </FieldDescription>
             </FieldContent>
             <Select

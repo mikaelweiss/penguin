@@ -243,6 +243,7 @@ export function App() {
         <NewWorkflowDialog
           dir={starting?.dir}
           preset={starting?.workflow}
+          config={config}
           onClose={() => setStarting(undefined)}
           onStarted={select}
         />

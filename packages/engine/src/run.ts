@@ -48,6 +48,11 @@ export type RunOptions = {
   /** The parent run's id. The engine sets it when it spawns a sub-run. */
   parent?: string;
   /**
+   * The agent adapter the run defaults to, in place of the config line. A session that names
+   * another adapter still gets it. A child run inherits it.
+   */
+  agent?: string;
+  /**
    * Continue the run `id` names in its own folder. What the person answered and what
    * the agents returned replay from the run file; the world is read again.
    */
@@ -77,6 +82,7 @@ export async function run(
       root: projectRoot(cwd),
       parent: options?.parent,
       catalogs: options?.catalogs,
+      agent: options?.agent,
     },
     journal,
   );
@@ -90,7 +96,7 @@ export async function run(
     const rescue = createRescue(worldOf(ctx));
     const installed: Adapter[] = [];
     for (const role of new Set(found.map((entry) => entry.role))) {
-      const picked = pick(found, role);
+      const picked = pick(found, role, role === "agent" ? options?.agent : undefined);
       if ("missing" in picked) throw new PenguinError(picked.missing);
       if ("conflict" in picked) throw new PenguinError(picked.conflict);
       // An adapter a session names is probed when the session opens, not at preflight.
@@ -106,7 +112,7 @@ export async function run(
       else if (role === "agent") ctx[role] = traced;
       else ctx[role] = rescue(role, traced);
     }
-    children = childrenOf(trace, id, cwd, list);
+    children = childrenOf(trace, id, cwd, list, options?.agent);
     ctx[RUN] = children.hooks;
     // A child run works where its parent already checked, so only a root run pays for preflight.
     if (options?.parent === undefined) await preflight(installed, host, ctx);
@@ -225,7 +231,13 @@ type Children = {
   pause(): void;
 };
 
-function childrenOf(trace: Trace, parent: string, cwd: string, catalogs: Catalog[]): Children {
+function childrenOf(
+  trace: Trace,
+  parent: string,
+  cwd: string,
+  catalogs: Catalog[],
+  agent: string | undefined,
+): Children {
   let spawned = 0;
   const perform = async (job: Job, ordinal: number): Promise<unknown> => {
     const at = job.cwd ?? cwd;
@@ -234,7 +246,15 @@ function childrenOf(trace: Trace, parent: string, cwd: string, catalogs: Catalog
     if (child.attach) return attached(job.workflow, child.id);
     const config: ChildJob = child.resume
       ? { id: child.id, resume: true }
-      : { id: child.id, file: job.workflow, params: job.params, cwd: at, parent, catalogs };
+      : {
+          id: child.id,
+          file: job.workflow,
+          params: job.params,
+          cwd: at,
+          parent,
+          catalogs,
+          ...(agent === undefined ? {} : { agent }),
+        };
     return spawnRun(job.workflow, config, at);
   };
   const wrapped = trace.wrapCall("run", perform);
@@ -299,6 +319,7 @@ type ChildJob =
       cwd: string;
       parent: string;
       catalogs: Catalog[];
+      agent?: string;
     };
 
 /** Runs a child workflow as its own process and settles with the outcome its run file records. */

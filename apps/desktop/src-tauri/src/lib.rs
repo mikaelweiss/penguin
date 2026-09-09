@@ -761,6 +761,8 @@ struct Job<'a> {
     params: &'a serde_json::Value,
     cwd: &'a str,
     id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent: Option<&'a str>,
 }
 
 /// A fresh run id, its folder claimed under the runs directory the way the engine claims one.
@@ -906,6 +908,7 @@ async fn start_run(
     params: serde_json::Value,
     dir: String,
     id: Option<String>,
+    agent: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let engine = engine(&app)?;
@@ -928,6 +931,7 @@ async fn start_run(
             params: &params,
             cwd: &dir,
             id: &id,
+            agent: agent.as_deref(),
         })
         .map_err(|cause| cause.to_string())?;
 

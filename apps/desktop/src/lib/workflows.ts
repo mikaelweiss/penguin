@@ -54,14 +54,26 @@ export function discardRun(id: string): Promise<void> {
   return invoke("discard_run", { id });
 }
 
-/** Starts a workflow as its own run and settles with the id its files live under. */
+/**
+ * Starts a workflow as its own run and settles with the id its files live under. `agent` names
+ * the agent adapter the run defaults to; none leaves it to the config line.
+ */
 export function startRun(
   file: string,
   params: unknown,
   dir: string,
   id: string | undefined,
+  agent: string | undefined,
 ): Promise<string> {
-  return invoke<string>("start_run", { file, params, dir, id });
+  return invoke<string>("start_run", { file, params, dir, id, agent });
+}
+
+/** The role the engine reads a run's coding agent from. */
+export const AGENT = "agent";
+
+/** The agent adapters a run can default to, from what the catalogs installed. */
+export function agentsIn(adapters: Adapter[]): Adapter[] {
+  return adapters.filter((adapter) => adapter.role === AGENT);
 }
 
 const ORDER: Scope[] = ["project", "home", "catalog", "starter", "worktree", "builtin"];

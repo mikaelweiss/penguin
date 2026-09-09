@@ -26,6 +26,8 @@ export type RunInfo = {
   parent?: string | undefined;
   /** The catalogs a parent handed this run. A root run finds its own. */
   catalogs?: unknown;
+  /** The agent adapter this run defaults to, over the config line. */
+  agent?: string | undefined;
 };
 
 export type { Entry } from "./core/segments.ts";
@@ -202,6 +204,7 @@ export function createTrace(info: RunInfo, journal?: Journal): Trace {
     root: info.root,
     ...(info.parent === undefined ? {} : { parent: info.parent }),
     ...(info.catalogs === undefined ? {} : { catalogs: safe(info.catalogs) }),
+    ...(info.agent === undefined ? {} : { agent: info.agent }),
   });
 
   const note = (entry: Entry): void => {
