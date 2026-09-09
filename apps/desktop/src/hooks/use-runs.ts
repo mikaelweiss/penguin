@@ -7,16 +7,21 @@ import type { Project, RunFile } from "@/lib/runs";
 
 const POLL_MS = 250;
 
-type Tracked = RunFile & { offset: number };
+/** Settled once a read has reached the file's end, so its closing note is in hand. */
+type Tracked = RunFile & { offset: number; settled: boolean };
 
 export type Runs = {
   projects: Project[];
-  /** False until the first tree lands, so an empty first render is not read as no runs. */
+  /** False until every run file has been read to its end once. A half-read tree is not acted on. */
   published: boolean;
   error: string | undefined;
 };
 
-/** Follows every run file, re-reading only the bytes each one has grown by. */
+/**
+ * Follows every run file, re-reading only the bytes each one has grown by. A file the budget cut
+ * short stays out of the tree until a read reaches its end: without its closing note, a finished
+ * run would pass for a paused one.
+ */
 export function useRuns(dirs: string[], hidden: Hidden): Runs {
   const [projects, setProjects] = useState<Project[]>([]);
   const [published, setPublished] = useState(false);
@@ -46,19 +51,23 @@ export function useRuns(dirs: string[], hidden: Hidden): Runs {
         }
         const entries = rewound || prior === undefined ? [] : prior.entries;
         if (update.text !== "") entries.push(...parseEntries(update.text));
+        const settled = (!rewound && prior?.settled === true) || !update.more;
+        if (prior?.settled !== settled) changed = true;
         next.set(update.id, {
           id: update.id,
           entries,
           alive: update.alive,
           offset: update.offset,
+          settled,
         });
       }
 
       tracked = next;
       if (!changed) return;
       drawn = true;
-      setProjects(toProjects([...next.values()], dirs, hidden));
-      setPublished(true);
+      const files = [...next.values()];
+      setProjects(toProjects(files.filter((file) => file.settled), dirs, hidden));
+      if (files.every((file) => file.settled)) setPublished(true);
     };
 
     const loop = async () => {

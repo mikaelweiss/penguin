@@ -7,6 +7,8 @@ export type RunUpdate = {
   /** Where the next read starts: after the last line in `text`. */
   offset: number;
   alive: boolean;
+  /** Whole lines past `offset` were left behind when the read's budget ran out. */
+  more: boolean;
 };
 
 export function readRuns(offsets: Record<string, number>): Promise<RunUpdate[]> {

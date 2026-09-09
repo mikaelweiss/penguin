@@ -22,6 +22,8 @@ struct RunUpdate {
     text: String,
     offset: u64,
     alive: bool,
+    /// Whole lines past `offset` were left behind when the budget ran out.
+    more: bool,
 }
 
 fn state_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -137,10 +139,12 @@ fn update(id: String, path: PathBuf, from: u64, budget: usize) -> Option<RunUpda
     let mut reader = BufReader::new(file);
     let mut bytes = Vec::new();
     let mut line = Vec::new();
+    let mut more = true;
     while bytes.len() < budget {
         line.clear();
         reader.read_until(b'\n', &mut line).ok()?;
         if line.last() != Some(&b'\n') {
+            more = false;
             break;
         }
         bytes.extend_from_slice(&line);
@@ -151,6 +155,7 @@ fn update(id: String, path: PathBuf, from: u64, budget: usize) -> Option<RunUpda
         offset: from + text.len() as u64,
         text,
         alive: path.parent().is_some_and(run_alive),
+        more,
     })
 }
 
@@ -1361,12 +1366,19 @@ mod tests {
         let first = update("r".into(), path.clone(), 0, 1).unwrap();
         assert_eq!(first.text.lines().count(), 1);
         assert!(first.text.ends_with('\n'));
+        assert!(first.more);
 
         let second = update("r".into(), path.clone(), first.offset, 9).unwrap();
         assert_eq!(second.text, "{\"a\":1}\n{\"a\":2}\n");
+        assert!(second.more);
 
-        let rest = update("r".into(), path, second.offset, READ_BUDGET).unwrap();
+        let rest = update("r".into(), path.clone(), second.offset, READ_BUDGET).unwrap();
         assert_eq!(rest.text, "{\"a\":3}\n");
+        assert!(!rest.more);
+
+        let spent = update("r".into(), path, 0, 0).unwrap();
+        assert_eq!(spent.text, "");
+        assert!(spent.more);
     }
 
     #[test]
