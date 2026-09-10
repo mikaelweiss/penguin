@@ -1,6 +1,5 @@
 import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
-import { REVIEWER } from "../helpers/models.ts";
 import { narrate, narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
@@ -248,7 +247,6 @@ export default workflow({
 
     // The reader holds the tree it read across the rounds, so a second round reads only what changed.
     const reader = await agent.open({
-      adapter: REVIEWER,
       model: "small",
       cwd: dir,
       autocompact: "200000",
@@ -423,8 +421,6 @@ export default workflow({
 
       // The prompt carries the whole case, so the judge runs with nothing
       // to call: no tools to define, no MCP servers to wait on, and a context that stays flat.
-      // It does not follow the reader onto REVIEWER, whose CLI takes no tool list: a judge that
-      // can read the tree stops asking the reader for it, and the questions loop below goes dead.
       const judge = await agent.open({ tools: [], settings: [] });
       const judged = await settle(judge, judging(gathered.value));
       if ("stop" in judged) return judged.stop;

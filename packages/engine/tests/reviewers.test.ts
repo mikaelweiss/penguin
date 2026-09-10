@@ -167,13 +167,13 @@ function pullRequest() {
   return { opens, turns, openedFor, run: () => reviewPr.run(ctx as never) };
 }
 
-test("review-pr gathers on the reviewing adapter, and triages on the configured one", async () => {
+test("review-pr gathers and triages on the configured adapter", async () => {
   const bench = pullRequest();
 
   const done = await bench.run();
 
   expect(done).toEqual({ rounds: 1, posted: 1 });
-  expect(bench.openedFor("review-gather")?.["adapter"]).toBe(REVIEWER);
+  expect(bench.openedFor("review-gather")).not.toHaveProperty("adapter");
   expect(bench.openedFor("triage-pr")).not.toHaveProperty("adapter");
 });
 
@@ -191,7 +191,6 @@ test("the gatherer keeps the worktree and the window its rounds are built on", a
   await bench.run();
 
   expect(bench.openedFor("review-gather")).toEqual({
-    adapter: REVIEWER,
     model: "small",
     cwd: "/tmp/trees/review-pr-7",
     autocompact: "200000",

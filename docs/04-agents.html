@@ -307,11 +307,13 @@ return { ok: false, error: "API Error: 500 Internal Server Error", pause: "error
 
     <p>
       The starter catalog spends this on code review: <code>review.ts</code>, the reviewer in
-      <code>implement.ts</code>, the gatherer in <code>review-pr.ts</code>, and the reviewer in
+      <code>implement.ts</code>, and the reviewer in
       <code>make-workflow.ts</code> all open on <code>REVIEWER</code> from
       <code>examples/helpers/models.ts</code>, so the change is read by a CLI other than the one
       that wrote it. The sessions that write code, and the judge in <code>review-pr.ts</code> whose
-      whole design is that it holds no tools, stay on the configured adapter.
+      whole design is that it holds no tools, stay on the configured adapter. The
+      <code>review-pr</code> session that reads the tree runs on the configured adapter too, so the
+      <code>pr-queue</code> review starts on the agent the run was started with.
     </p>
 
     <p>
