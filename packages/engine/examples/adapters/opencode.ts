@@ -88,9 +88,40 @@ function added(total: Usage | undefined, part: Part, model: string | undefined):
 function reason(error: unknown): string {
   if (said(error)) return error;
   if (error === null || typeof error !== "object") return "opencode reported an error";
-  const values = error as { message?: unknown; data?: { message?: unknown } };
-  const message = values.message ?? values.data?.message;
-  return said(message) ? message : JSON.stringify(error);
+  const values = error as {
+    name?: unknown;
+    message?: unknown;
+    data?: { message?: unknown; ref?: unknown };
+  };
+  const held = values.message ?? values.data?.message;
+  const message = said(held) ? held : JSON.stringify(error);
+  const named = said(values.name) ? `${values.name}: ${message}` : message;
+  const ref = values.data?.ref;
+  return said(ref) ? `${named} (ref ${ref})` : named;
+}
+
+/**
+ * opencode answers a server defect with a generic 500 and a ref, keeping the cause in its own
+ * logs. --print-logs copies that cause to stderr, which the run file would otherwise never hold.
+ */
+function loggedCause(stderr: string): string | undefined {
+  for (const line of stderr.split("\n").reverse()) {
+    if (!line.includes("message=failed")) continue;
+    const match = /(?:^|\s)error=("(?:\\.|[^"\\])*"|\S+)/.exec(line);
+    if (match === null) continue;
+    const raw = match[1] ?? "";
+    const cause = raw.startsWith('"') ? unquote(raw) : raw;
+    if (said(cause)) return cause;
+  }
+  return undefined;
+}
+
+function unquote(value: string): string {
+  try {
+    return JSON.parse(value) as string;
+  } catch {
+    return value.slice(1, -1);
+  }
 }
 
 const KINDS: Record<string, ActionKind> = {
@@ -170,7 +201,7 @@ export default adapter({
       emit: (chunk: Chunk) => void,
     ): Promise<Attempt> {
       const { options, prompt, schema, signal } = invocation;
-      const argv = ["opencode", "run", "--auto", "--format", "json"];
+      const argv = ["opencode", "run", "--auto", "--format", "json", "--print-logs"];
       let id = invocation.thread;
       if (id !== undefined) argv.push("--session", id);
       const model = modelFor(options.model, "opencode", {}, host.config);
@@ -225,8 +256,12 @@ export default adapter({
       if (buffer.trim() !== "") handle(buffer);
 
       const spent = usage === undefined ? {} : { usage };
-      /** The reason rides an error event on stdout. opencode writes stderr under --print-logs only. */
-      if (failed !== undefined) return { ok: false, error: failed, pause: "error", ...spent };
+      /** The reason rides an error event on stdout; --print-logs puts the cause it omits on stderr. */
+      if (failed !== undefined) {
+        const cause = loggedCause(done.stderr);
+        const error = cause === undefined || failed.includes(cause) ? failed : `${failed}\n${cause}`;
+        return { ok: false, error, pause: "error", ...spent };
+      }
       if (done.code !== 0) {
         const tail = done.stderr.trim().split("\n").at(-1) ?? "";
         return {
