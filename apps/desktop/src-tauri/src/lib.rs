@@ -348,13 +348,18 @@ fn pause_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
 }
 
 /// A stopped note on each parked run, so it ends where it stands instead of waiting for a resume.
+/// A run that turns out to still hold a process is stopped for real instead, and writes its own
+/// note as it goes: a note must never stand on a file a process is still writing.
 #[tauri::command]
 fn close_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
     let runs = runs_dir(&app).ok_or("no runs directory")?;
     for id in ids {
         let dir = run_folder(runs.clone(), &id).ok_or_else(|| format!("no run named {id}"))?;
         if run_alive(&dir) {
-            return Err(format!("{id} is still running"));
+            if !leaves(&dir) {
+                return Err(format!("{id} is still running"));
+            }
+            continue;
         }
         let note = serde_json::json!({ "at": stamp(), "stopped": true });
         append_line(&dir.join("run.jsonl"), &note).map_err(|cause| cause.to_string())?;
@@ -809,7 +814,7 @@ fn discard_run(app: tauri::AppHandle, id: String) -> Result<(), String> {
     discard(&folder).map_err(|cause| cause.to_string())
 }
 
-/// A run still writing would put its file back, so the folder goes only once the process has left.
+/// Stops a run and waits for its process to go, so nothing is written about a run still writing.
 fn leaves(folder: &Path) -> bool {
     let Some(pid) = run_pid(folder) else {
         return true;

@@ -59,6 +59,9 @@ export type RunOptions = {
   resume?: boolean;
 };
 
+/** How often a run looks for a closing note it did not write itself. */
+const CLOSED_MS = 1000;
+
 /** Loads one workflow file, validates its params, wires the installed adapters onto ctx, and runs it. */
 export async function run(
   file: string,
@@ -86,6 +89,14 @@ export async function run(
     },
     journal,
   );
+  // A stop that reaches the run file but not this process would otherwise leave it working
+  // out of sight: nothing draws a run its file calls ended, so nothing can reach it again.
+  const closed = setInterval(() => {
+    if (trace.closedElsewhere() === undefined) return;
+    signalChildren("SIGTERM");
+    process.exit(143);
+  }, CLOSED_MS);
+  closed.unref();
   let children: Children | undefined;
   // Wiring the adapters is inside the try: a catalog that will not load is a failure of this run,
   // and a caller reads what stopped it from the run file like any other.
@@ -128,6 +139,8 @@ export async function run(
       trace.note({ threw: messageOf(error) });
     }
     throw error;
+  } finally {
+    clearInterval(closed);
   }
 }
 

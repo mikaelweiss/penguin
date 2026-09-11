@@ -161,7 +161,7 @@ function answering(found: Answers): string {
 
 export default workflow({
   description:
-    "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until your approval lands or it closes",
+    "review an open pull request: triage it first, post the findings, approve when nothing blocks, and re-review every push until it merges or closes",
   params: z.object({ pr: z.string().describe("the pull request, as a number or a url") }),
 
   async run(ctx) {
@@ -356,7 +356,7 @@ export default workflow({
         }
         if (change.kind === "approved") {
           await stopTurn();
-          await view.show(`You approved PR #${pr.number}, the review stops`);
+          await view.show(`PR #${pr.number} is approved, this round has nothing left to say`);
           return { stop: "approved" };
         }
         if (change.kind === "draft") {
@@ -464,7 +464,7 @@ export default workflow({
           rounds += 1;
           await view.show(`review round ${rounds}`);
           const outcome = await review();
-          if (outcome === "closed" || outcome === "approved") break;
+          if (outcome === "closed") break;
           if (outcome === "draft") {
             inDraft = true;
             continue;
@@ -486,8 +486,7 @@ export default workflow({
           break;
         }
         if (change.kind === "approved") {
-          await view.show(`You approved PR #${pr.number}, the review stops`);
-          break;
+          await view.show(`PR #${pr.number} is approved, the review waits for the merge`);
         }
         if (change.kind === "draft") inDraft = true;
         if (change.kind === "ready") inDraft = false;

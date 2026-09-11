@@ -9,6 +9,8 @@ export type Trace = {
   file: string;
   dir: string;
   note(entry: Record<string, unknown>): void;
+  /** A closing note something other than this process put on the run file, none while it is the only writer. */
+  closedElsewhere(): Entry | undefined;
   wrap<A>(role: string, api: A): A;
   wrapCall<Args extends unknown[], R>(
     name: string,
@@ -78,6 +80,39 @@ export function readEntries(file: string): Entry[] {
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line) as Entry);
+}
+
+function sizeOf(file: string): number {
+  try {
+    return fs.statSync(file).size;
+  } catch {
+    return 0;
+  }
+}
+
+function readFrom(file: string, from: number, length: number): string {
+  const buffer = Buffer.alloc(length);
+  const fd = fs.openSync(file, "r");
+  try {
+    const read = fs.readSync(fd, buffer, 0, length, from);
+    return buffer.subarray(0, read).toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Whole lines only, and a line this reader cannot make sense of is not one to act on. */
+function entriesIn(text: string): Entry[] {
+  const found: Entry[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      found.push(JSON.parse(line) as Entry);
+    } catch {
+      continue;
+    }
+  }
+  return found;
 }
 
 /** The run's first head: how it was started. */
@@ -191,8 +226,25 @@ export function createTrace(info: RunInfo, journal?: Journal): Trace {
   let index = 0;
   let seq = journal?.issued ?? 0;
 
+  // Where this process has already accounted for the file. A resumed run starts past its
+  // earlier segments, so only what arrives from here on can be somebody else's.
+  let scanned = 0;
+
   const append = (entry: Entry): void => {
     fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
+    scanned = sizeOf(file);
+  };
+
+  const closedElsewhere = (): Entry | undefined => {
+    const size = sizeOf(file);
+    if (size <= scanned) return undefined;
+    const text = readFrom(file, scanned, size - scanned);
+    const end = text.lastIndexOf("\n");
+    // A line still being written is read whole on the next look.
+    if (end === -1) return undefined;
+    const lines = text.slice(0, end + 1);
+    scanned += Buffer.byteLength(lines);
+    return entriesIn(lines).findLast(isClosing);
   };
 
   append({
@@ -319,6 +371,7 @@ export function createTrace(info: RunInfo, journal?: Journal): Trace {
     file,
     dir,
     note,
+    closedElsewhere,
     wrap: <A>(role: string, api: A): A => wrapApi(role, api) as A,
     wrapCall: (name, fn) =>
       wrapFunction(name, fn as (...args: unknown[]) => unknown, undefined) as typeof fn,

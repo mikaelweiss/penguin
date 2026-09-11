@@ -158,7 +158,7 @@ function queueRead(place: Place): string[] {
   return graphql(QUEUE_QUERY, place, QUEUE_PATH);
 }
 
-/** Yours and theirs part ways here: your approval ends a review, theirs is feedback to answer. */
+/** Yours and theirs part ways here: your approval settles a round, theirs is feedback to answer. */
 export function changedBetween(last: Watched, snap: Watched, me: string): Change[] {
   const found: Change[] = [];
   if (snap.state !== last.state && snap.state !== "OPEN") {

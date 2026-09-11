@@ -658,6 +658,22 @@ test("an interrupt parks a run process, and the same folder takes it up again", 
   });
 }, 20000);
 
+test("a run whose file is closed by something else ends instead of working on unseen", async () => {
+  tallyFile();
+  const { list, workflow } = catalog({ "adapters/echo.ts": COUNTING, "workflows/hello.ts": ASKING });
+  const entry = fileURLToPath(new URL("./child.ts", import.meta.url));
+  const id = runId();
+  const job = { id, file: workflow, params: { name: "pip" }, cwd: os.tmpdir(), catalogs: list };
+
+  const child = spawn(process.execPath, [entry, JSON.stringify(job)], { stdio: "ignore" });
+  await waitFor(() =>
+    readEntries(runFile(id)).some((e) => e["call"] === "view.ask" && e["pending"] === true),
+  );
+  fs.appendFileSync(runFile(id), `${JSON.stringify({ at: "t", stopped: true })}\n`);
+
+  expect(await closed(child)).toBe(143);
+}, 20000);
+
 const CHILD = `import { workflow } from "penguin";
 import { z } from "zod";
 type Echo = { say(text: string): Promise<{ ok: boolean; text: string }> };

@@ -23,7 +23,7 @@ export default workflow({
       if (reviewing.has(request.number)) continue;
       reviewing.add(request.number);
       await view.show(`PR #${request.number} asks for a review: ${request.title}`);
-      // A review lives until you approve its PR or it closes, so it runs beside the watch, never in front of it.
+      // A review lives until its PR merges or closes, so it runs beside the watch, never in front of it.
       void call(ctx, reviewPr, { pr: String(request.number) })
         .catch(async (error: unknown) => {
           await view.show(`The review of PR #${request.number} failed: ${messageOf(error)}`);
