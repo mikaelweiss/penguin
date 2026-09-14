@@ -309,7 +309,11 @@ function childOf(
       JSON.stringify(head["params"]) === JSON.stringify(safe(job.params)) &&
       canonical(String(head["cwd"])) === canonical(job.cwd);
     if (!same) continue;
-    const going = livePid(id) !== undefined && closingOf(id) === undefined;
+    const last = closingOf(id);
+    // A run a person stopped is finished. Carrying it on would undo the stop, so the parent asking
+    // for that work again gets a run of its own.
+    if (last?.["stopped"] === true) continue;
+    const going = livePid(id) !== undefined && last === undefined;
     return { id, resume: !going, attach: going };
   }
 }

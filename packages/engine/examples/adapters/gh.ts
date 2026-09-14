@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { adapter, Fault, messageOf, type CommandResult } from "penguin";
 
 const ISSUE_FIELDS = "number,title,body,state,url";
@@ -219,6 +221,26 @@ export function movesOf(
 
 function rested(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const WATCHED_FILE = "watched.json";
+
+/**
+ * What each watch saw last, kept beside the run. A watch that starts again with nothing takes every
+ * open request for a new one, and reviews the whole backlog a second time.
+ */
+function watched(dir: string): Record<string, number[]> {
+  try {
+    const text = fs.readFileSync(path.join(dir, WATCHED_FILE), "utf8");
+    return JSON.parse(text) as Record<string, number[]>;
+  } catch {
+    return {};
+  }
+}
+
+function remember(dir: string, search: string, numbers: number[]): void {
+  const held = { ...watched(dir), [search]: numbers };
+  fs.writeFileSync(path.join(dir, WATCHED_FILE), JSON.stringify(held));
 }
 
 /** What a person fixes outside penguin rides in the reason, with the line that says how. */
@@ -524,7 +546,7 @@ export default adapter({
         /** A handle, not a snapshot, so the trace never replays a poll. A failed poll retries quietly. */
         requested(reviewer: string): { next(): Promise<Requested> } {
           const search = `review-requested:${reviewer} draft:false`;
-          let last: number[] | undefined;
+          let last: number[] | undefined = watched(host.run.dir)[search];
           const queue: Requested[] = [];
           return {
             async next(): Promise<Requested> {
@@ -549,6 +571,7 @@ export default adapter({
                   const before = last ?? [];
                   queue.push(...open.filter((pr) => !before.includes(pr.number)));
                   last = open.map((pr) => pr.number);
+                  remember(host.run.dir, search, last);
                 } catch {
                   // The next poll tries again. A watch has nowhere to report a passing failure.
                 }

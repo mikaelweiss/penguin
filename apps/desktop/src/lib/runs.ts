@@ -143,6 +143,8 @@ export type Run = {
   problem?: string;
   /** The run is waiting on view.listen, so it can take a message. */
   listening: boolean;
+  /** A process of this run's own is still going, whatever its file says it did. */
+  alive: boolean;
   /** This run's own spend. Absent when no agent turn reported any. */
   cost?: Cost;
   /** The pull request the run last read, when it read one. */
@@ -183,6 +185,15 @@ export function isIdle(run: Run): boolean {
 /** The run, or a run inside it, has a process to signal. */
 export function isLive(run: Run): boolean {
   return run.status === "running" || run.children.some(isLive);
+}
+
+/**
+ * There is something here to end. A file that says a run closed while its process works on is the
+ * one state a person most needs the stop for, so what is offered follows the processes, never the
+ * status a file claims.
+ */
+export function stoppable(run: Run): boolean {
+  return run.status === "running" || run.status === "paused" || run.alive || run.children.some(stoppable);
 }
 
 export function resumable(run: Run): boolean {
@@ -804,6 +815,7 @@ function place(file: RunFile): Placed | undefined {
       ...(paused === undefined ? {} : { paused }),
       ...(closing.problem === undefined ? {} : { problem: closing.problem }),
       listening,
+      alive: file.alive,
       ...(cost === undefined ? {} : { cost }),
       ...(pr === undefined ? {} : { pr }),
       ...(ticket === undefined ? {} : { ticket }),

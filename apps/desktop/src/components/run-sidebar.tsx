@@ -61,7 +61,7 @@ import {
   isLive,
   needsYou,
   resumable,
-  unfinished,
+  stoppable,
   visibleRuns,
 } from "@/lib/runs";
 import type { Project, Run, RunNode } from "@/lib/runs";
@@ -172,7 +172,7 @@ function RunRow({
           <PlayIcon />
           Resume
         </ContextMenuItem>
-        <ContextMenuItem disabled={!unfinished(run)} onSelect={() => actions.stop(run)}>
+        <ContextMenuItem disabled={!stoppable(run)} onSelect={() => actions.stop(run)}>
           <CircleStopIcon />
           Stop
         </ContextMenuItem>

@@ -15,19 +15,18 @@ export function readRuns(offsets: Record<string, number>): Promise<RunUpdate[]> 
   return invoke<RunUpdate[]>("read_runs", { offsets });
 }
 
-/** SIGTERM to each run's process group. The run writes its own stopped note as it goes. */
+/**
+ * Ends each run and every run it spawned, and settles once their processes are gone. A run is asked
+ * first and killed if it will not go, so what comes back saying stopped is stopped. Naming a run
+ * that already ended is no trouble: the ones inside it may still be going.
+ */
 export function stopRuns(ids: string[]): Promise<void> {
   return invoke("stop_runs", { ids });
 }
 
-/** SIGINT to each run's process group. The run writes its own paused note as it goes. */
+/** SIGINT to each run and the runs it spawned. Each writes its own paused note as it goes. */
 export function pauseRuns(ids: string[]): Promise<void> {
   return invoke("pause_runs", { ids });
-}
-
-/** Ends each parked run where it stands, with a stopped note on its file. */
-export function closeRuns(ids: string[]): Promise<void> {
-  return invoke("close_runs", { ids });
 }
 
 /**

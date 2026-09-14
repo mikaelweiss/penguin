@@ -30,6 +30,7 @@ function run(id: string, status: Run["status"], held?: Paused, children: Run[] =
     dir: "/work",
     cwd: "/work",
     at: "t1",
+    alive: false,
     ...(held === undefined ? {} : { paused: held }),
     listening: false,
     input: [],

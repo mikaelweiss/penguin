@@ -9,6 +9,7 @@ import {
   nextView,
   pausedReason,
   resumable,
+  stoppable,
   subtreeCost,
   toProjects,
   unfinished,
@@ -31,6 +32,7 @@ function run(sketch: Sketch): Run {
     dir: "/work",
     cwd: "/work",
     at: "t1",
+    alive: false,
     ...(sketch.ask === undefined
       ? {}
       : { ask: { prompt: "which one?", schema: undefined, problem: undefined, ...sketch.ask } }),
@@ -296,6 +298,17 @@ test("a person's pause needs no reason, and their stop of a parked run ends it",
   const closed = only([written(false, { at: "t2", paused: { by: "user" } }, { at: "t3", stopped: true })]);
   expect(closed.status).toBe("stopped");
   expect(closed.paused).toBeUndefined();
+});
+
+test("a run whose file closed while its process works on can still be stopped", () => {
+  const orphan = only([written(true, { at: "t2", stopped: true })]);
+  expect(orphan.status).toBe("stopped");
+  expect(orphan.alive).toBe(true);
+  expect(unfinished(orphan)).toBe(false);
+  expect(stoppable(orphan)).toBe(true);
+
+  const done = only([written(false, { at: "t2", outcome: null })]);
+  expect(stoppable(done)).toBe(false);
 });
 
 test("a resumed run reads from its latest segment, the earlier pause being history", () => {

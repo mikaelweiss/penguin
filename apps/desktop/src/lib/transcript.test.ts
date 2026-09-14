@@ -19,6 +19,7 @@ function run(output: TranscriptItem[], rest: Partial<Run> = {}): Run {
     dir: "/work",
     cwd: "/work",
     at: "t0",
+    alive: false,
     listening: false,
     input: [],
     output,

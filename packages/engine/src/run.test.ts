@@ -768,6 +768,38 @@ test("call spawns the child as its own run and hands back its outcome", async ()
   expect(child?.["parent"]).toBe(parent?.["run"]);
 }, 20000);
 
+test("a child a person stopped is never carried on: the parent asking again gets a fresh run", async () => {
+  const { list, workflow } = catalog({
+    "adapters/echo.ts": ECHO,
+    "workflows/hello.ts": PARENT,
+    "workflows/child.ts": CHILD,
+  });
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "penguin-base-"));
+  temps.push(base);
+  const id = runId();
+  const stopped = `${id}-c1`;
+  fs.mkdirSync(runDir(stopped), { recursive: true });
+  const head = {
+    at: "t1",
+    run: stopped,
+    workflow: path.join(path.dirname(workflow), "child.ts"),
+    params: { name: "pip" },
+    cwd: base,
+    root: base,
+    parent: id,
+  };
+  fs.writeFileSync(
+    runFile(stopped),
+    `${JSON.stringify(head)}\n${JSON.stringify({ at: "t2", stopped: true })}\n`,
+  );
+
+  const result = await run(workflow, { name: "pip" }, { catalogs: list, cwd: base, id });
+
+  expect(result).toEqual({ inner: { ok: true, text: "hi pip" } });
+  expect(fs.existsSync(runDir(`${stopped}-2`))).toBe(true);
+  expect(readEntries(runFile(stopped)).filter(isHead)).toHaveLength(1);
+}, 20000);
+
 test("a child takes the folder call names, resolved against the parent's", async () => {
   const { list, workflow } = catalog({
     "adapters/echo.ts": ECHO,

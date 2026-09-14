@@ -78,8 +78,117 @@ fn run_pid(dir: &Path) -> Option<i32> {
         .ok()
 }
 
+#[cfg(target_os = "macos")]
+fn process_argv(pid: i32) -> Option<String> {
+    let mut name = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let width = name.len() as u32;
+    let mut size: libc::size_t = 0;
+    let asked = unsafe {
+        libc::sysctl(
+            name.as_mut_ptr(),
+            width,
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if asked != 0 || size == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u8; size];
+    let read = unsafe {
+        libc::sysctl(
+            name.as_mut_ptr(),
+            width,
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if read != 0 {
+        return None;
+    }
+    buffer.truncate(size);
+    Some(String::from_utf8_lossy(&buffer).into_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn process_argv(pid: i32) -> Option<String> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    Some(String::from_utf8_lossy(&raw).into_owned())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_argv(_pid: i32) -> Option<String> {
+    None
+}
+
+/// A process that has ended and is waiting to be collected by whoever started it. Its pid still
+/// answers, so the run behind it would read as one still going. The kernel keeps no process
+/// information for one, which is what separates it from a process that is simply not ours.
+#[cfg(target_os = "macos")]
+fn spent(pid: i32) -> bool {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            std::ptr::from_mut(&mut info).cast(),
+            size,
+        )
+    };
+    read != size || info.pbi_status == libc::SZOMB
+}
+
+#[cfg(target_os = "linux")]
+fn spent(pid: i32) -> bool {
+    let Ok(text) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    // The command field is parenthesised and can hold spaces, so the state is what follows the last one.
+    let Some(end) = text.rfind(')') else {
+        return false;
+    };
+    text[end + 1..].trim_start().starts_with('Z')
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn spent(_pid: i32) -> bool {
+    false
+}
+
+/// Whether the process at `pid` is this run's, from the job its command line carries. Pids are
+/// reused, so a run folder left behind can name a process that has nothing to do with it, and
+/// signalling that one would kill a stranger's work. A command line nobody can read proves
+/// nothing either way, and a run is held to be alive until it is proven otherwise.
+fn owns_run(pid: i32, id: &str) -> bool {
+    match process_argv(pid) {
+        None => true,
+        Some(argv) => argv.contains(&format!("\"id\":\"{id}\"")),
+    }
+}
+
+fn run_id(dir: &Path) -> Option<&str> {
+    dir.file_name().and_then(|name| name.to_str())
+}
+
+/// The run's own live process, or none once it is gone.
+fn live_pid(dir: &Path) -> Option<i32> {
+    let pid = run_pid(dir)?;
+    let id = run_id(dir)?;
+    if pid_alive(pid) && !spent(pid) && owns_run(pid, id) {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
 fn run_alive(dir: &Path) -> bool {
-    run_pid(dir).is_some_and(pid_alive)
+    live_pid(dir).is_some()
 }
 
 /// The same cut of a run file as the engine's `core/segments.ts`.
@@ -115,14 +224,18 @@ fn closing_note(path: &Path) -> Option<serde_json::Value> {
     closing
 }
 
-/// Where the run works, from its first head line.
-fn head_cwd(path: &Path) -> Option<PathBuf> {
+/// How the run was started, from its first line.
+fn head(path: &Path) -> Option<serde_json::Value> {
     let mut line = String::new();
     BufReader::new(File::open(path).ok()?)
         .read_line(&mut line)
         .ok()?;
-    let head: serde_json::Value = serde_json::from_str(&line).ok()?;
-    head.get("cwd")?.as_str().map(PathBuf::from)
+    serde_json::from_str(&line).ok()
+}
+
+/// Where the run works, from its first head line.
+fn head_cwd(path: &Path) -> Option<PathBuf> {
+    head(path)?.get("cwd")?.as_str().map(PathBuf::from)
 }
 
 /// The most run text one read hands the frontend. A runaway run file arrives over many polls
@@ -302,10 +415,94 @@ fn signal_run(_pid: i32, _signal: i32) -> bool {
 const STOP: i32 = libc::SIGTERM;
 #[cfg(unix)]
 const PAUSE: i32 = libc::SIGINT;
+#[cfg(unix)]
+const KILL: i32 = libc::SIGKILL;
 #[cfg(not(unix))]
 const STOP: i32 = 15;
 #[cfg(not(unix))]
 const PAUSE: i32 = 2;
+#[cfg(not(unix))]
+const KILL: i32 = 9;
+
+/// How long a run gets to end itself, write its own note, and take its agents with it.
+const GRACE: Duration = Duration::from_secs(5);
+
+/// How long the kernel gets to clear a run that had to be killed.
+const AFTER_KILL: Duration = Duration::from_millis(500);
+
+/// How often a run is looked at again while it is going.
+const STEP: Duration = Duration::from_millis(50);
+
+fn gone(folder: &Path, within: Duration) -> bool {
+    let deadline = Instant::now() + within;
+    while Instant::now() < deadline {
+        if !run_alive(folder) {
+            return true;
+        }
+        std::thread::sleep(STEP);
+    }
+    !run_alive(folder)
+}
+
+/// Ends a run's process for good: it is asked, given a grace period to leave on its own terms, then
+/// killed. True once nothing of the run is left running, which is the only thing that counts as
+/// stopped. A run nobody could kill is reported, never passed off as ended.
+fn reaped(folder: &Path) -> bool {
+    let Some(pid) = live_pid(folder) else {
+        return true;
+    };
+    signal_run(pid, STOP);
+    if gone(folder, GRACE) {
+        return true;
+    }
+    signal_run(pid, KILL);
+    gone(folder, AFTER_KILL)
+}
+
+/// Ends a run and leaves its file closed. The note goes on only once the process is gone: a note
+/// must never stand on a file something is still writing, and a run that ends itself writes its own.
+fn close_run(folder: &Path) -> Result<(), String> {
+    if !reaped(folder) {
+        return Err("its process would not end".to_string());
+    }
+    let file = folder.join("run.jsonl");
+    if !file.exists() || closing_note(&file).is_some() {
+        return Ok(());
+    }
+    let note = serde_json::json!({ "at": stamp(), "stopped": true });
+    append_line(&file, &note).map_err(|cause| cause.to_string())
+}
+
+/// A run and every run it spawned, outermost first, read from the run folders rather than from
+/// what a window happens to be drawing. A tree the frontend has not finished reading, or does not
+/// show at all, still holds processes, and a stop that cannot see them leaves them running.
+fn descendants(runs: &Path, id: &str) -> Vec<String> {
+    let mut children: HashMap<String, Vec<String>> = HashMap::new();
+    if let Ok(entries) = std::fs::read_dir(runs) {
+        for entry in entries.flatten() {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let parent = head(&entry.path().join("run.jsonl"))
+                .and_then(|head| head.get("parent")?.as_str().map(str::to_string));
+            let Some(parent) = parent else {
+                continue;
+            };
+            children.entry(parent).or_default().push(name);
+        }
+    }
+    let mut found = vec![id.to_string()];
+    let mut at = 0;
+    while at < found.len() {
+        if let Some(next) = children.remove(&found[at]) {
+            let mut ordered = next;
+            ordered.sort();
+            found.extend(ordered);
+        }
+        at += 1;
+    }
+    found
+}
 
 /// One signal to each run. Callers pass a run and every run inside it, outermost first.
 fn signal_runs(
@@ -322,9 +519,8 @@ fn signal_runs(
             continue;
         };
         // A run that already left, or never wrote a pid file, has nothing to signal.
-        match run_pid(&folder) {
+        match live_pid(&folder) {
             None => {}
-            Some(pid) if !pid_alive(pid) => {}
             Some(pid) if signal_run(pid, signal) => {}
             Some(_) => missed.push(id),
         }
@@ -335,36 +531,89 @@ fn signal_runs(
     Err(format!("could not {verb} {}", missed.join(", ")))
 }
 
-/// SIGTERM to each run: it writes its stopped note and ends.
+/// Ends each run named and every run inside it, and does not return until their processes are gone.
+/// The caller names the runs it means; what they spawned is found here, from the run folders.
+/// A run is ended by what it is doing, never by what its file says it did: a file can say a run
+/// closed while its process works on, and that run has to stay reachable.
 #[tauri::command]
-fn stop_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
-    signal_runs(&app, ids, STOP, "stop")
+async fn stop_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runs = runs_dir(&app).ok_or("no runs directory")?;
+        let mut missed = Vec::new();
+        for id in ids {
+            for each in descendants(&runs, &id) {
+                let Some(folder) = run_folder(runs.clone(), &each) else {
+                    missed.push(each);
+                    continue;
+                };
+                if !folder.exists() {
+                    continue;
+                }
+                if close_run(&folder).is_err() {
+                    missed.push(each);
+                }
+            }
+        }
+        if missed.is_empty() {
+            return Ok(());
+        }
+        Err(format!("could not stop {}", missed.join(", ")))
+    })
+    .await
+    .map_err(|cause| cause.to_string())?
 }
 
-/// SIGINT to each run: it writes its paused note and ends, to be resumed later.
+/// SIGINT to each run and to every run inside it: each writes its paused note and ends, to be
+/// resumed later. A run left going while the tree around it parks would work on alone.
 #[tauri::command]
 fn pause_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
-    signal_runs(&app, ids, PAUSE, "pause")
+    let runs = runs_dir(&app).ok_or("no runs directory")?;
+    let all = ids.iter().flat_map(|id| descendants(&runs, id)).collect();
+    signal_runs(&app, all, PAUSE, "pause")
 }
 
-/// A stopped note on each parked run, so it ends where it stands instead of waiting for a resume.
-/// A run that turns out to still hold a process is stopped for real instead, and writes its own
-/// note as it goes: a note must never stand on a file a process is still writing.
-#[tauri::command]
-fn close_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
-    let runs = runs_dir(&app).ok_or("no runs directory")?;
-    for id in ids {
-        let dir = run_folder(runs.clone(), &id).ok_or_else(|| format!("no run named {id}"))?;
-        if run_alive(&dir) {
-            if !leaves(&dir) {
-                return Err(format!("{id} is still running"));
-            }
+/// How often the app looks for a run whose file ended while its process kept working.
+const SWEEP: Duration = Duration::from_secs(5);
+
+/// How long a closed run's process has to leave on its own before the app ends it. A run writes
+/// its outcome a moment before it exits, and that moment is not an orphan.
+const ORPHANED_AFTER: i64 = 30;
+
+fn settled_long_ago(note: &serde_json::Value) -> bool {
+    let Some(at) = note.get("at").and_then(|at| at.as_str()) else {
+        return true;
+    };
+    let Ok(at) = chrono::DateTime::parse_from_rfc3339(at) else {
+        return true;
+    };
+    chrono::Utc::now().signed_duration_since(at).num_seconds() > ORPHANED_AFTER
+}
+
+/// A run whose file says it ended while its process works on is an orphan: every action in the
+/// window reads that file, so nothing there can reach it, and it goes on spawning work nobody
+/// asked for. Watching for that from outside is what holds when the watch inside a run cannot:
+/// an older build that never had one, or a process too wedged to run it.
+fn sweep_orphans(runs: &Path) {
+    let Ok(entries) = std::fs::read_dir(runs) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let folder = entry.path();
+        // Reading a run file costs more than asking after a pid, and most runs left here ended long ago.
+        if !run_alive(&folder) {
             continue;
         }
-        let note = serde_json::json!({ "at": stamp(), "stopped": true });
-        append_line(&dir.join("run.jsonl"), &note).map_err(|cause| cause.to_string())?;
+        let file = folder.join("run.jsonl");
+        let Some(note) = closing_note(&file) else {
+            continue;
+        };
+        if !settled_long_ago(&note) {
+            continue;
+        }
+        if reaped(&folder) {
+            let _ = append_line(&file, &serde_json::json!({ "at": stamp(), "orphan": true }));
+        }
     }
-    Ok(())
 }
 
 /// ~/.penguin, the folder the engine reads its config from.
@@ -814,21 +1063,6 @@ fn discard_run(app: tauri::AppHandle, id: String) -> Result<(), String> {
     discard(&folder).map_err(|cause| cause.to_string())
 }
 
-/// Stops a run and waits for its process to go, so nothing is written about a run still writing.
-fn leaves(folder: &Path) -> bool {
-    let Some(pid) = run_pid(folder) else {
-        return true;
-    };
-    for _ in 0..40 {
-        if !pid_alive(pid) {
-            return true;
-        }
-        signal_run(pid, STOP);
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    !pid_alive(pid)
-}
-
 /// Drops the run folders for good, so the projects they name stop reappearing in the sidebar.
 #[tauri::command]
 async fn forget_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), String> {
@@ -839,7 +1073,7 @@ async fn forget_runs(app: tauri::AppHandle, ids: Vec<String>) -> Result<(), Stri
             let folder = run_folder(runs.clone(), &id);
             let gone = match folder {
                 Some(folder) if !folder.exists() => true,
-                Some(folder) => leaves(&folder) && std::fs::remove_dir_all(&folder).is_ok(),
+                Some(folder) => reaped(&folder) && std::fs::remove_dir_all(&folder).is_ok(),
                 None => false,
             };
             if !gone {
@@ -888,6 +1122,14 @@ fn launch(engine: &Engine, folder: &Path, job: &str, dir: &Path) -> Result<Child
     command
         .spawn()
         .map_err(|cause| format!("{} could not run: {cause}", engine.bun.display()))
+}
+
+/// A run the app started stays the app's child until someone waits on it, and a child nobody waits
+/// on lingers in the process table after it ends, where every check for a live run would find it.
+fn reap(mut child: Child) {
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
 }
 
 /// Waits until the run process shows it is going, or has died, or START_WAIT is up.
@@ -947,7 +1189,9 @@ async fn start_run(
 
         let mut child = launch(&engine, &folder, &job, Path::new(&dir))?;
         let run_file = folder.join("run.jsonl");
-        settled(&mut child, || run_file.exists(), &file, &folder)?;
+        let started = settled(&mut child, || run_file.exists(), &file, &folder);
+        reap(child);
+        started?;
         Ok(id)
     })
     .await
@@ -980,7 +1224,9 @@ async fn resume_run(app: tauri::AppHandle, id: String, only_paused: bool) -> Res
             .unwrap_or_else(|| folder.clone());
         let job = serde_json::json!({ "id": id, "resume": true }).to_string();
         let mut child = launch(&engine, &folder, &job, &dir)?;
-        settled(&mut child, || run_pid(&folder) != before, &id, &folder)
+        let started = settled(&mut child, || run_pid(&folder) != before, &id, &folder);
+        reap(child);
+        started
     })
     .await
     .map_err(|cause| cause.to_string())?
@@ -1189,6 +1435,14 @@ pub fn run() {
                 let _ = waiting.show();
             });
 
+            let sweeping = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(SWEEP);
+                if let Some(runs) = runs_dir(&sweeping) {
+                    sweep_orphans(&runs);
+                }
+            });
+
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -1217,7 +1471,6 @@ pub fn run() {
             read_run_log,
             stop_runs,
             pause_runs,
-            close_runs,
             resume_run,
             read_config,
             write_config,
@@ -1276,6 +1529,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("penguin-test-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    fn named(dir: &Path) -> String {
+        run_id(dir).unwrap().to_string()
+    }
+
+    /// A process that carries the run's job on its command line, the way a run's own process does.
+    fn working(id: &str, deaf: bool) -> Child {
+        let held = if deaf { "trap '' TERM; " } else { "" };
+        Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!("{held}sleep 30"))
+            .arg(format!("{{\"id\":\"{id}\"}}"))
+            .spawn()
+            .unwrap()
     }
 
     #[test]
@@ -1411,8 +1679,11 @@ mod tests {
     #[test]
     fn a_live_pid_is_alive_and_a_missing_one_is_not() {
         let dir = temp("alive");
-        let mine = run_file(&dir, std::process::id() as i32, &[]);
+        let mut child = working(&named(&dir), false);
+        let mine = run_file(&dir, child.id() as i32, &[]);
         assert!(update("r".into(), mine, 0, READ_BUDGET).unwrap().alive);
+        let _ = child.kill();
+        let _ = child.wait();
 
         let gone = temp("dead");
         let path = run_file(&gone, 0x7FFF_FFFE, &[]);
@@ -1433,6 +1704,108 @@ mod tests {
         let dir = temp("empty");
         std::fs::create_dir_all(&dir).unwrap();
         assert!(update("r".into(), dir.join("run.jsonl"), 0, READ_BUDGET).is_none());
+    }
+
+    #[test]
+    fn a_pid_that_came_back_to_another_process_is_not_the_run() {
+        let dir = temp("reused");
+        let mut stranger = working("someone-elses-run", false);
+        run_file(&dir, stranger.id() as i32, &[]);
+
+        assert!(!run_alive(&dir));
+
+        let _ = stranger.kill();
+        let _ = stranger.wait();
+    }
+
+    #[test]
+    fn a_stop_ends_a_run_that_will_not_take_the_hint_and_closes_its_file() {
+        let dir = temp("wedged");
+        let mut child = working(&named(&dir), true);
+        let path = run_file(&dir, child.id() as i32, &[]);
+        assert!(run_alive(&dir));
+
+        close_run(&dir).unwrap();
+
+        assert!(!run_alive(&dir));
+        assert_eq!(
+            closing_note(&path).unwrap().get("stopped"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn a_stop_closes_a_parked_run_without_touching_a_file_that_already_closed() {
+        let parked = temp("parked");
+        let path = run_file(&parked, 0x7FFF_FFFE, &[]);
+        close_run(&parked).unwrap();
+        assert_eq!(
+            closing_note(&path).unwrap().get("stopped"),
+            Some(&serde_json::Value::Bool(true))
+        );
+
+        let done = temp("done");
+        let ended = run_file(&done, 0x7FFF_FFFE, &["{\"at\":\"t2\",\"outcome\":null}"]);
+        close_run(&done).unwrap();
+        assert_eq!(std::fs::read_to_string(ended).unwrap().lines().count(), 2);
+    }
+
+    #[test]
+    fn a_stop_reaches_every_run_the_named_one_spawned() {
+        let runs = temp("tree");
+        for (id, parent) in [
+            ("root", None),
+            ("root-c1", Some("root")),
+            ("root-c1-c1", Some("root-c1")),
+            ("root-c2", Some("root")),
+            ("elsewhere", None),
+        ] {
+            let dir = runs.join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            let head = match parent {
+                Some(parent) => format!(
+                    "{{\"run\":\"{id}\",\"workflow\":\"w.ts\",\"params\":{{}},\"parent\":\"{parent}\"}}"
+                ),
+                None => format!("{{\"run\":\"{id}\",\"workflow\":\"w.ts\",\"params\":{{}}}}"),
+            };
+            std::fs::write(dir.join("run.jsonl"), format!("{head}\n")).unwrap();
+        }
+
+        assert_eq!(
+            descendants(&runs, "root"),
+            vec!["root", "root-c1", "root-c2", "root-c1-c1"]
+        );
+    }
+
+    #[test]
+    fn a_run_whose_file_closed_while_its_process_worked_on_is_ended_and_said_so() {
+        let runs = temp("orphans");
+        let dir = runs.join("orphan");
+        let mut child = working("orphan", false);
+        let path = run_file(&dir, child.id() as i32, &["{\"at\":\"2020-01-01T00:00:00.000Z\",\"stopped\":true}"]);
+
+        sweep_orphans(&runs);
+
+        assert!(!run_alive(&dir));
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.lines().last().unwrap().contains("\"orphan\":true"));
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn a_run_that_just_wrote_its_outcome_is_left_to_leave_on_its_own() {
+        let runs = temp("settling");
+        let dir = runs.join("settling");
+        let mut child = working("settling", false);
+        let note = serde_json::json!({ "at": stamp(), "outcome": null }).to_string();
+        run_file(&dir, child.id() as i32, &[note.as_str()]);
+
+        sweep_orphans(&runs);
+
+        assert!(run_alive(&dir));
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]
@@ -1640,3 +2013,4 @@ mod tests {
         assert_eq!(run_folder(runs.clone(), "a-run"), Some(runs.join("a-run")));
     }
 }
+
