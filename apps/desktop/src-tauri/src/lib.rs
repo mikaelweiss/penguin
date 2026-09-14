@@ -461,12 +461,17 @@ fn reaped(folder: &Path) -> bool {
 
 /// Ends a run and leaves its file closed. The note goes on only once the process is gone: a note
 /// must never stand on a file something is still writing, and a run that ends itself writes its own.
+/// A pause is the one closing note a stop writes over: a parked run has work left, and a stop that
+/// left the pause standing would leave it parked in the window with nothing able to end it.
 fn close_run(folder: &Path) -> Result<(), String> {
     if !reaped(folder) {
         return Err("its process would not end".to_string());
     }
     let file = folder.join("run.jsonl");
-    if !file.exists() || closing_note(&file).is_some() {
+    if !file.exists() {
+        return Ok(());
+    }
+    if closing_note(&file).is_some_and(|note| note.get("paused").is_none()) {
         return Ok(());
     }
     let note = serde_json::json!({ "at": stamp(), "stopped": true });
@@ -1749,6 +1754,23 @@ mod tests {
         let ended = run_file(&done, 0x7FFF_FFFE, &["{\"at\":\"t2\",\"outcome\":null}"]);
         close_run(&done).unwrap();
         assert_eq!(std::fs::read_to_string(ended).unwrap().lines().count(), 2);
+    }
+
+    #[test]
+    fn a_stop_ends_a_run_that_a_pause_left_parked() {
+        let paused = temp("paused");
+        let path = run_file(
+            &paused,
+            0x7FFF_FFFE,
+            &["{\"at\":\"t2\",\"paused\":{\"by\":\"user\"}}"],
+        );
+
+        close_run(&paused).unwrap();
+
+        assert_eq!(
+            closing_note(&path).unwrap().get("stopped"),
+            Some(&serde_json::Value::Bool(true))
+        );
     }
 
     #[test]
