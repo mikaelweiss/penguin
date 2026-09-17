@@ -223,6 +223,53 @@ test("worktree.add buckets by the repository, not the checkout it was called fro
   }
 });
 
+test("worktree.list names every tree in the bucket the way add named it", async () => {
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const { dir, host, vcs } = await repo();
+    await commitFile({ dir, host }, "base.txt", "base");
+    await vcs.worktree.add("review-pr-1072");
+    await vcs.worktree.add("chore/retire-permissions");
+
+    const listed = await vcs.worktree.list();
+
+    expect(listed.map((one) => one.name).sort()).toEqual([
+      "chore/retire-permissions",
+      "review-pr-1072",
+    ]);
+    // A run that reads the list has to be able to hand the path straight back to remove.
+    const found = listed.find((one) => one.name === "review-pr-1072");
+    await vcs.worktree.remove(found?.path ?? "", { force: true });
+    expect((await vcs.worktree.list()).map((one) => one.name)).toEqual([
+      "chore/retire-permissions",
+    ]);
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});
+
+test("worktree.list leaves out the main checkout and trees cut outside the bucket", async () => {
+  const home = tempDir("penguin-home-");
+  process.env["PENGUIN_HOME"] = home;
+  try {
+    const { dir, host, vcs } = await repo();
+    await commitFile({ dir, host }, "base.txt", "base");
+    await vcs.worktree.add("mine");
+
+    // What someone cut by hand: a worktree of the same repository, nowhere near the bucket.
+    const elsewhere = path.join(tempDir("penguin-loose-"), "theirs");
+    await git(host, ["worktree", "add", "-b", "theirs", elsewhere]);
+
+    const listed = await vcs.worktree.list();
+
+    expect(listed.map((one) => one.name)).toEqual(["mine"]);
+    expect(listed.some((one) => path.resolve(one.path) === path.resolve(dir))).toBe(false);
+  } finally {
+    delete process.env["PENGUIN_HOME"];
+  }
+});
+
 test("worktree.add reports a branch another worktree holds as one already there", async () => {
   const home = tempDir("penguin-home-");
   process.env["PENGUIN_HOME"] = home;

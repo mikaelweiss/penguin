@@ -104,11 +104,14 @@ test("make-workflow reviews the draft on the reviewing adapter, and writes it on
 const DOSSIER = { files: [], flows: [], state: [], facts: [] };
 const CLEAN = { blockers: [], nonBlockers: [], questions: [] };
 
+type Watched = { kind: string; state?: string };
+
 /** review-pr to one approved round: the triage, the gather, and the judgment, and nothing else. */
 function pullRequest() {
   const opens: Opened[] = [];
   const turns: Turn[] = [];
   const values: unknown[] = [{ eyeball: false, reason: "one file" }, DOSSIER, CLEAN];
+  let arrive: ((change: Watched) => void) | undefined;
   const agent = {
     open: (options?: Opened) => {
       opens.push(options ?? {});
@@ -138,7 +141,12 @@ function pullRequest() {
       get: () => Promise.resolve(pr),
       comments: () => Promise.resolve([]),
       diff: () => Promise.resolve("+++ b/src/widget.ts\n+const on = true;"),
-      changes: () => ({ next: () => new Promise<never>(() => {}) }),
+      changes: () => ({
+        next: () =>
+          new Promise<Watched>((resolve) => {
+            arrive = resolve;
+          }),
+      }),
       comment: () => Promise.resolve(),
       approve: () => Promise.resolve(),
     },
@@ -155,7 +163,11 @@ function pullRequest() {
   const view = {
     show: () => Promise.resolve(),
     act: () => Promise.resolve(),
-    status: () => Promise.resolve(),
+    // The round over, the run parks for the merge. Reporting it is what lets the run end.
+    status: (_text: string, options?: { idle?: boolean }) => {
+      if (options?.idle === true) arrive?.({ kind: "closed", state: "MERGED" });
+      return Promise.resolve();
+    },
     ask: () => Promise.resolve("send"),
   };
   const ctx = { agent, github, vcs, view, params: { pr: "7" } } as unknown as Ctx<{ pr: string }>;

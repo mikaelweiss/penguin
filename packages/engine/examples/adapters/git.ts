@@ -121,6 +121,28 @@ export default adapter({
         .some((line) => path.resolve(line.slice("worktree ".length).trim()) === here);
     }
 
+    /**
+     * Where this repository's worktrees are cut. The repository, not the checkout: a run started
+     * inside a worktree buckets with the clone it came from, or it loses sight of every worktree
+     * an earlier run cut.
+     */
+    async function worktreeBase(): Promise<string> {
+      const common = await git(["rev-parse", "--git-common-dir"]);
+      const gitdir = common.stdout.trim();
+      const repo = gitdir === "" ? host.cwd : path.dirname(path.resolve(host.cwd, gitdir));
+      const base = host.config("worktrees") ?? path.join(host.home, "worktrees");
+      return path.join(base, path.basename(repo));
+    }
+
+    /** A path as the filesystem settles it, so two spellings of one folder compare equal. */
+    function settled(target: string): string {
+      try {
+        return fs.realpathSync(target);
+      } catch {
+        return path.resolve(target);
+      }
+    }
+
     async function headOf(
       cwd: string | undefined,
     ): Promise<{ branch: string; sha: string; detached: boolean }> {
@@ -471,13 +493,7 @@ export default adapter({
               `${JSON.stringify({ at: new Date().toISOString(), dir })}\n`,
             );
           };
-          // The repository, not the checkout: a run started inside a worktree buckets with the
-          // clone it came from, or it loses sight of every worktree an earlier run cut.
-          const common = await git(["rev-parse", "--git-common-dir"]);
-          const gitdir = common.stdout.trim();
-          const repo = gitdir === "" ? host.cwd : path.dirname(path.resolve(host.cwd, gitdir));
-          const base = host.config("worktrees") ?? path.join(host.home, "worktrees");
-          const target = path.join(base, path.basename(repo), name);
+          const target = path.join(await worktreeBase(), name);
           // A branch git already holds is the same "one is already there" the caller answers,
           // whatever folder holds it.
           const held = options?.ref === undefined ? await checkedOut(name) : "";
@@ -513,6 +529,24 @@ export default adapter({
             return { path: target, existed: false };
           }
           throw new Fault(done.stderr.trim());
+        },
+        /**
+         * The worktrees this repository holds under its own base, each named as add names it.
+         * The main checkout and anything cut somewhere else are not a run's to reason about.
+         */
+        async list(): Promise<{ path: string; name: string }[]> {
+          const listed = await git(["worktree", "list", "--porcelain"]);
+          if (listed.code !== 0) throw new Fault(listed.stderr.trim());
+          const base = settled(await worktreeBase());
+          const found: { path: string; name: string }[] = [];
+          for (const line of listed.stdout.split("\n")) {
+            if (!line.startsWith("worktree ")) continue;
+            const dir = line.slice("worktree ".length).trim();
+            const name = path.relative(base, settled(dir));
+            if (name === "" || name.startsWith("..") || path.isAbsolute(name)) continue;
+            found.push({ path: dir, name });
+          }
+          return found;
         },
         async remove(target: string, options?: { force?: boolean }): Promise<void> {
           const force = options?.force === true ? ["--force"] : [];

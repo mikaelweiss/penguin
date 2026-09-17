@@ -5,6 +5,9 @@ import { openWorktree } from "../helpers/worktree.ts";
 
 const DIFF_LINES = 500;
 
+/** What every review worktree is named under, and what the sweep reads a PR number back out of. */
+const PREFIX = "review-pr-";
+
 /** How many times one judgment may send the gatherer back for code it cannot read itself. */
 const QUESTIONS = 2;
 
@@ -224,9 +227,34 @@ export default workflow({
     }
 
     const ref = `pull/${pr.number}/head`;
-    const name = `review-pr-${pr.number}`;
-    const dir = await openWorktree(ctx, name, { ref });
-    if (dir === "") return { rounds: 0, posted: 0 };
+    const name = `${PREFIX}${pr.number}`;
+
+    /**
+     * What earlier reviews left behind. A run killed between its review and the merge never
+     * reaches its own teardown, so each review clears the trees whose pull requests are done.
+     */
+    const sweep = async (): Promise<void> => {
+      let held: { path: string; name: string }[];
+      try {
+        held = await vcs.worktree.list();
+      } catch {
+        return;
+      }
+      for (const tree of held) {
+        if (tree.name === name || !tree.name.startsWith(PREFIX)) continue;
+        const number = tree.name.slice(PREFIX.length);
+        if (!/^\d+$/.test(number)) continue;
+        try {
+          const done = await github.pr.get(number);
+          if (done !== null && done.state === "OPEN") continue;
+          await vcs.worktree.remove(tree.path, { force: true });
+          await view.show(`swept the worktree for PR #${number}: it is ${done?.state ?? "gone"}`);
+        } catch (error) {
+          await view.show(`the worktree for PR #${number} stayed: ${messageOf(error)}`);
+        }
+      }
+    };
+    await sweep();
 
     const changes = github.pr.changes(params.pr);
     let inbound = changes.next();
@@ -237,6 +265,8 @@ export default workflow({
     let rounds = 0;
     let posted = 0;
     let head = "";
+    let dir = "";
+    let reader = "";
 
     type Change = Awaited<ReturnType<typeof changes.next>>;
     /** The changes that are context for a running turn rather than a reason to stop. */
@@ -245,12 +275,33 @@ export default workflow({
     type Stop = "approved" | "closed" | "draft" | "queued";
     type Ran<T> = { stop: Stop } | { value: T };
 
-    // The reader holds the tree it read across the rounds, so a second round reads only what changed.
-    const reader = await agent.open({
-      model: "small",
-      cwd: dir,
-      autocompact: "200000",
-    });
+    /** The tree a round reads, cut when one is owed. The reader opens on it and dies with it. */
+    const hold = async (): Promise<boolean> => {
+      if (dir !== "") return true;
+      const cut = await openWorktree(ctx, name, { ref });
+      if (cut === "") return false;
+      dir = cut;
+      reader = await agent.open({ model: "small", cwd: dir, autocompact: "200000" });
+      return true;
+    };
+
+    /**
+     * A full checkout costs too much to hold through a wait that runs for days, and a review
+     * with nothing owed has no use for one. Teardown runs here too, so it runs on every exit.
+     */
+    const drop = async (): Promise<void> => {
+      if (dir === "") return;
+      const held = dir;
+      dir = "";
+      reader = "";
+      head = "";
+      // Best-effort teardown: the review's outcome must not wait on a gate about a folder.
+      try {
+        await attempt(() => vcs.worktree.remove(held, { force: true }));
+      } catch (error) {
+        await view.show(`the worktree stayed: ${messageOf(error)}`);
+      }
+    };
 
     const gathering = (): string =>
       previous === undefined
@@ -273,7 +324,7 @@ export default workflow({
 
     /** The commit the findings judge, against the commit the PR carries now. */
     const since = async (): Promise<"same" | "moved" | "unread"> => {
-      if (head === "") return "unread";
+      if (dir === "" || head === "") return "unread";
       // A freshness read stays best-effort: a fault here must not hold the review at a gate.
       try {
         return await attempt(async () => {
@@ -461,6 +512,7 @@ export default workflow({
     try {
       for (;;) {
         if (owed && !inDraft && !paused) {
+          if (!(await hold())) break;
           rounds += 1;
           await view.show(`review round ${rounds}`);
           const outcome = await review();
@@ -478,6 +530,7 @@ export default workflow({
           owed = false;
           continue;
         }
+        await drop();
         await view.status(`waiting for changes on PR #${pr.number}`, { idle: true });
         const change = await inbound;
         inbound = changes.next();
@@ -503,12 +556,7 @@ export default workflow({
         if (change.kind === "comments") notes = notes.concat(change.comments);
       }
     } finally {
-      // Best-effort teardown: the review's outcome must not wait on a gate about a folder.
-      try {
-        await attempt(() => vcs.worktree.remove(dir));
-      } catch (error) {
-        await view.show(`the worktree stayed: ${messageOf(error)}`);
-      }
+      await drop();
     }
     return { rounds, posted };
   },
