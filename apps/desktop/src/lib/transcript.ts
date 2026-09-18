@@ -13,6 +13,7 @@ export type TranscriptRow =
   | { kind: "input"; key: string; input: RunInput[] }
   | { kind: "line"; key: string; line: OutputLine }
   | { kind: "actions"; key: string; actions: ActionItem[]; summary: string; failures: number }
+  | { kind: "image"; key: string; path: string }
   | { kind: "turn"; key: string; label: string }
   | { kind: "mark"; key: string; text: string }
   | { kind: "closing"; key: string; text: string };
@@ -108,6 +109,10 @@ export function toRows(run: Run, sent: OutputLine[]): TranscriptRow[] {
       rows.push({ kind: "mark", key: `mark:${item.id}`, text: item.text });
       continue;
     }
+    if (item.type === "image") {
+      rows.push({ kind: "image", key: `image:${item.id}`, path: item.path });
+      continue;
+    }
     if (item.type === "action") {
       const tail = rows.at(-1);
       if (tail?.kind === "actions") {
@@ -192,6 +197,8 @@ function same(a: TranscriptRow, b: TranscriptRow): boolean {
         sameActions(a.actions, other.actions)
       );
     }
+    case "image":
+      return a.path === (b as typeof a).path;
     case "turn":
       return a.label === (b as typeof a).label;
     case "mark":

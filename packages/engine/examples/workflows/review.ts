@@ -1,5 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { reviewBrief } from "../helpers/brief.ts";
 import { REVIEWER } from "../helpers/models.ts";
 import { narrated } from "../helpers/turns.ts";
 
@@ -10,6 +11,8 @@ export const Review = z.object({
     .describe("the defects this change must fix before it lands, one per line, empty when none"),
   notes: z.string().describe("what else the reader should know, one per line"),
 });
+
+export type Reviewed = z.infer<typeof Review>;
 
 export type Brief = {
   acceptance: string;
@@ -47,6 +50,18 @@ export function checklist(brief: Brief): string {
   return parts.join("\n\n");
 }
 
+/** What the brief's writer needs and the review turn never put in words: the case and the verdict on it. */
+export function outcome(options: { acceptance: string; base: string; review: Reviewed }): string {
+  const said = (text: string): string => (text === "" ? "none" : text);
+  const parts = [`# What the change had to satisfy\n\n${options.acceptance}`];
+  if (options.base !== "")
+    parts.push(`# The base\n\nThe change is \`git diff ${options.base}..HEAD\`.`);
+  parts.push(
+    `# The verdict\n\n${options.review.verdict}\n\n## Blocking\n\n${said(options.review.blocking)}\n\n## Notes\n\n${said(options.review.notes)}`,
+  );
+  return parts.join("\n\n");
+}
+
 export default workflow({
   description: "review a working tree against its acceptance checks",
   params: z.object({
@@ -59,7 +74,8 @@ export default workflow({
     base: z.string().default("").meta({ internal: true }),
   }),
 
-  async run({ params, agent, gates, view }) {
+  async run(ctx) {
+    const { params, agent, gates, view } = ctx;
     // The gates run here, once, so the reviewer reads a verdict instead of producing one.
     const ran = await gates.run({ since: params.base === "" ? undefined : params.base });
     await view.show(ran.green ? "gates: green" : "gates: red");
@@ -72,6 +88,10 @@ export default workflow({
       ),
     );
     await view.show(`verdict: ${review.verdict}`);
+    const page = await reviewBrief(ctx, session, {
+      about: outcome({ acceptance: params.acceptance, base: params.base, review }),
+    });
+    if (page !== null && page.png !== null) await view.image(page.png);
     return review;
   },
 });

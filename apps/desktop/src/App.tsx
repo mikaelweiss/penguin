@@ -32,6 +32,7 @@ import { RemoveProjectDialog } from "@/components/remove-project-dialog";
 import { RunTranscript } from "@/components/run-transcript";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { useAutoResume } from "@/hooks/use-auto-resume";
+import { useBriefsRoot } from "@/hooks/use-briefs-root";
 import { useBrowser } from "@/hooks/use-browser";
 import { useConfig } from "@/hooks/use-config";
 import { useDirectories } from "@/hooks/use-directories";
@@ -65,7 +66,8 @@ export function App() {
   useWindowBackground();
   useDragKeepsFocus();
   const directories = useDirectories();
-  const { projects, published, error } = useRuns(directories.dirs, directories.hidden);
+  const briefs = useBriefsRoot();
+  const { projects, published, error } = useRuns(directories.dirs, directories.hidden, briefs);
   const removing = useRemoveProject(projects, directories);
   const inbox = useInbox();
   const actions = useRunActions();

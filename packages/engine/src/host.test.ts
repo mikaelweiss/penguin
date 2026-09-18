@@ -2,10 +2,12 @@ import { afterEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Host } from "./core/adapter.ts";
 import { roots } from "./catalog/catalogs.ts";
 import { skillLookup } from "./catalog/skills.ts";
 import { createHost } from "./host.ts";
+import { home } from "./paths.ts";
 
 function hostFor(dir: string): Host {
   return createHost(dir, { id: "test", dir }, skillLookup(roots(dir)));
@@ -150,6 +152,26 @@ test("open ignores what no browser can show", () => {
   host.open("");
   host.open("file:///etc/passwd");
   host.open("not a url");
+  expect(fs.existsSync(path.join(dir, "run.jsonl"))).toBe(false);
+});
+
+test("a brief page is a file url open takes, once", () => {
+  const dir = tempDir();
+  const host = hostFor(dir);
+  const page = pathToFileURL(
+    path.join(home(), "briefs", "penguin", "main", "proposal.html"),
+  ).href;
+  host.open(page);
+  host.open(page);
+  expect(opens(dir)).toEqual([page]);
+});
+
+test("a page outside the briefs root is nothing open takes, whatever it is named", () => {
+  const dir = tempDir();
+  const host = hostFor(dir);
+  host.open(pathToFileURL(path.join(os.tmpdir(), "elsewhere", "proposal.html")).href);
+  host.open(pathToFileURL(path.join(home(), "briefs", "..", "notes.html")).href);
+  host.open(pathToFileURL(path.join(home(), "briefs", "penguin", "main", "review.md")).href);
   expect(fs.existsSync(path.join(dir, "run.jsonl"))).toBe(false);
 });
 

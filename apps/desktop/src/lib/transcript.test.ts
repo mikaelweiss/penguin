@@ -197,3 +197,16 @@ test("the scroller anchors on each new step", () => {
 
   expect(rows.filter(startsTurn).map((row) => row.key)).toEqual(["turn:t1"]);
 });
+
+test("a picture takes a row of its own, and keeps it while the path holds", () => {
+  const picture: TranscriptItem = {
+    type: "image",
+    id: "p1",
+    path: "/home/me/.penguin/briefs/penguin/ship/review.png",
+    at: "t2",
+  };
+  const rows = toRows(run([said("c1", "show", "t1"), picture]), []);
+
+  expect(rows.map((row) => row.key)).toEqual(["line:show:c1", "image:p1"]);
+  expect(reuseRows(rows, toRows(run([said("c1", "show", "t1"), picture]), []))).toBe(rows);
+});

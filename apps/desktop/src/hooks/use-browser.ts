@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 import {
   blankTab,
   closeTab,
   forgetGone,
   freshOpens,
+  landOpens,
   navigate,
   NO_TABS,
   openTab,
+  pageUrl,
   retitle,
   type Held,
   type RunTabs,
 } from "@/lib/browser";
+import { openOutside } from "@/lib/opening";
 import {
+  browserNavigate,
   browserReset,
+  liveTabs,
   onBrowserPopup,
   onBrowserTitle,
   onBrowserUrl,
@@ -121,13 +126,20 @@ export function useBrowser(): BrowserState {
       const { urls, applied } = freshOpens(one, opens);
       if (urls.length === 0) return false;
       if (into === "system") {
-        for (const url of urls) openUrl(url).catch((cause: unknown) => setError(problem(cause)));
+        for (const url of urls) openOutside(url).catch((cause: unknown) => setError(problem(cause)));
         change(runId, (held) => ({ ...held, applied }));
         return true;
       }
-      let next = one;
-      for (const url of urls) next = openTab(next, url);
+      const { next, moved } = landOpens(
+        one,
+        urls.map((url) => pageUrl(url, convertFileSrc)),
+      );
       change(runId, () => ({ ...next, applied }));
+      // A tab whose page is already up hears about the new one from nowhere else.
+      for (const page of moved) {
+        if (!liveTabs().has(page.id)) continue;
+        browserNavigate(page.id, page.url).catch((cause: unknown) => setError(problem(cause)));
+      }
       return true;
     },
     [held, change],

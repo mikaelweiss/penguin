@@ -22,12 +22,15 @@ export type Runs = {
  * short stays out of the tree until a read reaches its end: without its closing note, a finished
  * run would pass for a paused one.
  */
-export function useRuns(dirs: string[], hidden: Hidden): Runs {
+export function useRuns(dirs: string[], hidden: Hidden, briefs: string | undefined): Runs {
   const [projects, setProjects] = useState<Project[]>([]);
   const [published, setPublished] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
+    // The browser counts the open notes it was handed, so a first draw that dropped a brief
+    // would leave that page behind the cursor forever.
+    if (briefs === undefined) return;
     let tracked = new Map<string, Tracked>();
     let drawn = false;
     let stopped = false;
@@ -66,7 +69,7 @@ export function useRuns(dirs: string[], hidden: Hidden): Runs {
       if (!changed) return;
       drawn = true;
       const files = [...next.values()];
-      setProjects(toProjects(files.filter((file) => file.settled), dirs, hidden));
+      setProjects(toProjects(files.filter((file) => file.settled), dirs, hidden, briefs));
       if (files.every((file) => file.settled)) setPublished(true);
     };
 
@@ -85,7 +88,7 @@ export function useRuns(dirs: string[], hidden: Hidden): Runs {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [dirs, hidden]);
+  }, [dirs, hidden, briefs]);
 
   return { projects, published, error };
 }

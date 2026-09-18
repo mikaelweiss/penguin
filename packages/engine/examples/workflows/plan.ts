@@ -1,5 +1,6 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { NOTES_ASK, Notes, notesApprove, notesRevision, proposal } from "../helpers/brief.ts";
 import { bearings, discover } from "../helpers/discover.ts";
 import { resolveTicket } from "../helpers/ticket.ts";
 import { narrated } from "../helpers/turns.ts";
@@ -36,8 +37,6 @@ export const Out = z.object({
 });
 
 export type Planned = z.infer<typeof Plan> & { tasks: string[] };
-
-const Approved = z.union([z.enum(["approve"]), z.string()]);
 
 function numbered(tasks: string[]): string {
   return tasks.map((task, index) => `${index + 1}. ${task}`).join("\n");
@@ -93,6 +92,7 @@ export default workflow({
     const scouted = bearings(await discover(ctx, { task }));
     const session = await agent.open();
     let input = brief(ticket, fence(tasks, params.done), scouted);
+    let reply = "";
     for (;;) {
       const out = await narrated(view, () =>
         agent.turn(session, { skill: "plan", prompt: input }, { result: Out }),
@@ -116,7 +116,7 @@ export default workflow({
         const proposed = [...tasks.slice(0, params.done), ...out.resplit.tasks];
         const answer = await view.ask(
           `The code changes the split. ${out.resplit.reason}\n\nThe work that remains:\n\n${numbered(out.resplit.tasks)}\n\nApprove the split?`,
-          Approved,
+          Notes,
         );
         if (answer === "approve") {
           tasks = proposed;
@@ -131,9 +131,19 @@ export default workflow({
         continue;
       }
       const plan = out.result;
-      const answer = await view.ask(`${plan.plan}\n\nApprove the plan?`, Approved);
-      if (answer === "approve") return { ...plan, tasks };
-      input = `# The revision the user asks for\n\n${answer}`;
+      const page = await proposal(ctx, session, { about: plan.plan, notes: reply });
+      const answer =
+        page === null
+          ? await view.ask(`${plan.plan}\n\nApprove the plan?`, Notes)
+          : await view.ask(NOTES_ASK, Notes);
+      if (notesApprove(answer)) return { ...plan, tasks };
+      const heading =
+        page === null
+          ? "# The revision the user asks for"
+          : "# The revision the user asks for, numbered against the proposal page";
+      // The page carries the reply as it was written, so the next version shows what drove it.
+      reply = page === null ? "" : answer;
+      input = `${heading}\n\n${notesRevision(answer)}`;
     }
   },
 });

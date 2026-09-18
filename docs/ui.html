@@ -116,6 +116,7 @@
       <li>Back, forward, reload, an address bar, and a button that sends the page to the default browser.</li>
       <li>Tabs outlive a quit. Reopening the app and selecting the run finds them where they were.</li>
       <li>A run opens a url with <code>view.open</code>, and the adapters open what they produce: a PR made, a PR reviewed, a ticket handed in.</li>
+      <li>A run's brief opens the same way, loaded from disk. Re-rendering it moves the tab already holding it rather than opening a second.</li>
       <li>Each url is a tab. A url a tab already holds is selected, not opened twice.</li>
       <li>A url opened while you watch another run waits. Switching to that run opens the panel on it.</li>
       <li>The empty state lists the local servers answering with a page, by the process holding each port.</li>

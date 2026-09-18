@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -31,7 +30,8 @@ import { Spinner } from "@workspace/ui/components/spinner";
 import { PanelChrome } from "@/components/panel-chrome";
 import { useBrowserSurface } from "@/hooks/use-browser-surface";
 import { useLocalServers } from "@/hooks/use-local-servers";
-import { allTabs, isBlank, typedUrl, type Held, type RunTabs } from "@/lib/browser";
+import { allTabs, isBlank, shownUrl, typedUrl, type Held, type RunTabs } from "@/lib/browser";
+import { openOutside } from "@/lib/opening";
 import {
   browserBack,
   browserForward,
@@ -61,7 +61,8 @@ function tabName(url: string, title: string): string {
   if (url === "") return "New tab";
   if (title !== "") return title;
   try {
-    const { host, pathname } = new URL(url);
+    const { protocol, host, pathname } = new URL(shownUrl(url));
+    if (protocol === "file:") return pathname.split("/").pop() ?? pathname;
     return pathname === "/" ? host : `${host}${pathname}`;
   } catch {
     return url;
@@ -137,7 +138,7 @@ export function BrowserPanel({
 
       <UrlRow
         key={active?.id ?? "none"}
-        url={active?.url ?? ""}
+        url={active === undefined ? "" : shownUrl(active.url)}
         tabId={active?.id}
         loading={loading}
         onGo={onGo}
@@ -263,7 +264,7 @@ function UrlRow({
             size="icon-xs"
             aria-label="Open in the default browser"
             disabled={url === ""}
-            onClick={() => void openUrl(url)}
+            onClick={() => void openOutside(url)}
             type="button"
           >
             <ExternalLinkIcon />

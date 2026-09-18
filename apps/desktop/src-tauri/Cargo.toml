@@ -19,7 +19,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Child webviews, what the in-app browser panel is made of, live behind "unstable".
-tauri = { version = "2", features = ["unstable"] }
+# "protocol-asset" is what serves a run's briefs off disk to the same panel.
+# "image-png" is what decodes a brief's shot, which Image::from_path is a stub without.
+tauri = { version = "2", features = ["unstable", "protocol-asset", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"

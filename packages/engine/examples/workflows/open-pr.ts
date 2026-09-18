@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { call, isWithdrawn, workflow, type Adapters } from "penguin";
 import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
@@ -120,7 +121,7 @@ export default workflow({
   }),
 
   async run(ctx) {
-    const { agent, github, params, vcs, view } = ctx;
+    const { agent, brief, github, params, vcs, view } = ctx;
     const nowhere = { url: "", state: "", rounds: 0 };
 
     const head = await vcs.head();
@@ -185,9 +186,17 @@ export default workflow({
       vcs.against(onto),
       github.pr.titles(STYLE_DEPTH),
     ]);
+    // The branch's review brief, when it has one. The person read that page, so the pull request carries it.
+    const pages = (await brief.where({ name: "review" })).replace(/\.json$/, "");
+    const reviewed = fs.existsSync(`${pages}.md`) ? fs.readFileSync(`${pages}.md`, "utf8") : "";
     const work = [
       `# Base branch\n\n${base}`,
       ...(params.ticket === "" ? [] : [`# Ticket\n\n${params.ticket}`]),
+      ...(reviewed === ""
+        ? []
+        : [
+            `# The brief\n\nThis is the body the pull request will carry. Write a title that names the same change.\n\n${reviewed}`,
+          ]),
       `# Commits\n\n${commits.subjects.join("\n")}`,
       `# Diff stat\n\n${stat.text.trim()}`,
       `# Diff\n\n${
@@ -205,8 +214,9 @@ export default workflow({
     const written = await narrated(view, () =>
       agent.turn(writer, { skill: "open-pr", prompt: work }, { result: Description }),
     );
-    // The note is the caller's, so it goes under a body the agent wrote knowing nothing of it.
-    const body = params.note === "" ? written.body : `${written.body}\n\n${params.note}`;
+    const said = reviewed === "" ? written.body : reviewed;
+    // The note is the caller's, so it goes under a body written knowing nothing of it.
+    const body = params.note === "" ? said : `${said}\n\n${params.note}`;
 
     const made = await github.pr.ensure({ head: head.branch, base, title: written.title, body });
     if (made.landed) {
@@ -230,6 +240,7 @@ export default workflow({
       base = pr.baseRefName;
     }
     await view.show(`PR is up: ${pr.url}`);
+    if (fs.existsSync(`${pages}.png`)) await view.image(`${pages}.png`);
 
     // ---- the watch ----
     // Pumps keep what arrived; the loop reads the pull request fresh before it

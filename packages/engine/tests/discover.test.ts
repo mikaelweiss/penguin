@@ -11,6 +11,17 @@ function said(ask: Ask): string {
   return typeof ask === "string" ? ask : (ask.prompt ?? "");
 }
 
+function skillOf(ask: Ask): string | undefined {
+  return typeof ask === "string" ? undefined : ask.skill;
+}
+
+const PAGE = {
+  html: "/briefs/review.html",
+  md: "/briefs/review.md",
+  png: "/briefs/review.png",
+  problems: [],
+};
+
 function harness(values: unknown[]) {
   const opens: Opened[] = [];
   const turns: Turn[] = [];
@@ -27,11 +38,24 @@ function harness(values: unknown[]) {
       };
     },
   };
-  const view = { show: () => Promise.resolve(), act: () => Promise.resolve() };
+  const shown: string[] = [];
+  const view = {
+    show: () => Promise.resolve(),
+    act: () => Promise.resolve(),
+    image: (path: string) => {
+      shown.push(path);
+      return Promise.resolve();
+    },
+  };
   const gates = { run: () => Promise.resolve({ green: true, report: "bun test: pass" }) };
   const vcs = { status: () => Promise.resolve({ files: [{ status: "M", path: "src/edited.ts" }] }) };
-  const ctx = { agent, gates, vcs, view } as unknown as Ctx<unknown>;
-  return { opens, turns, ctx };
+  const brief = {
+    where: (options: { name: string }) => Promise.resolve(`/briefs/${options.name}.json`),
+    render: () => Promise.resolve(PAGE),
+    open: () => Promise.resolve(),
+  };
+  const ctx = { agent, brief, gates, vcs, view } as unknown as Ctx<unknown>;
+  return { opens, turns, shown, ctx };
 }
 
 const scouted: Bearings = {
@@ -128,4 +152,28 @@ test("the reviewer still gets the tree's own list, not the scout's", async () =>
   const review = said(bench.turns[2]?.ask ?? "");
   expect(review).toContain("- src/edited.ts");
   expect(review).not.toContain("src/widget.ts");
+});
+
+test("one brief closes the run, after the last round, on the reviewer's session", async () => {
+  const bench = harness([
+    scouted,
+    {},
+    { verdict: "changes_needed", blocking: "the toggle has no test", notes: "" },
+    {},
+    { verdict: "approved", blocking: "", notes: "" },
+  ]);
+
+  await implement.run({
+    ...bench.ctx,
+    params: { task: "add a toggle", rounds: 2, baseline: "", base: "" },
+  } as never);
+
+  const briefs = bench.turns.filter((turn) => skillOf(turn.ask) === "brief");
+  expect(briefs).toHaveLength(1);
+  const last = bench.turns[bench.turns.length - 1];
+  expect(skillOf(last?.ask ?? "")).toBe("brief");
+  expect(briefs[0]?.session).toBe("session-3");
+  expect(said(briefs[0]?.ask ?? "")).toContain("/briefs/review.json");
+  expect(said(briefs[0]?.ask ?? "")).toContain("approved");
+  expect(bench.shown).toEqual(["/briefs/review.png"]);
 });

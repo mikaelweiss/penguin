@@ -37,16 +37,71 @@ function newTab(url: string): Tab {
   return { id: crypto.randomUUID(), url, title: "" };
 }
 
+/** A file served to a page. macOS and Linux get a scheme of their own, Windows a reserved host. */
+function isAsset(url: URL): boolean {
+  return url.protocol === "asset:" || url.host === "asset.localhost";
+}
+
+/** The file on disk behind a url: a brief's own url, or the asset url a page loads it by. */
+export function filePath(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "file:") return decodeURIComponent(parsed.pathname);
+    return isAsset(parsed) ? decodeURIComponent(parsed.pathname.slice(1)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What a run's open note loads. A brief is a file, and wry hands a file url straight to the
+ * platform's web view, which shows nothing, so it goes through the asset protocol instead. The
+ * version the note carries rides along, so a re-render is a page the tab has not seen.
+ */
+export function pageUrl(url: string, asset: (path: string) => string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  if (parsed.protocol !== "file:") return url;
+  return `${asset(decodeURIComponent(parsed.pathname))}${parsed.search}`;
+}
+
+/** What the address bar says. A brief reads as the file it is, not as the url serving it. */
+export function shownUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!isAsset(parsed)) return url;
+    return `file://${decodeURIComponent(parsed.pathname.slice(1))}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+/** One brief re-rendered. The path stays put and only the version on the end of it moves. */
+function samePage(a: string, b: string): boolean {
+  try {
+    const one = new URL(a);
+    const two = new URL(b);
+    return isAsset(one) && isAsset(two) && one.host === two.host && one.pathname === two.pathname;
+  } catch {
+    return false;
+  }
+}
+
 /** The tab a url would land in: the one already holding it, or one waiting to be told where to go. */
-function landing(held: RunTabs, url: string): Tab | undefined {
+export function tabFor(held: RunTabs, url: string): Tab | undefined {
   return (
     held.tabs.find((tab) => tab.url === url) ??
+    held.tabs.find((tab) => samePage(tab.url, url)) ??
     held.tabs.find((tab) => tab.id === held.active && isBlank(tab))
   );
 }
 
 export function openTab(held: RunTabs, url: string): RunTabs {
-  const known = landing(held, url);
+  const known = tabFor(held, url);
   if (known === undefined) {
     const tab = newTab(url);
     return { ...held, tabs: [...held.tabs, tab], active: tab.id };
@@ -90,12 +145,28 @@ export function freshOpens(held: RunTabs, opens: string[]): { urls: string[]; ap
   return { urls: opens.slice(held.applied), applied: opens.length };
 }
 
+/** A page a tab was already showing has moved under it, so only the page itself still needs telling. */
+export type Moved = { id: string; url: string };
+
+/** Where fresh urls land: the tabs they make, and the tabs they left on a new page. */
+export function landOpens(held: RunTabs, urls: string[]): { next: RunTabs; moved: Moved[] } {
+  let next = held;
+  const moved: Moved[] = [];
+  for (const url of urls) {
+    const known = tabFor(next, url);
+    if (known !== undefined && !isBlank(known) && known.url !== url) {
+      moved.push({ id: known.id, url });
+    }
+    next = openTab(next, url);
+  }
+  return { next, moved };
+}
+
 /** What a run's open notes make of its tabs, and whether any of them were news. */
 export function applyOpens(held: RunTabs, opens: string[]): { next: RunTabs; opened: boolean } {
   const { urls, applied } = freshOpens(held, opens);
   if (urls.length === 0) return { next: held, opened: false };
-  let next = held;
-  for (const url of urls) next = openTab(next, url);
+  const { next } = landOpens(held, urls);
   return { next: { ...next, applied }, opened: true };
 }
 

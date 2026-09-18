@@ -1,5 +1,6 @@
 import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
+import { reviewBrief, type Page } from "../helpers/brief.ts";
 import { narrate, narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
@@ -351,9 +352,13 @@ export default workflow({
       return true;
     };
 
-    const post = async (findings: Findings): Promise<void> => {
-      await github.pr.comment(params.pr, { body: report(findings) });
+    const post = async (findings: Findings, page: Page | null): Promise<void> => {
+      await github.pr.comment(
+        params.pr,
+        page === null ? { body: report(findings) } : { bodyFile: page.md },
+      );
       posted += 1;
+      if (page !== null && page.png !== null) await view.image(page.png);
     };
 
     /** What news that lands mid-turn tells the session that was running. */
@@ -478,6 +483,18 @@ export default workflow({
 
       let findings = verdictOf(judged.value);
       previous = findings;
+
+      /**
+       * The reader writes the page, not the judge: the judge holds no tools, so it can
+       * neither write the JSON nor run the renderer.
+       */
+      const briefed = (found: Findings): Promise<Page | null> =>
+        reviewBrief(ctx, reader, {
+          about: `${briefing()}\n\nThe base is origin/${pr.baseRefName} and the working tree holds the head. The review judged the code you read, and every finding below goes on the page.\n\n${report(found)}`,
+          branch: `pr-${pr.number}`,
+        });
+      let page = await briefed(findings);
+
       while (findings.blockers.length > 0) {
         const answer = await view.ask(
           `${report(findings)}\n\nPost this without approving?`,
@@ -485,7 +502,7 @@ export default workflow({
         );
         if (answer === "send") {
           if (await overtaken()) return "stale";
-          await post(findings);
+          await post(findings, page);
           await view.show(`Posted feedback on PR #${pr.number} without approving`);
           return "sent";
         }
@@ -496,9 +513,10 @@ export default workflow({
         if ("stop" in said) return said.stop;
         findings = verdictOf(said.value);
         previous = findings;
+        page = await briefed(findings);
       }
       if (await overtaken()) return "stale";
-      await post(findings);
+      await post(findings, page);
       try {
         await github.pr.approve(params.pr);
         await view.show(`Approved PR #${pr.number}`);

@@ -2,6 +2,7 @@ import { isClosing, isHead, lastSegment } from "@mikaelweiss/penguin-engine/segm
 
 import { plain } from "@/lib/ansi";
 import type { Attachment } from "@/lib/attachments";
+import { briefImage, briefPage } from "@/lib/briefs";
 import type { Hidden } from "@/lib/directories";
 
 export type RunStatus = "running" | "done" | "failed" | "stopped" | "paused";
@@ -59,7 +60,20 @@ export type Mark = {
   at: string;
 };
 
-export type TranscriptItem = { type: "line"; line: OutputLine } | ActionItem | TurnMark | Mark;
+/** A picture the run made, shown so it can be copied or dragged where it is wanted. */
+export type ImageItem = {
+  type: "image";
+  id: string;
+  path: string;
+  at: string;
+};
+
+export type TranscriptItem =
+  | { type: "line"; line: OutputLine }
+  | ActionItem
+  | TurnMark
+  | Mark
+  | ImageItem;
 
 export type Ask = {
   prompt: string;
@@ -685,19 +699,21 @@ function opensTurn(entry: Entry): boolean {
   );
 }
 
-function outputOf(entries: Entry[]): TranscriptItem[] {
+function outputOf(entries: Entry[], briefs: string | undefined): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const actions = new Map<string, ActionItem>();
   const agents = new Map<string, number>();
   const latest = entries.findLastIndex(isHead);
   let turns = 0;
   let marks = 0;
+  let pictures = 0;
   for (const [index, entry] of entries.entries()) {
     // A resumed segment writes down what it replayed. The story already told it.
     if (entry["replayed"] === true) continue;
     const args = argsOf(entry);
     const at = text(entry["at"]) ?? "";
     const id = text(entry["id"]) ?? at;
+    const picture = briefImage(text(entry["image"]) ?? "", briefs);
     const line = (kind: OutputLine["kind"], value: string): void => {
       items.push({ type: "line", line: { id, kind, text: value, at } });
     };
@@ -722,6 +738,8 @@ function outputOf(entries: Entry[]): TranscriptItem[] {
     } else if (opensTurn(entry)) {
       const turn = turnOf(entry, agents, `t${++turns}`);
       if (turn !== undefined) items.push(turn);
+    } else if (picture !== undefined) {
+      items.push({ type: "image", id: `p${++pictures}`, path: picture, at });
     }
   }
   return items;
@@ -737,7 +755,7 @@ function inputOf(head: Entry): RunInput[] {
   });
 }
 
-/** A page a browser can show. A run file is not the app's to trust, so anything else is dropped. */
+/** A page from the web. A brief is the other kind a browser can show, and it comes off disk. */
 function isWeb(url: string): boolean {
   try {
     return ["http:", "https:"].includes(new URL(url).protocol);
@@ -746,10 +764,11 @@ function isWeb(url: string): boolean {
   }
 }
 
-function opensOf(notes: Entry[]): string[] {
+function opensOf(notes: Entry[], briefs: string | undefined): string[] {
   return notes.flatMap((note) => {
     const url = text(note["open"]);
-    return url === undefined || !isWeb(url) ? [] : [url];
+    if (url === undefined) return [];
+    return isWeb(url) || briefPage(url, briefs) !== undefined ? [url] : [];
   });
 }
 
@@ -774,7 +793,7 @@ type Placed = {
   at: string;
 };
 
-function place(file: RunFile): Placed | undefined {
+function place(file: RunFile, briefs: string | undefined): Placed | undefined {
   const head = file.entries.find(isHead);
   const workflow = text(head?.["workflow"]);
   const cwd = text(head?.["cwd"]);
@@ -821,8 +840,8 @@ function place(file: RunFile): Placed | undefined {
       ...(ticket === undefined ? {} : { ticket }),
       ...(state === undefined ? {} : { state }),
       input: inputOf(head),
-      output: outputOf(file.entries),
-      opens: opensOf(notes),
+      output: outputOf(file.entries, briefs),
+      opens: opensOf(notes, briefs),
       children: [],
     },
     parent: text(head["parent"]),
@@ -840,10 +859,18 @@ function shows(entry: Placed, hidden: Hidden): boolean {
 /**
  * The run files as a tree of projects, grouped by each run's git root and linked by parent id.
  * The directories the user added come through even before they hold a run.
+ *
+ * `briefs` is where the engine writes a run's pages and pictures. Until the app knows it, a run
+ * file's word that a path is one of them is worth nothing, so those notes are dropped.
  */
-export function toProjects(files: RunFile[], dirs: string[], hidden: Hidden = {}): Project[] {
+export function toProjects(
+  files: RunFile[],
+  dirs: string[],
+  hidden: Hidden = {},
+  briefs?: string,
+): Project[] {
   const placed = files
-    .map(place)
+    .map((file) => place(file, briefs))
     .filter((entry): entry is Placed => entry !== undefined && shows(entry, hidden))
     .sort((a, b) => a.at.localeCompare(b.at));
   const byId = new Map(placed.map((entry) => [entry.run.id, entry]));

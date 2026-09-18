@@ -55,13 +55,23 @@ export function createHost(cwd: string, location: RunLocation, skill: SkillLooku
   };
 }
 
-/** A page a browser can show. An adapter that came up empty hands over "", not a url. */
+/**
+ * A page a browser can show. An adapter that came up empty hands over "", not a url.
+ * A brief page is the one file a run may open, so nothing else off the disk is reachable.
+ */
 function isWeb(url: string): boolean {
   try {
-    return ["http:", "https:"].includes(new URL(url).protocol);
+    const parsed = new URL(url);
+    if (parsed.protocol === "file:") return isBrief(decodeURIComponent(parsed.pathname));
+    return ["http:", "https:"].includes(parsed.protocol);
   } catch {
     return false;
   }
+}
+
+function isBrief(file: string): boolean {
+  const root = `${path.join(home(), "briefs")}${path.sep}`;
+  return file.endsWith(".html") && path.resolve(file).startsWith(root);
 }
 
 /** The keystore item store-secret.ts writes, read by the same binary that wrote it. */

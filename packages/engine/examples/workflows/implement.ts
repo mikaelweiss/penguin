@@ -1,9 +1,10 @@
 import { workflow } from "penguin";
 import { z } from "zod";
+import { reviewBrief } from "../helpers/brief.ts";
 import { bearings, discover } from "../helpers/discover.ts";
 import { REVIEWER } from "../helpers/models.ts";
 import { narrated } from "../helpers/turns.ts";
-import { checklist, Review } from "./review.ts";
+import { checklist, outcome, Review } from "./review.ts";
 
 /**
  * Every request re-reads what the requests before it grew, so an uncompacted turn pays for its
@@ -30,6 +31,12 @@ function brief(
     );
   if (blocking !== "") parts.push(`# Review findings to fix\n\n${blocking}`);
   return parts.join("\n\n");
+}
+
+/** One branch holds every task, and each task rewrites the branch's review brief. */
+function wholeBranch(base: string): string {
+  const range = base === "" ? "the branch since it left its base" : `\`git diff ${base}..HEAD\``;
+  return `# What the brief covers\n\nEvery change on this branch, ${range}, and not this task alone. A later task on this branch writes this brief again, so the page always stands for the whole branch.`;
 }
 
 export default workflow({
@@ -102,6 +109,18 @@ export default workflow({
       notes = reviewed.notes;
       approved = reviewed.verdict === "approved";
     }
+    // One brief for the change, not one a round: the page reports where the rounds landed.
+    const page = await reviewBrief(ctx, reviewer, {
+      about: [
+        outcome({
+          acceptance: params.acceptance ?? params.task,
+          base: params.base,
+          review: { verdict: approved ? "approved" : "changes_needed", blocking, notes },
+        }),
+        wholeBranch(params.base),
+      ].join("\n\n"),
+    });
+    if (page !== null && page.png !== null) await view.image(page.png);
     return { approved, blocking, notes };
   },
 });

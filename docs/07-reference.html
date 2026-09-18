@@ -183,6 +183,13 @@
             <td>role <code>github</code>: issues, pull requests, and branch heads through the gh CLI</td>
           </tr>
           <tr>
+            <td><code>examples/adapters/brief.ts</code></td>
+            <td>
+              role <code>brief</code>: where a branch's brief lives, the renderer that turns its
+              JSON into a page, and the page put in front of the person
+            </td>
+          </tr>
+          <tr>
             <td><code>examples/adapters/jira.ts</code></td>
             <td>
               role <code>jira</code>: Jira Cloud over REST, credentials from the environment or
@@ -199,7 +206,9 @@
           <tr>
             <td><code>examples/skills/</code></td>
             <td>
-              Seventeen skills the workflows' turns run on. <code>skills/commit/</code> is the model.
+              Twenty-one skills the workflows' turns run on. <code>skills/commit/</code> is the
+              model, and <code>skills/brief/</code> is one that ships a renderer beside its
+              SKILL.md.
             </td>
           </tr>
           <tr>
@@ -232,7 +241,7 @@
           </tr>
           <tr>
             <td>
-              <code>examples/workflows/</code>: <code>baseline</code>, <code>triage</code>,
+              <code>examples/workflows/</code>: <code>triage</code>,
               <code>plan</code>, <code>implement</code>, <code>review</code>, <code>open-pr</code>,
               <code>land</code>, <code>rebase</code>, <code>review-pr</code>,
               <code>make-workflow</code>

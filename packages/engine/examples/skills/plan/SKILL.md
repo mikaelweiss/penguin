@@ -47,7 +47,7 @@ From the rules you read, list the gates that touch the paths in scope: lint, req
 
 ## 4. Failure modes
 
-For each piece of persisted state, shared resource, or concurrent actor: what happens when the data is older or newer than the code, corrupt, or absent; when two actors write at once; when permissions or selection shift under a live view; when the flow stops halfway. Each answer is a one-sentence invariant, pinned by one test. When none of it applies, say so in one line and move on.
+For each piece of persisted state, shared resource, or concurrent actor: what happens when the data is older or newer than the code, corrupt, or absent; when two actors write at once; when permissions or selection shift under a live view; when the flow stops halfway. Write each answer as one plain sentence, pinned by one test. Never label it an invariant: the reader should not need the word. When none of it applies, say so in one line and move on.
 
 ## 5. The plan
 
@@ -55,7 +55,7 @@ For each piece of persisted state, shared resource, or concurrent actor: what ha
 - **Bearings**: the files to change, and the one place already doing this well enough to copy.
 - **Decisions**: each choice you made, in a line.
 - **Acceptance criteria**: numbered, each provable by a command, a test, or a manual step. Every gate from step 3.
-- **Invariants**: from step 4, or the one line saying none apply.
+- **What must hold**: the answers from step 4, or the one line saying none apply.
 - **Out of scope**: what the ticket or the split leaves to others, and any gate you skipped.
 - **Verification**: the exact commands.
 

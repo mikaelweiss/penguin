@@ -161,8 +161,10 @@ export default adapter({
       the one it read, <code>issue.get</code> the ticket. That is the whole reason a workflow that
       reviews a pull request never mentions a browser. A url this run already opened writes nothing
       the second time, so a watch loop that reads the same pull request every thirty seconds does
-      not fight the person for their screen. Anything that is not an <code>http</code> or
-      <code>https</code> page is ignored, so an adapter that came up empty needs no guard of its own.
+      not fight the person for their screen. A brief page opens too, a <code>file</code> url ending
+      in <code>.html</code>, which is the one thing off the disk a run reaches this way. Anything
+      else that is not an <code>http</code> or <code>https</code> page is ignored, so an adapter
+      that came up empty needs no guard of its own.
     </p>
 
     <div class="table-wrap">

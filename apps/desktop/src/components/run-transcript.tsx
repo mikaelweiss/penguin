@@ -1,7 +1,9 @@
 import {
   ActivityIcon,
   BotIcon,
+  CheckIcon,
   ChevronDownIcon,
+  CopyIcon,
   EyeIcon,
   GlobeIcon,
   ListTreeIcon,
@@ -12,7 +14,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { Image } from "@tauri-apps/api/image";
+import { writeImage } from "@tauri-apps/plugin-clipboard-manager";
 
+import { Button } from "@workspace/ui/components/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -273,6 +279,55 @@ const ActionsRow = memo(function ActionsRow({ row, live, open, onToggle }: Actio
   );
 });
 
+/** How long "Copied" stays up: long enough to read, short enough not to sit there. */
+const COPIED_MS = 2000;
+
+type Copying = "idle" | "copied" | "failed";
+
+const COPY_LABEL: Record<Copying, string> = {
+  idle: "Copy image",
+  copied: "Copied",
+  failed: "Copy failed",
+};
+
+/** A picture the run made, to drag into a comment box or to copy and paste there. */
+const ImageRow = memo(function ImageRow({ path }: { path: string }) {
+  const [copying, setCopying] = useState<Copying>("idle");
+  const name = path.split("/").pop() ?? path;
+
+  useEffect(() => {
+    if (copying === "idle") return;
+    const timer = window.setTimeout(() => setCopying("idle"), COPIED_MS);
+    return () => window.clearTimeout(timer);
+  }, [copying]);
+
+  const copy = () => {
+    Image.fromPath(path)
+      .then((picture) => writeImage(picture))
+      .then(
+        () => setCopying("copied"),
+        () => setCopying("failed"),
+      );
+  };
+
+  return (
+    <Message>
+      <MessageContent>
+        <img
+          src={convertFileSrc(path)}
+          alt={name}
+          draggable
+          className="max-w-full self-start rounded-md border"
+        />
+        <Button variant="outline" size="sm" className="self-start" onClick={copy}>
+          {copying === "copied" ? <CheckIcon /> : <CopyIcon />}
+          {COPY_LABEL[copying]}
+        </Button>
+      </MessageContent>
+    </Message>
+  );
+});
+
 /** What the run waits on, unless an action of its own is what is moving. */
 function waitingOn(run: Run, acting: boolean): RunState | undefined {
   return acting ? undefined : run.state;
@@ -337,6 +392,8 @@ function Row({ row, live, open, onToggle }: RowProps) {
       return <LineRow line={row.line} />;
     case "actions":
       return <ActionsRow row={row} live={live} open={open} onToggle={onToggle} />;
+    case "image":
+      return <ImageRow path={row.path} />;
     case "turn":
       return <TurnRow label={row.label} />;
     case "mark":

@@ -5,8 +5,11 @@ import {
   blankTab,
   closeTab,
   forgetGone,
+  landOpens,
   NO_TABS,
   openTab,
+  pageUrl,
+  shownUrl,
   typedUrl,
   type RunTabs,
 } from "@/lib/browser";
@@ -143,4 +146,53 @@ test("what no browser can show is not navigated to", () => {
   expect(typedUrl("")).toBeUndefined();
   expect(typedUrl("file:///etc/passwd")).toBeUndefined();
   expect(typedUrl("javascript:alert(1)")).toBeUndefined();
+});
+
+/** What the platform hands back for a file, which the app never builds itself. */
+function asset(path: string): string {
+  return `asset://localhost/${encodeURIComponent(path)}`;
+}
+
+const PAGE = "/home/me/.penguin/briefs/penguin/ship/proposal.html";
+
+function version(mark: string): string {
+  return `${asset(PAGE)}?${mark}`;
+}
+
+test("a brief loads through the asset protocol, and the version it was asked for rides along", () => {
+  expect(pageUrl(`file://${PAGE}?v=2`, asset)).toBe(version("v=2"));
+  expect(pageUrl("https://example.test/a", asset)).toBe("https://example.test/a");
+  expect(pageUrl("what a run wrote", asset)).toBe("what a run wrote");
+});
+
+test("a brief rendered again moves the tab already holding it instead of opening a second", () => {
+  const first = landOpens(NO_TABS, [version("v=1")]);
+  const tab = first.next.tabs[0]!.id;
+  const second = landOpens(first.next, [version("v=2")]);
+
+  expect(second.next.tabs).toHaveLength(1);
+  expect(activeUrl(second.next)).toBe(version("v=2"));
+  expect(second.moved).toEqual([{ id: tab, url: version("v=2") }]);
+});
+
+test("two briefs are two tabs, and a tab nothing moved is told nothing", () => {
+  const other = `${asset("/home/me/.penguin/briefs/penguin/ship/review.html")}?v=1`;
+  const landed = landOpens(NO_TABS, [version("v=1"), other]);
+
+  expect(urls(landed.next)).toEqual([version("v=1"), other]);
+  expect(landed.moved).toEqual([]);
+});
+
+test("an older version of the same brief is a tab of its own, not the page the run opened", () => {
+  const older = asset("/home/me/.penguin/briefs/penguin/ship/history/proposal.v1.html");
+  const landed = landOpens(NO_TABS, [version("v=2"), older]);
+
+  expect(urls(landed.next)).toEqual([version("v=2"), older]);
+  expect(landed.moved).toEqual([]);
+});
+
+test("the address bar says the file a brief came from, which no one can type back at it", () => {
+  expect(shownUrl(version("v=2"))).toBe(`file://${PAGE}?v=2`);
+  expect(shownUrl("https://example.test/a")).toBe("https://example.test/a");
+  expect(typedUrl(shownUrl(version("v=2")))).toBeUndefined();
 });

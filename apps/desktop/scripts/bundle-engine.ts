@@ -53,7 +53,8 @@ function stageEngine(): void {
   const staged = new Set<string>();
   // The types are here because penguin points a catalog's tsconfig at them, so an
   // author editing definition files gets the same resolution a checkout gives.
-  for (const dependency of ["zod", "bun-pty", "@types/bun", "@types/node"]) {
+  // playwright-core is what shoots a brief's png. Without a chromium installed the page still renders.
+  for (const dependency of ["zod", "bun-pty", "playwright-core", "@types/bun", "@types/node"]) {
     stagePackage(dependency, target, staged);
   }
   console.log(`staged ${engine}`);

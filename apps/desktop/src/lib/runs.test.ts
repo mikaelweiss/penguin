@@ -253,8 +253,10 @@ function live(...entries: Record<string, unknown>[]): RunFile {
   return written(true, ...entries);
 }
 
+const BRIEFS = "/home/me/.penguin/briefs/";
+
 function only(files: RunFile[]): Run {
-  const found = toProjects(files, [])[0]?.runs[0];
+  const found = toProjects(files, [], {}, BRIEFS)[0]?.runs[0];
   if (found === undefined) throw new Error("no run");
   return found;
 }
@@ -460,4 +462,64 @@ test("a run that read no pr and no ticket shows neither, and keeps where it star
   expect(bare.dir).toBe("/worktrees/thing");
   expect(bare.cwd).toBe("/work");
   expect(bare.at).toBe("t1");
+});
+
+test("a run opens its brief off disk, and nothing else a file url could name", () => {
+  const brief = `file://${BRIEFS}penguin/ship/proposal.html?v=2`;
+  const seen = only([
+    written(
+      false,
+      { at: "t2", open: "https://example.test/a" },
+      { at: "t3", open: brief },
+      { at: "t4", open: "file:///etc/passwd" },
+      { at: "t5", open: `file://${BRIEFS}../../../etc/shadow.html` },
+      { at: "t6", open: `file://${BRIEFS}penguin/ship/notes.md` },
+    ),
+  ]);
+
+  expect(seen.opens).toEqual(["https://example.test/a", brief]);
+});
+
+test("a picture shows when the engine wrote it, and a path that climbs out never does", () => {
+  const seen = only([
+    written(
+      false,
+      { at: "t2", image: `${BRIEFS}penguin/ship/review.png` },
+      { at: "t3", image: "/etc/passwd" },
+      { at: "t4", image: `${BRIEFS}../../.ssh/id_rsa` },
+    ),
+  ]);
+
+  expect(seen.output).toEqual([
+    { type: "image", id: "p1", path: `${BRIEFS}penguin/ship/review.png`, at: "t2" },
+  ]);
+});
+
+test("a home folder that never answered still draws the tree, with no brief in it", () => {
+  const files = [
+    written(
+      false,
+      { at: "t2", open: "https://example.test/a" },
+      { at: "t3", open: `file://${BRIEFS}penguin/ship/proposal.html` },
+      { at: "t4", image: `${BRIEFS}penguin/ship/review.png` },
+    ),
+  ];
+  const seen = toProjects(files, [], {}, "")[0]!.runs[0]!;
+
+  expect(seen.opens).toEqual(["https://example.test/a"]);
+  expect(seen.output).toEqual([]);
+});
+
+test("until the app knows where briefs live, a run file's word that a path is one counts for nothing", () => {
+  const files = [
+    written(
+      false,
+      { at: "t2", open: `file://${BRIEFS}penguin/ship/proposal.html` },
+      { at: "t3", image: `${BRIEFS}penguin/ship/review.png` },
+    ),
+  ];
+  const seen = toProjects(files, [])[0]!.runs[0]!;
+
+  expect(seen.opens).toEqual([]);
+  expect(seen.output).toEqual([]);
 });

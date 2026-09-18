@@ -28,14 +28,21 @@ fn say<T: Clone + serde::Serialize>(app: &tauri::AppHandle, event: &str, label: 
     );
 }
 
-/// A page a browser can show. The panel never asks for anything else, and a page that redirects
-/// itself to another scheme is a navigation this refuses rather than follows.
+/// A page a browser can show: the web, or a brief the asset protocol serves off disk. The frontend
+/// converts a file before it asks, because wry hands a file url to the platform's web view, which
+/// shows nothing. A page that redirects itself elsewhere is a navigation this refuses.
 fn web(url: &str) -> Result<Url, String> {
     let parsed = Url::parse(url).map_err(|cause| format!("{url} did not read: {cause}"))?;
-    match parsed.scheme() {
-        "http" | "https" => Ok(parsed),
-        scheme => Err(format!("{scheme} is not a web page")),
+    if shows(&parsed) {
+        Ok(parsed)
+    } else {
+        Err(format!("{} is not a web page", parsed.scheme()))
     }
+}
+
+/// Windows serves the asset protocol over http under a reserved host instead of a scheme of its own.
+fn shows(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "asset")
 }
 
 fn webview(app: &tauri::AppHandle, label: &str) -> Result<tauri::webview::Webview, String> {
@@ -122,7 +129,7 @@ pub fn browser_open(
     let popped = (app.clone(), label.clone());
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(target))
         .on_navigation(move |url| {
-            let allowed = matches!(url.scheme(), "http" | "https");
+            let allowed = shows(url);
             if allowed {
                 say(&moved.0, URL_EVENT, &moved.1, url.to_string());
             }
@@ -221,4 +228,21 @@ pub fn browser_forward(app: tauri::AppHandle, label: String) -> Result<(), Strin
     webview(&app, &label)?
         .eval("history.forward()")
         .map_err(|cause| cause.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_brief_shows_as_an_asset_and_never_as_the_file_it_came_from() {
+        assert!(web("https://example.test/a").is_ok());
+        assert!(web("http://localhost:5173/").is_ok());
+        assert!(web("asset://localhost/%2FUsers%2Fme%2Fproposal.html?v=2").is_ok());
+        assert!(web("asset://localhost/x.html").is_ok());
+        assert!(web("http://asset.localhost/%2FUsers%2Fme%2Fproposal.html").is_ok());
+        assert!(web("file:///Users/me/proposal.html").is_err());
+        assert!(web("file://asset.localhost/etc/passwd").is_err());
+        assert!(web("javascript:alert(1)").is_err());
+    }
 }

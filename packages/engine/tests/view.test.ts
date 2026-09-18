@@ -120,6 +120,21 @@ test("open notes the url, and a workflow that means it twice says it twice", asy
   ]);
 });
 
+test("image notes the file by path, each time it is shown", async () => {
+  const { view, dir } = filesView();
+  await view.image("/home/me/.penguin/briefs/penguin/main/proposal.png");
+  await view.image("/home/me/.penguin/briefs/penguin/main/proposal.png");
+  const shown = written(dir)
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((entry) => "image" in entry);
+  expect(shown.map((entry) => entry["image"])).toEqual([
+    "/home/me/.penguin/briefs/penguin/main/proposal.png",
+    "/home/me/.penguin/briefs/penguin/main/proposal.png",
+  ]);
+});
+
 test("a dead premise withdraws the ask, and the next answer lands on the live question", async () => {
   const { view, dir, sent } = filesView();
   let moot: (reason: string) => void = () => {};

@@ -1,0 +1,96 @@
+{
+  "title": "Rate-limit password reset requests",
+  "mode": "proposal",
+  "branch": "acme / reset-rate-limit",
+  "user": "A user who asks for more than five password resets in an hour sees a wait message instead of another email.",
+  "behaviors": [
+    {
+      "before": "Any number of reset emails per hour",
+      "after": "The sixth request in an hour is refused",
+      "risk": "high",
+      "files": [
+        ["create", "src/auth/reset-limiter.ts"],
+        ["edit", "src/auth/reset-controller.ts"]
+      ],
+      "test": "test/auth/reset-limiter.test.ts: refuses the sixth request, allows the first after the window",
+      "detail": "The limiter counts requests per lowercased email in the cache, and each count expires with the window. The controller checks it before queueing the email, so a refused request sends nothing. A counter older than the window never blocks a request."
+    },
+    {
+      "before": "Refused requests look like success",
+      "after": "The form shows how long to wait",
+      "risk": "med",
+      "files": [
+        ["edit", "src/web/reset-form.tsx"]
+      ],
+      "test": "test/web/reset-form.test.tsx: renders the wait message from retry-after",
+      "detail": "The controller returns 429 with a retry-after header and the form reads it into the message. Any other error keeps the existing generic text."
+    },
+    {
+      "before": "An unused legacy reset endpoint ships",
+      "after": "It is gone",
+      "risk": "low",
+      "files": [
+        ["delete", "src/auth/legacy-reset.ts"]
+      ],
+      "test": null,
+      "detail": "The route was never registered after the router rewrite. The build proves nothing imports it."
+    }
+  ],
+  "flows": [
+    {
+      "name": "User requests a password reset",
+      "items": [1, 2],
+      "steps": [
+        "Open the sign-in page and choose Forgot password",
+        "Submit the same email six times within an hour",
+        "The sixth submit shows the wait message and sends no email"
+      ]
+    },
+    {
+      "name": "Operator reads the audit log",
+      "items": [1],
+      "effect": "Each refused request logs the email hash and the retry time, so support can see why a user got no email."
+    }
+  ],
+  "touched": [
+    { "name": "api / auth", "files": 3 },
+    { "name": "web / sign-in", "files": 1 }
+  ],
+  "changed_files": [
+    ["create", "src/auth/reset-limiter.ts", "Counts reset requests per email and refuses at six", "The count lives beside the token store so a restart does not clear it"],
+    ["edit", "src/auth/reset-controller.ts", "Asks the limiter before queueing the email", "The controller is the one place every reset request passes through"],
+    ["delete", "src/auth/legacy-reset.ts", "Unregistered route with no callers", "Leaving it is a second reset path with no limiter on it"],
+    ["edit", "src/web/reset-form.tsx", "Shows the wait message on a 429 response", "A bare 429 reads as a broken form, so the wait has to be named"]
+  ],
+  "map": {
+    "layers": ["Entry", "Logic", "Storage"],
+    "nodes": [
+      { "id": "form", "name": "Reset form", "layer": "Entry", "changed": "edit", "files": ["src/web/reset-form.tsx"] },
+      { "id": "controller", "name": "Reset controller", "layer": "Logic", "changed": "edit", "files": ["src/auth/reset-controller.ts"] },
+      { "id": "limiter", "name": "Reset limiter", "layer": "Logic", "changed": "create", "files": ["src/auth/reset-limiter.ts"] },
+      { "id": "legacy", "name": "Legacy reset route", "layer": "Logic", "changed": "delete", "files": ["src/auth/legacy-reset.ts"] },
+      { "id": "cache", "name": "Cache", "layer": "Storage", "changed": null, "files": [] },
+      { "id": "mail", "name": "Mail queue", "layer": "Storage", "changed": null, "files": [] }
+    ],
+    "edges": [
+      { "from": "form", "to": "controller", "kind": "existing", "label": "POST /reset" },
+      { "from": "controller", "to": "limiter", "kind": "new", "label": "check" },
+      { "from": "limiter", "to": "cache", "kind": "new", "label": "count" },
+      { "from": "controller", "to": "mail", "kind": "existing", "label": "queue email" }
+    ]
+  },
+  "questions": [
+    {
+      "q": "Where does the counter live?",
+      "options": ["Cache", "Database", "In memory"],
+      "recommend": "Cache",
+      "detail": "The cache already expires entries on its own and is shared across instances. The database adds a migration for a value that expires in an hour. In memory breaks with more than one instance."
+    },
+    {
+      "q": "What does the sixth request return?",
+      "options": ["429 with retry-after", "200 with no email"],
+      "recommend": "429 with retry-after",
+      "detail": "A 429 lets the form explain the wait. A silent 200 hides the limit from the user and from support."
+    }
+  ]
+}

@@ -42,6 +42,16 @@ test("readSkill returns the body without the frontmatter", () => {
   expect(skill.text).toBe("# Steps\n\nDo the thing.");
 });
 
+test("a skill that ships files beside its SKILL.md loads, and dir points at them", () => {
+  const catalog = catalogWith({ greet: skillMd("greet") });
+  const dir = path.join(catalog.dir, "skills", "greet");
+  fs.writeFileSync(path.join(dir, "render.mjs"), "export default 1;\n");
+  const skill = readSkill(dir);
+  expect(skill.dir).toBe(dir);
+  expect(path.isAbsolute(skill.dir)).toBe(true);
+  expect(skillsIn([catalog]).map((entry) => entry.name)).toEqual(["greet"]);
+});
+
 test("metadata entries do not shadow the top-level fields", () => {
   const catalog = catalogWith({
     greet: `---\nname: greet\ndescription: greets\nmetadata:\n  name: shadow\n---\n\nBody.\n`,

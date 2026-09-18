@@ -62,6 +62,8 @@ export type View = {
   act(action: Action): Promise<void>;
   /** Puts a url in front of the person watching, in whatever browser the frontend has. */
   open(url: string): Promise<void>;
+  /** Puts an image file in front of the person watching, by absolute path. */
+  image(path: string): Promise<void>;
   ask: Ask;
   listen(): AsyncIterable<Message>;
 };

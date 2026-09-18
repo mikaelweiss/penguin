@@ -150,6 +150,9 @@ export function createFilesView(dir: string): View {
     async open(url: string): Promise<void> {
       note({ open: url });
     },
+    async image(file: string): Promise<void> {
+      note({ image: file });
+    },
     ask: ((_question: string, shape?: z.ZodType, options?: AskOptions) =>
       asked(shape, options)) as Ask,
     listen,

@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "bun-pty": "0.4.8",
+    "playwright-core": "^1.63.0",
     "zod": "^4.4.3"
   },
   "nx": {
