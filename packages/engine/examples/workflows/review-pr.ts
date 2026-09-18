@@ -2,10 +2,8 @@ import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
 import { reviewBrief, type Page } from "../helpers/brief.ts";
 import { comment as jevComment } from "../helpers/jev.ts";
-import { narrate, narrated } from "../helpers/turns.ts";
+import { narrate } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
-
-const DIFF_LINES = 500;
 
 /** What every review worktree is named under, and what the sweep reads a PR number back out of. */
 const PREFIX = "review-pr-";
@@ -19,13 +17,6 @@ const LINE = 300;
 function line(about: string): z.ZodString {
   return z.string().max(LINE).describe(about);
 }
-
-const Triage = z.object({
-  eyeball: z
-    .boolean()
-    .describe("true when a person can read the whole change and judge it in a minute"),
-  reason: z.string().describe("the one line that decides it"),
-});
 
 const Findings = z.object({
   blockers: z
@@ -119,12 +110,6 @@ function verdictOf(judged: Verdict): Findings {
   return { blockers: judged.blockers, nonBlockers: judged.nonBlockers };
 }
 
-function cut(diff: string): string {
-  const lines = diff.split("\n");
-  if (lines.length <= DIFF_LINES) return diff;
-  return `${lines.slice(0, DIFF_LINES).join("\n")}\n\n[cut here: the diff runs ${lines.length} lines]`;
-}
-
 function noted(notes: Note[]): string {
   return notes.map((note) => `## ${note.author} on ${note.at}\n\n${note.body}`).join("\n\n");
 }
@@ -207,14 +192,15 @@ export default workflow({
 
     // The triage reads the diff over the wire, so a PR the user takes costs no worktree.
     let diff = await github.pr.diff(params.pr);
-    const triager = await agent.open();
-    const triaged = await narrated(view, () =>
-      agent.turn(
-        triager,
-        { skill: "triage-pr", prompt: `${briefing()}\n\n# Diff\n\n${cut(diff)}` },
-        { result: Triage },
-      ),
-    );
+    /** Jev's word on whether a person reads this in a minute. A failure means the full review, which is what the judgment guards. */
+    const triaged = await (async (): Promise<{ eyeball: boolean; reason: string }> => {
+      try {
+        return await jev.triage.pr({ title: pr.title, description, notes, diff });
+      } catch (error) {
+        await view.show(`The Jev triage did not run, so the full review does: ${messageOf(error)}`);
+        return { eyeball: false, reason: "" };
+      }
+    })();
     if (triaged.eyeball) {
       const choice = await view.ask(
         `PR #${pr.number} is small enough to read yourself: ${triaged.reason}\n\n${pr.url}\n\nreview runs the full review, mine leaves it to you.`,

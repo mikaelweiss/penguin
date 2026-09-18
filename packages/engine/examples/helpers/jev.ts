@@ -82,6 +82,20 @@ export function changedIn(diff: string): { files: ChangedFile[]; tests: ChangedF
   return { files, tests };
 }
 
+export type Size = { files: number; lines: number };
+
+/** What a reader faces: the files a unified diff touches and the lines it adds or removes. */
+export function sizeOf(diff: string): Size {
+  let files = 0;
+  let lines = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++ ")) files += 1;
+    else if (line.startsWith("--- ")) continue;
+    else if (line.startsWith("+") || line.startsWith("-")) lines += 1;
+  }
+  return { files, lines };
+}
+
 /** The new path, or the old one when the change deletes the file. */
 function pathOf(lines: string[]): string | undefined {
   const added = lines.find((line) => line.startsWith("+++ "));

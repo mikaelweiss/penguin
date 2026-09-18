@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { call, isWithdrawn, workflow, type Adapters } from "penguin";
+import { call, isWithdrawn, messageOf, workflow, type Adapters } from "penguin";
 import { z } from "zod";
 import { resolveBase } from "../helpers/base.ts";
 import { narrated } from "../helpers/turns.ts";
@@ -16,11 +16,6 @@ type Thread = Awaited<ReturnType<Adapters["github"]["pr"]["threads"]>>[number];
 
 const Confirm = z.enum(["ok", "stop"]);
 const Go = z.union([z.enum(["go", "skip"]), z.string()]);
-
-const Triage = z.object({
-  asks: z.boolean().describe("true when the author has to change or answer something"),
-  why: z.string().describe("one line naming the fact that decided it"),
-});
 
 /** One thing that arrived. The user's own words go straight to a round; everything else is triaged first. */
 type Arrival = { author: string; text: string; fromUser: boolean };
@@ -121,7 +116,7 @@ export default workflow({
   }),
 
   async run(ctx) {
-    const { agent, brief, github, params, vcs, view } = ctx;
+    const { agent, brief, github, jev, params, vcs, view } = ctx;
     const nowhere = { url: "", state: "", rounds: 0 };
 
     const head = await vcs.head();
@@ -358,16 +353,18 @@ export default workflow({
       return session;
     };
 
-    // The judge reads text and nothing else, so its session carries no tools and no setup.
-    let judge = "";
+    /** Jev's word on whether the feedback directs the author. A failure sends it to the assessment, which reads the code. */
     const asks = async (arrival: Arrival): Promise<boolean> => {
       if (arrival.fromUser) return true;
-      if (judge === "") {
-        judge = await agent.open({ model: "small", tools: [], settings: [], effort: "low" });
+      let verdict: { asks: boolean; why: string };
+      try {
+        verdict = await jev.triage.feedback({ author: arrival.author, text: arrival.text });
+      } catch (error) {
+        await view.show(
+          `The Jev triage did not run, so the feedback goes to the assessment: ${messageOf(error)}`,
+        );
+        return true;
       }
-      const verdict = await narrated(view, () =>
-        agent.turn(judge, { skill: "triage-feedback", prompt: arrival.text }, { result: Triage }),
-      );
       if (!verdict.asks) await view.show(`${arrival.author} asks nothing: ${verdict.why}`);
       return verdict.asks;
     };

@@ -9,6 +9,7 @@ import {
   parseHunks,
   relatedTo,
   resolveImport,
+  sizeOf,
   testsFor,
   type Report,
   type Tree,
@@ -57,6 +58,16 @@ describe("changedIn", () => {
     expect(tests.map((one) => one.path)).toEqual(["src/a.test.ts"]);
     expect(files[0]?.patch.startsWith("@@ -1,3 +1,4 @@")).toBe(true);
     expect(files[0]?.patch).not.toContain("+++ b/src/a.ts");
+  });
+});
+
+describe("sizeOf", () => {
+  test("counts the files touched and the lines added or removed, headers apart", () => {
+    expect(sizeOf(DIFF)).toEqual({ files: 4, lines: 7 });
+  });
+
+  test("an empty diff is nothing to read", () => {
+    expect(sizeOf("")).toEqual({ files: 0, lines: 0 });
   });
 });
 

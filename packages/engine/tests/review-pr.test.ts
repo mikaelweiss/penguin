@@ -91,7 +91,6 @@ function harness(options: Options) {
     stop: () => Promise.resolve(),
     turn: (_session: string, ask: { skill: string }) => {
       const value = (): unknown => {
-        if (ask.skill === "triage-pr") return { eyeball: false, reason: "too big to eyeball" };
         if (ask.skill === "review-judge") {
           return { blockers: blockers.shift() ?? [], nonBlockers: [], questions: [] };
         }
@@ -120,6 +119,11 @@ function harness(options: Options) {
     },
   };
 
+  const jev = {
+    review: () => Promise.resolve(null),
+    triage: { pr: () => Promise.resolve({ eyeball: false, reason: "too big to eyeball" }) },
+  };
+
   const view = {
     show: (text: string) => {
       shown.push(text);
@@ -145,7 +149,7 @@ function harness(options: Options) {
     parked,
     held: () => held.map((tree) => tree.name),
     run: () =>
-      reviewPr.run({ params, vcs, agent, github, view } as unknown as Ctx<typeof params>),
+      reviewPr.run({ params, vcs, agent, github, jev, view } as unknown as Ctx<typeof params>),
   };
 }
 

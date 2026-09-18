@@ -186,7 +186,7 @@ test("make-workflow reviews the draft on the reviewing adapter, and writes it on
 const DOSSIER = { files: [], flows: [], state: [], facts: [] };
 const CLEAN = { blockers: [], nonBlockers: [], questions: [] };
 
-/** review-pr to its approved rounds: the triage, then each round's gather, judgment, and page. */
+/** review-pr to its approved rounds: each round's gather, judgment, and page. Jev triages it into the review. */
 function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?: number } = {}) {
   const opens: Opened[] = [];
   const turns: Turn[] = [];
@@ -212,8 +212,12 @@ function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?:
           waiting = settle;
         });
   const pages = briefs(wheres, options.renders ?? [], shown, opened);
-  const values: unknown[] = [{ eyeball: false, reason: "one file" }];
+  const values: unknown[] = [];
   for (let round = 0; round < rounds; round++) values.push(DOSSIER, options.judged ?? CLEAN, {});
+  const jev = {
+    review: () => Promise.resolve(null),
+    triage: { pr: () => Promise.resolve({ eyeball: false, reason: "one file" }) },
+  };
   const agent = {
     open: (options?: Opened) => {
       opens.push(options ?? {});
@@ -280,6 +284,7 @@ function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?:
     agent,
     brief: pages.brief,
     github,
+    jev,
     vcs,
     view,
     params: { pr: "7" },
@@ -302,14 +307,14 @@ function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?:
   };
 }
 
-test("review-pr gathers and triages on the configured adapter", async () => {
+test("review-pr gathers on the configured adapter, and opens no session to triage", async () => {
   const bench = pullRequest();
 
   const done = await bench.run();
 
   expect(done).toEqual({ rounds: 1, posted: 1 });
   expect(bench.openedFor("review-gather")).not.toHaveProperty("adapter");
-  expect(bench.openedFor("triage-pr")).not.toHaveProperty("adapter");
+  expect(bench.turns.map((turn) => turn.skill)).not.toContain("triage-pr");
 });
 
 test("the review-pr judge stays where its empty tool list is honoured", async () => {

@@ -9,6 +9,8 @@ const RUN = Symbol.for("penguin.run");
 
 type Ensured = { head: string; base: string; title: string; body: string };
 type Turn = { session: string; prompt: string };
+type Judged = { author: string; text: string };
+type Change = { kind: string; state?: string; comments?: { author: string; at: string; body: string }[] };
 
 let temps: string[] = [];
 
@@ -34,11 +36,30 @@ const pr = {
   isInMergeQueue: false,
 };
 
-function harness(dir: string) {
+function harness(dir: string, options: { changes?: Change[] } = {}) {
   const ensured: Ensured[] = [];
   const turns: Turn[] = [];
   const shown: string[] = [];
+  const judged: Judged[] = [];
   let sessions = 0;
+
+  // The watch reads changes as they come; past the queue it waits until Jev has judged, then the PR merges.
+  const queue: Change[] = [...(options.changes ?? [])];
+  let waiting: ((change: Change) => void) | undefined;
+  const merged = (): void => {
+    const settle = waiting;
+    waiting = undefined;
+    const done = { kind: "closed", state: "MERGED" };
+    if (settle === undefined) queue.push(done);
+    else settle(done);
+  };
+  const next = (): Promise<Change> =>
+    queue.length > 0
+      ? Promise.resolve(queue.shift() as Change)
+      : new Promise((settle) => {
+          waiting = settle;
+        });
+  if (queue.length === 0) merged();
 
   const agent = {
     open: () => {
@@ -63,7 +84,8 @@ function harness(dir: string) {
         ensured.push(options);
         return Promise.resolve({ landed: false, pr, created: true });
       },
-      changes: () => ({ next: () => Promise.resolve({ kind: "closed", state: "MERGED" }) }),
+      get: () => Promise.resolve(pr),
+      changes: () => ({ next }),
       threads: () => Promise.resolve([]),
     },
     branch: { moved: () => ({ next: () => new Promise<never>(() => {}) }) },
@@ -84,6 +106,15 @@ function harness(dir: string) {
       }),
     }),
   };
+  const jev = {
+    triage: {
+      feedback: (one: Judged) => {
+        judged.push(one);
+        merged();
+        return Promise.resolve({ asks: false, why: "it is a bot's status line" });
+      },
+    },
+  };
   const brief = { where: () => Promise.resolve(path.join(dir, "review.json")) };
   const hooks = { spawn: () => Promise.resolve({ committed: true, message: "add the widget" }) };
   const params = { base: "main", note: "the note", ticket: "" };
@@ -91,13 +122,26 @@ function harness(dir: string) {
     agent,
     brief,
     github,
+    jev,
     vcs,
     view,
     params,
     [RUN]: hooks,
   } as unknown as Ctx<typeof params>;
-  return { ensured, turns, shown, run: () => openPr.run(ctx as never) };
+  return { ensured, turns, shown, judged, run: () => openPr.run(ctx as never) };
 }
+
+test("feedback goes to Jev as its author said it, and what asks nothing opens no round", async () => {
+  const bench = harness(tempDir(), {
+    changes: [{ kind: "comments", comments: [{ author: "bot", at: "now", body: "Preview is live" }] }],
+  });
+
+  const done = await bench.run();
+
+  expect(bench.judged).toEqual([{ author: "bot", text: "bot commented:\n\nPreview is live" }]);
+  expect(bench.turns).toHaveLength(1);
+  expect(done.rounds).toBe(0);
+});
 
 test("the branch's brief is the body, and the writer titles the page it carries", async () => {
   const dir = tempDir();

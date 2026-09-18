@@ -193,9 +193,9 @@ function proposal(assessed: Assessment): string {
 }
 
 /** What a turn put to the person instead of the answer the key holds. */
-function askedInstead(out: z.infer<typeof PlanOut> | z.infer<typeof TriageOut>): string {
-  if ("decide" in out && out.decide !== undefined) return out.decide.question;
-  if ("resplit" in out && out.resplit !== undefined) return out.resplit.reason;
+function askedInstead(out: z.infer<typeof PlanOut>): string {
+  if (out.decide !== undefined) return out.decide.question;
+  if (out.resplit !== undefined) return out.resplit.reason;
   return (out.blocked?.questions ?? []).join("; ");
 }
 
@@ -328,23 +328,25 @@ async function tryPlan(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
   if (dir === "") return graded(failed("no scratch worktree to run in"), "");
   try {
     const session = await ctx.agent.open({ model: ctx.params.model, cwd: dir, autocompact: WINDOW });
-    const shape = held.skill === "triage" ? TriageOut : PlanOut;
-    const turned = (prompt: string) =>
-      narrated(ctx.view, () =>
-        ctx.agent.turn(session, { skill: held.skill, prompt }, { result: shape }),
-      );
     // The person's answers and revisions follow the ticket, so the replay sends them in turn.
-    let out = await turned(held.prompt);
-    for (const prompt of held.prompts.slice(1)) out = await turned(prompt);
+    const replayed = async <Shape extends z.ZodObject>(shape: Shape): Promise<z.infer<Shape>> => {
+      const turned = (prompt: string): Promise<z.infer<Shape>> =>
+        narrated(ctx.view, () =>
+          ctx.agent.turn(session, { skill: held.skill, prompt }, { result: shape }),
+        );
+      let out = await turned(held.prompt);
+      for (const prompt of held.prompts.slice(1)) out = await turned(prompt);
+      return out;
+    };
+    if (held.skill === "triage") {
+      const candidate = split((await replayed(TriageOut)).tasks);
+      return graded(await judgePlan(ctx, held, candidate), candidate);
+    }
+    const out = await replayed(PlanOut);
     if (out.result === undefined) {
       return graded(failed(`the turn asked instead of answering: ${askedInstead(out)}`), "");
     }
-    const answer = out.result;
-    if ("tasks" in answer && !answer.actionable) {
-      return graded(failed(`not actionable: ${answer.reason}`), answer.reason);
-    }
-    const candidate = "tasks" in answer ? split(answer.tasks) : answer.plan;
-    return graded(await judgePlan(ctx, held, candidate), candidate);
+    return graded(await judgePlan(ctx, held, out.result.plan), out.result.plan);
   } finally {
     await dropped(ctx, dir);
   }

@@ -8,6 +8,7 @@ import {
   graphOf,
   parseHunks,
   relatedTo,
+  sizeOf,
   testsFor,
   type Cells,
   type ChangedFile,
@@ -45,6 +46,16 @@ const BLOCKING = 2;
 const LOCATED = 0.55;
 /** A source file past this size is generated or vendored, and reading it buys nothing. */
 const FILE_BYTES = 1_000_000;
+/** What a person reads in a minute: a few files, tens of changed lines. Past either, no question is asked. */
+const EYEBALL_FILES = 5;
+const EYEBALL_LINES = 100;
+/** The full review wins a disagreement, so a reason for it counts from low odds, and plainness from high. */
+const RISK = 0.3;
+const PLAIN = 0.7;
+/** Feedback directs the author from even odds. */
+const ASKS = 0.5;
+/** A ticket is clear enough to build from even odds: a planner asks what a vague one leaves open anyway. */
+const CLEAR = 0.5;
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
@@ -252,6 +263,218 @@ const SCREENING = {
 
 type Signal = { file: ChangedFile; dimension: Dimension; probability: number };
 
+/**
+ * The reasons a pull request needs the full review, over the diff and what the author and
+ * reviewers said about it. `plain` is the one reason it does not.
+ */
+const SHAPE = {
+  traced: noul(
+    {
+      question: "Does diff hold logic a reader has to trace to judge it: control flow, state, concurrency, or error paths?",
+      inspect: "diff, with pr.description for what the author says it does",
+    },
+    {
+      true: {
+        what: "Judging the change means following how values move or what runs when",
+        examples: ["A new branch in a condition", "An await moved across a loop", "A catch that changes what propagates"],
+      },
+      false: {
+        what: "The change is right or wrong on its face",
+        examples: ["A copy edit", "A version bump", "A rename", "A comment", "A config value", "A test that follows the pattern next to it"],
+      },
+    },
+  ),
+  reaches: noul(
+    {
+      question: "Does the change reach code the diff does not show: a shared function, an exported symbol, a schema, a migration?",
+      inspect: "diff, for what the changed lines are used by outside the changed files",
+    },
+    {
+      true: {
+        what: "Whether the change is right depends on callers, readers, or data the diff does not include",
+        examples: ["An exported signature changes", "A schema or migration changes", "A shared helper's behavior changes"],
+      },
+      false: { what: "Every effect of the change is visible in the diff itself" },
+    },
+  ),
+  risky: noul(
+    {
+      question: "Does the change touch security, permissions, money, or data loss?",
+      inspect: "diff, with pr.description and pr.comments for what the code is for",
+    },
+    {
+      true: {
+        what: "A mistake in the change would expose data, grant access, move money, or destroy records",
+        examples: ["An authorization check", "A payment amount", "A delete or a migration that drops data"],
+      },
+      false: { what: "A mistake in the change costs a fix and nothing else" },
+    },
+  ),
+  plain: noul(
+    {
+      question: "Does the change do one plain thing?",
+      inspect: "diff, with pr.title and pr.description for what one thing it claims to do",
+    },
+    {
+      true: {
+        what: "One purpose, and the diff is all of it",
+        examples: ["A copy edit", "A version bump", "A rename", "A dependency bump", "A config value", "A test that follows the pattern next to it"],
+      },
+      false: {
+        what: "Several unrelated things, or one thing whose effect the diff alone does not show",
+        examples: ["A rename beside a behavior change", "A new feature", "A refactor that moves logic between files"],
+      },
+    },
+  ),
+};
+
+type Risk = "traced" | "reaches" | "risky";
+const RISKS: Risk[] = ["traced", "reaches", "risky"];
+const RISK_REASONS: Record<Risk, string> = {
+  traced: "it holds logic a reader has to trace",
+  reaches: "it reaches code the diff does not show",
+  risky: "it touches security, permissions, money, or data loss",
+};
+
+const REMARKS = {
+  approval: "An approval, or a verdict that the work can land as it is: merge it, ship it, no blocking defects",
+  summary: "A summary, a scorecard, or a description of what the change does",
+  praise: "Praise",
+  optional: "A remark marked nit, non-blocking, optional, or take it or leave it",
+  otherAddressee: "A note addressed to someone other than the author",
+  botStatus: "A status line from a bot: a deploy, a check, a preview link",
+  other: "Something else that directs the author to nothing",
+};
+type Remark = keyof typeof REMARKS;
+const REMARK_REASONS: Record<Remark, string> = {
+  approval: "it approves the work as it is",
+  summary: "it describes the change",
+  praise: "it is praise",
+  optional: "it is marked optional",
+  otherAddressee: "it is addressed to someone else",
+  botStatus: "it is a bot's status line",
+  other: "it directs the author to nothing",
+};
+
+/** Whether one piece of feedback directs the author, and what it is when it does not. */
+const FEEDBACK = {
+  direction: noul(
+    {
+      question: "Does feedback.text tell the author to change something, or say something must be fixed, added, or removed?",
+      focus: "Whether the author has to act, not whether the claim is true",
+    },
+    {
+      true: {
+        what: "The text directs the author to a change",
+        examples: ["Add coverage before this merges", "This must handle the empty case"],
+      },
+      false: {
+        what: "An observation, a verdict that the work can land, or a remark marked optional",
+        examples: ["Coverage is not present, under a verdict of merge it", "Nit: could be shorter"],
+      },
+    },
+  ),
+  question: noul(
+    "Does feedback.text ask a question the author has to answer?",
+    {
+      true: { what: "A question put to the author that the thread waits on" },
+      false: {
+        what: "No question, a rhetorical one, one the text answers itself, or one put to someone else",
+      },
+    },
+  ),
+  requestChanges: noul(
+    "Does feedback.text request changes as its verdict?",
+    {
+      true: { what: "The review's verdict is that changes are requested" },
+      false: { what: "It approves, only comments, or gives no verdict" },
+    },
+  ),
+  blocking: noul(
+    "Does feedback.text mark something as blocking, required, or to do before merge?",
+    {
+      true: { what: "A marker that the work cannot land until something is done" },
+      false: { what: "No marker, or one that says nit, non-blocking, optional, or take it or leave it" },
+    },
+  ),
+  remark: choice(
+    {
+      question: "Assuming feedback.text directs the author to nothing, what is it?",
+      fallback: "Select other when none of the kinds fits",
+    },
+    REMARKS,
+  ),
+};
+
+const MISSING = {
+  goal: "It names no outcome: nothing says what should be true when the work is done",
+  place: "It names no place: which screen, command, service, or path it is about",
+  behavior: "It names an outcome but not the behavior: what should happen, for whom, and when",
+  reference: "It points at something the text does not identify: the bug, that screen, the thing we discussed",
+  conflict: "It asks for things that contradict each other",
+  other: "Something else leaves it unclear",
+};
+type Missing = keyof typeof MISSING;
+const MISSING_REASONS: Record<Missing, string> = {
+  goal: "it says no outcome",
+  place: "it says no place",
+  behavior: "it says what to reach but not what should happen",
+  reference: "it points at something it does not identify",
+  conflict: "it contradicts itself",
+  other: "it leaves the goal unclear",
+};
+
+/** Whether a ticket is ready to work on, and what it leaves open when it is not. */
+const TICKET = {
+  clear: noul(
+    {
+      question: "Is the goal of ticket clear enough that a planner who reads the code could start from it without asking what it means?",
+      focus: "Whether the outcome is stated, not whether the code it names exists or how it is built",
+    },
+    {
+      true: {
+        what: "A planner knows what should be true when the work is done, and where",
+        examples: ["Add a toggle to the sidebar that hides completed items", "The login form times out after 30s; make it retry once"],
+      },
+      false: {
+        what: "A planner would have to ask the requester what is meant before reading code",
+        examples: ["Make it better", "Fix the bug we talked about", "Faster"],
+      },
+    },
+  ),
+  missing: choice(
+    {
+      question: "Assuming ticket is not clear enough to build, what does it leave open?",
+      fallback: "Select other when none of the kinds fits",
+    },
+    MISSING,
+  ),
+};
+
+type Asking = "direction" | "question" | "requestChanges" | "blocking";
+const ASKINGS: Asking[] = ["direction", "question", "requestChanges", "blocking"];
+const ASKING_REASONS: Record<Asking, string> = {
+  direction: "it tells the author to change something",
+  question: "it asks the author a question",
+  requestChanges: "it requests changes",
+  blocking: "it marks something as required before merge",
+};
+
+function counted(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/** The strongest of the named nouls at or over the bar, or undefined when none reaches it. */
+function strongest<Key extends string>(
+  answers: Record<Key, { noul: number }>,
+  keys: Key[],
+  bar: number,
+): Key | undefined {
+  const over = keys.filter((key) => answers[key].noul >= bar);
+  over.sort((a, b) => answers[b].noul - answers[a].noul);
+  return over[0];
+}
+
 async function mapLimit<T, R>(items: T[], limit: number, job: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
@@ -273,7 +496,7 @@ export default adapter({
   role: "jev",
   name: "jev",
   description:
-    "TypeSafe Jev, a model that answers typed questions in a fraction of a second: screens a diff for risk, file by file, with the code around each change as context",
+    "TypeSafe Jev, a model that answers typed questions in a fraction of a second: screens a diff for risk, file by file, with the code around each change as context, and triages tickets, pull requests, and their feedback",
   build: (host) => {
     const refused = new Set<string>();
     let refusal: string | undefined;
@@ -477,7 +700,81 @@ export default adapter({
       };
     }
 
+    const fresh = (): Usage => ({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0 });
+
+    function noted(spent: Usage): void {
+      host.note({
+        usage: {
+          adapter: "jev",
+          session: "jev",
+          ...priced({ ...spent, model: spent.model ?? MODEL }, host.config),
+        },
+      });
+    }
+
     return {
+      triage: {
+        /**
+         * Whether a ticket is ready to work on: its goal is clear enough that a planner could
+         * start from it. `reason` is what it leaves open when it is not.
+         */
+        async ticket(options: { ticket: string }): Promise<{ actionable: boolean; reason: string }> {
+          const spent = fresh();
+          const answers = await ask(spent, { ticket: options.ticket }, TICKET);
+          noted(spent);
+          if (answers.clear.noul >= CLEAR) return { actionable: true, reason: "the goal is clear enough to build" };
+          return { actionable: false, reason: MISSING_REASONS[answers.missing.choice as Missing] };
+        },
+
+        /**
+         * Whether a person can read the whole pull request and judge it in a minute. Size is
+         * counted here and settles it alone; Jev judges the shape of what is small enough.
+         * `reason` is the one fact that decided it.
+         */
+        async pr(options: {
+          title: string;
+          description: string;
+          notes: { author: string; body: string }[];
+          diff: string;
+        }): Promise<{ eyeball: boolean; reason: string }> {
+          const size = sizeOf(options.diff);
+          if (size.files > EYEBALL_FILES) return { eyeball: false, reason: `${size.files} files change` };
+          if (size.lines > EYEBALL_LINES) return { eyeball: false, reason: `${size.lines} lines change` };
+          const spent = fresh();
+          const answers = await ask(
+            spent,
+            {
+              pr: { title: options.title, description: options.description, comments: options.notes },
+              diff: options.diff,
+            },
+            SHAPE,
+          );
+          noted(spent);
+          const risk = strongest(answers, RISKS, RISK);
+          if (risk !== undefined) return { eyeball: false, reason: RISK_REASONS[risk] };
+          if (answers.plain.noul < PLAIN) {
+            return { eyeball: false, reason: "it does more than one plain thing" };
+          }
+          return {
+            eyeball: true,
+            reason: `${counted(size.files, "file")} and ${counted(size.lines, "changed line")} doing one plain thing`,
+          };
+        },
+
+        /**
+         * Whether one comment or review directs the author to do anything, read from its text
+         * alone. `why` is the one fact that decided it.
+         */
+        async feedback(options: { author: string; text: string }): Promise<{ asks: boolean; why: string }> {
+          const spent = fresh();
+          const answers = await ask(spent, { feedback: options }, FEEDBACK);
+          noted(spent);
+          const asking = strongest(answers, ASKINGS, ASKS);
+          if (asking !== undefined) return { asks: true, why: ASKING_REASONS[asking] };
+          return { asks: false, why: REMARK_REASONS[answers.remark.choice as Remark] };
+        },
+      },
+
       /**
        * The pass over one diff, with the checkout at `dir` holding the code it changes: every
        * file screened on five concerns, the strongest cells followed into their hunks, and the
@@ -488,7 +785,7 @@ export default adapter({
         if (files.length === 0) return null;
         const tree = await treeOf(options.dir);
         const graph = graphOf(tree);
-        const spent: Usage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+        const spent = fresh();
         let context = 0;
 
         const screened = await mapLimit(files, IN_FLIGHT, async (file) => {
@@ -544,13 +841,7 @@ export default adapter({
           .filter((one): one is Finding => one !== null)
           .sort((a, b) => b.severity - a.severity);
 
-        host.note({
-          usage: {
-            adapter: "jev",
-            session: "jev",
-            ...priced({ ...spent, model: spent.model ?? MODEL }, host.config),
-          },
-        });
+        noted(spent);
 
         return {
           files: files.length,
@@ -570,6 +861,5 @@ export default adapter({
         };
       },
     };
-
   },
 });
