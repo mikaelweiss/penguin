@@ -83,11 +83,17 @@ export type Ask = {
   problem: string | undefined;
 };
 
+/** One input the credentials form draws. `secret` hides what is typed. */
+export type AuthField = { name: string; label: string; placeholder?: string; secret?: boolean };
+
 /** The credentials a run's adapter waits on, from its unresolved auth note. */
 export type Auth = {
   role: string;
   /** Why the adapter paused: missing credentials, or the service's refusal. */
   reason: string;
+  /** What the adapter asks for, saved together as one keychain item under the role's name. */
+  fields: AuthField[];
+  help?: { label: string; url: string };
   at: string;
 };
 
@@ -522,7 +528,36 @@ function authOf(notes: Entry[]): Auth | undefined {
   const asked = auth as Record<string, unknown>;
   const role = text(asked["role"]);
   if (asked["resolved"] === true || role === undefined) return undefined;
-  return { role, reason: text(asked["reason"]) ?? "", at: text(last?.["at"]) ?? "" };
+  const help = asked["help"] as Record<string, unknown> | undefined;
+  const label = text(help?.["label"]);
+  const url = text(help?.["url"]);
+  return {
+    role,
+    reason: text(asked["reason"]) ?? "",
+    fields: fieldsOf(asked["fields"]),
+    ...(label === undefined || url === undefined ? {} : { help: { label, url } }),
+    at: text(last?.["at"]) ?? "",
+  };
+}
+
+function fieldsOf(value: unknown): AuthField[] {
+  if (!Array.isArray(value)) return [];
+  const fields: AuthField[] = [];
+  for (const one of value) {
+    if (one === null || typeof one !== "object") continue;
+    const field = one as Record<string, unknown>;
+    const name = text(field["name"]);
+    const label = text(field["label"]);
+    if (name === undefined || label === undefined) continue;
+    const placeholder = text(field["placeholder"]);
+    fields.push({
+      name,
+      label,
+      ...(placeholder === undefined ? {} : { placeholder }),
+      ...(field["secret"] === true ? { secret: true } : {}),
+    });
+  }
+  return fields;
 }
 
 function number(value: unknown): number {

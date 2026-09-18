@@ -1,6 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import { adapter, Fault } from "penguin";
+import { authGate, storedFields } from "../helpers/auth.ts";
 
 const TOKENS = "https://id.atlassian.com/manage-profile/security/api-tokens";
 const FIELDS = ["summary", "description", "status", "issuetype", "assignee"];
@@ -127,10 +126,18 @@ export default adapter({
   name: "cloud",
   description: "Jira Cloud issues over the REST API: read, search, create, comment, and transition",
   build: (host) => {
-    const epoch = path.join(host.state, "auth", "jira");
     const refused = new Set<string>();
     let refusal: string | undefined;
-    let waiting: Promise<void> | undefined;
+    const gate = authGate(host, "jira", {
+      fields: [
+        { name: "site", label: "Site", placeholder: "your-team.atlassian.net" },
+        { name: "email", label: "Email", placeholder: "you@example.com" },
+        { name: "token", label: "API token", secret: true },
+      ],
+      help: { label: "Make an API token", url: TOKENS },
+      // A save wipes the shelf, so re-entered credentials get one retry too.
+      onSave: () => refused.clear(),
+    });
 
     const keyOf = (held: Creds): string => JSON.stringify([held.site, held.email, held.token]);
 
@@ -139,24 +146,9 @@ export default adapter({
         ? { site: held.site, email: held.email, token: held.token }
         : undefined;
 
-    /** The keychain item the penguin app saves, one JSON of site, email, and token. */
-    async function stored(): Promise<Partial<Creds>> {
-      const raw = await host.secret("jira");
-      if (raw === undefined) return {};
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        return {};
-      }
-      const text = (value: unknown): string | undefined =>
-        typeof value === "string" && value !== "" ? value : undefined;
-      return { site: text(parsed["site"]), email: text(parsed["email"]), token: text(parsed["token"]) };
-    }
-
     /** Environment first, then the keychain, then ~/.penguin/config. Refused tuples wait their turn out. */
     async function creds(): Promise<Creds | { reason: string }> {
-      const saved = await stored();
+      const saved = await storedFields(host, "jira");
       const layered = (env: string, kept: string | undefined, key: string): string | undefined => {
         const fromEnv = process.env[env];
         if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
@@ -189,42 +181,12 @@ export default adapter({
       };
     }
 
-    const epochValue = (): string => {
-      try {
-        return fs.readFileSync(epoch, "utf8");
-      } catch {
-        return "";
-      }
-    };
-
-    /** Notes the pause once, then every caller waits for the app to save new credentials. */
-    function authPause(reason: string): Promise<void> {
-      if (waiting !== undefined) return waiting;
-      const since = epochValue();
-      host.note({ auth: { role: "jira", reason } });
-      waiting = new Promise<void>((resolve) => {
-        const check = (): void => {
-          if (epochValue() === since) return;
-          fs.unwatchFile(epoch, check);
-          resolve();
-        };
-        fs.watchFile(epoch, { interval: 500 }, check);
-        check();
-      }).then(() => {
-        // A save wipes the shelf, so re-entered credentials get one retry too.
-        refused.clear();
-        host.note({ auth: { role: "jira", resolved: true } });
-        waiting = undefined;
-      });
-      return waiting;
-    }
-
     /** A refusal shelves the tuple and tries the next. The pause comes when nothing is left. */
     async function call(method: string, route: string, body?: unknown): Promise<Reply> {
       for (;;) {
         const held = await creds();
         if ("reason" in held) {
-          await authPause(held.reason);
+          await gate.pause(held.reason);
           continue;
         }
         const reply = await request(held, method, route, body);

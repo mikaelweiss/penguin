@@ -38,7 +38,7 @@ function run(sketch: Sketch): Run {
       : { ask: { prompt: "which one?", schema: undefined, problem: undefined, ...sketch.ask } }),
     ...(sketch.auth === undefined
       ? {}
-      : { auth: { role: "jira", reason: "", at: "t1", ...sketch.auth } }),
+      : { auth: { role: "jira", reason: "", fields: [], at: "t1", ...sketch.auth } }),
     listening: false,
     input: [],
     output: [],
@@ -387,6 +387,25 @@ test("usage notes sum into the run's cost, and a child's spend joins the subtree
   const child: Run = { ...spent, id: "child", children: [], cost: { turns: 1, input: 1, cacheRead: 1, cacheWrite: 1, output: 1, usd: 0.05 } };
   const parent: Run = { ...spent, id: "parent", children: [child] };
   expect(subtreeCost(parent)).toEqual({ turns: 3, input: 12, cacheRead: 301, cacheWrite: 6, output: 23, usd: 0.8 });
+});
+
+test("an auth note carries the fields the adapter asks for, until a resolved note clears it", () => {
+  const asked = {
+    role: "jev",
+    reason: "TypeSafe needs an API key",
+    fields: [{ name: "key", label: "TypeSafe API key", secret: true }, { bad: true }],
+    help: { label: "Make an API key", url: "https://console.typesafe.ai/settings/keys" },
+  };
+  const waiting = only([live({ at: "t2", auth: asked })]);
+  expect(waiting.auth).toEqual({
+    role: "jev",
+    reason: "TypeSafe needs an API key",
+    fields: [{ name: "key", label: "TypeSafe API key", secret: true }],
+    help: { label: "Make an API key", url: "https://console.typesafe.ai/settings/keys" },
+    at: "t2",
+  });
+  const cleared = only([live({ at: "t2", auth: asked }, { at: "t3", auth: { role: "jev", resolved: true } })]);
+  expect(cleared.auth).toBeUndefined();
 });
 
 test("a run with no usage notes has no cost, and a tokens-only note keeps usd unknown", () => {

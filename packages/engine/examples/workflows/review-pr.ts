@@ -1,6 +1,7 @@
 import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
 import { reviewBrief, type Page } from "../helpers/brief.ts";
+import { comment as jevComment } from "../helpers/jev.ts";
 import { narrate, narrated } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
@@ -169,7 +170,7 @@ export default workflow({
   params: z.object({ pr: z.string().describe("the pull request, as a number or a url") }),
 
   async run(ctx) {
-    const { params, agent, vcs, github, view } = ctx;
+    const { params, agent, vcs, github, jev, view } = ctx;
     const found = await github.pr.get(params.pr);
     if (found === null) {
       await view.show(`${params.pr} names no pull request`);
@@ -352,6 +353,29 @@ export default workflow({
       return true;
     };
 
+    /**
+     * Jev's typed pass over the diff the tree holds, posted as its own comment before the deep
+     * review opens a session. A failure costs the post, not the round.
+     */
+    const screened = async (): Promise<void> => {
+      let report;
+      try {
+        report = await jev.review({ dir, diff });
+      } catch (error) {
+        await view.show(`The Jev pass did not run: ${messageOf(error)}`);
+        return;
+      }
+      if (report === null) {
+        await view.show("The diff holds nothing for Jev to screen.");
+        return;
+      }
+      await github.pr.comment(params.pr, { body: jevComment(report, `\`${head.slice(0, 7)}\``) });
+      posted += 1;
+      await view.show(
+        `Posted Jev's pass on PR #${pr.number}: ${report.files} files screened, ${report.findings.length} findings`,
+      );
+    };
+
     const post = async (findings: Findings, page: Page | null): Promise<void> => {
       await github.pr.comment(params.pr, { body: report(findings) });
       posted += 1;
@@ -469,6 +493,7 @@ export default workflow({
       "approved" | "sent" | "closed" | "draft" | "queued" | "stale"
     > => {
       await synced();
+      await screened();
       const gathered = await raced("gather", reader, "review-gather", gathering(), Dossier);
       if ("stop" in gathered) return gathered.stop;
 

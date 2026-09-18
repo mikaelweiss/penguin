@@ -197,6 +197,14 @@
             </td>
           </tr>
           <tr>
+            <td><code>examples/adapters/jev.ts</code></td>
+            <td>
+              role <code>jev</code>: TypeSafe Jev, which screens a diff for risk in seconds, the
+              key from <code>TYPESAFE_API_KEY</code>, the keychain, GNU pass, or
+              <code>~/.penguin/config</code>
+            </td>
+          </tr>
+          <tr>
             <td><code>examples/adapters/claude.ts</code>, <code>copilot.ts</code>, <code>codex.ts</code>, <code>cursor.ts</code>, <code>opencode.ts</code>, <code>pi.ts</code></td>
             <td>
               role <code>agent</code>, six names. Write <code>agent claude</code> to
@@ -238,6 +246,13 @@
           <tr>
             <td><code>examples/workflows/pr-queue.ts</code></td>
             <td>Watch the review requests and run <code>review-pr</code> on each arrival.</td>
+          </tr>
+          <tr>
+            <td><code>examples/workflows/jev.ts</code></td>
+            <td>
+              Screen the uncommitted change with Jev and show the report, in seconds and with no
+              agent. <code>review-pr</code> runs the same pass and posts it before its deep review.
+            </td>
           </tr>
           <tr>
             <td>

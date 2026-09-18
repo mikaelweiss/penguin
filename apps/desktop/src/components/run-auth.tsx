@@ -9,25 +9,22 @@ import { Input } from "@workspace/ui/components/input";
 import { storeAuthSecret } from "@/lib/auth";
 import type { Auth } from "@/lib/runs";
 
-const TOKENS = "https://id.atlassian.com/manage-profile/security/api-tokens";
-
 type RunAuthProps = {
   auth: Auth;
 };
 
 /**
- * The run paused for credentials. Saving puts them in the keychain and bumps
- * the epoch file, so every paused run retries and clears its own note.
+ * The run paused for credentials. The adapter's note names the fields; saving puts them in
+ * the keychain and bumps the epoch file, so every paused run retries and clears its own note.
  */
 export function RunAuth({ auth }: RunAuthProps) {
-  const [site, setSite] = useState("");
-  const [email, setEmail] = useState("");
-  const [token, setToken] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const id = useId();
 
-  const ready = site.trim() !== "" && email.trim() !== "" && token.trim() !== "";
+  const typed = (name: string): string => (values[name] ?? "").trim();
+  const ready = auth.fields.length > 0 && auth.fields.every((field) => typed(field.name) !== "");
 
   async function save(event: React.SyntheticEvent): Promise<void> {
     event.preventDefault();
@@ -35,12 +32,17 @@ export function RunAuth({ auth }: RunAuthProps) {
     setSaving(true);
     setProblem(undefined);
     try {
-      await storeAuthSecret(auth.role, {
-        site: site.trim(),
-        email: email.trim(),
-        token: token.trim(),
-      });
-      setToken("");
+      await storeAuthSecret(
+        auth.role,
+        Object.fromEntries(auth.fields.map((field) => [field.name, typed(field.name)])),
+      );
+      setValues((held) =>
+        Object.fromEntries(
+          Object.entries(held).filter(
+            ([name]) => !auth.fields.some((field) => field.name === name && field.secret === true),
+          ),
+        ),
+      );
     } catch (cause) {
       setProblem(cause instanceof Error ? cause.message : String(cause));
       setSaving(false);
@@ -57,51 +59,37 @@ export function RunAuth({ auth }: RunAuthProps) {
         </Alert>
 
         <FieldGroup className="gap-3 sm:flex-row">
-          <Field>
-            <FieldLabel htmlFor={`${id}-site`}>Site</FieldLabel>
-            <Input
-              id={`${id}-site`}
-              value={site}
-              placeholder="your-team.atlassian.net"
-              autoComplete="off"
-              onChange={(event) => setSite(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${id}-email`}>Email</FieldLabel>
-            <Input
-              id={`${id}-email`}
-              type="email"
-              value={email}
-              placeholder="you@example.com"
-              autoComplete="off"
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${id}-token`}>API token</FieldLabel>
-            <Input
-              id={`${id}-token`}
-              type="password"
-              value={token}
-              autoComplete="off"
-              onChange={(event) => setToken(event.target.value)}
-            />
-          </Field>
+          {auth.fields.map((field) => (
+            <Field key={field.name}>
+              <FieldLabel htmlFor={`${id}-${field.name}`}>{field.label}</FieldLabel>
+              <Input
+                id={`${id}-${field.name}`}
+                type={field.secret === true ? "password" : "text"}
+                value={values[field.name] ?? ""}
+                placeholder={field.placeholder}
+                autoComplete="off"
+                onChange={(event) =>
+                  setValues((held) => ({ ...held, [field.name]: event.target.value }))
+                }
+              />
+            </Field>
+          ))}
         </FieldGroup>
 
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={!ready || saving}>
             {saving ? "Waiting for the run" : "Save and continue"}
           </Button>
-          <a
-            href={TOKENS}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-muted-foreground underline underline-offset-4"
-          >
-            Make an API token
-          </a>
+          {auth.help !== undefined ? (
+            <a
+              href={auth.help.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-muted-foreground underline underline-offset-4"
+            >
+              {auth.help.label}
+            </a>
+          ) : null}
         </div>
       </form>
     </div>
