@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FolderIcon } from "lucide-react";
 
 import {
@@ -14,9 +14,14 @@ import { Kbd } from "@workspace/ui/components/kbd";
 
 import { ReadingCatalogs } from "@/components/reading-catalogs";
 import type { Startable, WorkflowIndex } from "@/hooks/use-workflow-index";
+import { ranked } from "@/lib/ranking";
+import type { Band } from "@/lib/ranking";
 import { visibleRuns } from "@/lib/runs";
 import type { Project, RunNode } from "@/lib/runs";
 import type { Workflow } from "@/lib/workflows";
+
+/** One command row: what a search ranks it on, and the item the list renders for it. */
+type Row = { value: string; item: React.ReactElement };
 
 function everyRun(projects: Project[]): RunNode[] {
   return projects.flatMap((project) =>
@@ -30,7 +35,7 @@ function Hint({ children }: { children: React.ReactNode }) {
 
 const SETTINGS = "open settings";
 
-/** What cmdk matches a workflow row on, and what marks it as the row the cursor starts on. */
+/** What a search matches a workflow row on. */
 function startValue({ workflow }: Startable): string {
   return `start ${workflow.name} ${workflow.description ?? ""} ${workflow.file}`;
 }
@@ -63,17 +68,11 @@ export function CommandPalette({
   onAppSettings,
 }: CommandPaletteProps) {
   const runs = everyRun(projects);
-  const top = index.startable[0];
-  const first = top === undefined ? SETTINGS : startValue(top);
-  const [cursor, setCursor] = useState(first);
+  const [cursor, setCursor] = useState("");
   const [search, setSearch] = useState("");
   /** The workflow whose project is still to be picked. */
   const [picking, setPicking] = useState<Startable | undefined>(undefined);
-
-  // The catalogs land after the dialog opens, so the cursor has to move onto them.
-  useEffect(() => {
-    setCursor(picking === undefined ? first : (picking.projects[0]?.dir ?? ""));
-  }, [first, picking]);
+  const list = useRef<HTMLDivElement>(null);
 
   // What was typed to find the workflow is not what filters its projects.
   useEffect(() => setSearch(""), [picking]);
@@ -97,6 +96,100 @@ export function CommandPalette({
     pick(() => onStartWorkflow(startable.workflow, only.dir));
   };
 
+  const bands: Band<Row>[] =
+    picking === undefined
+      ? [
+          {
+            title: "Workflows",
+            rows: index.startable.map((startable) => {
+              const value = startValue(startable);
+              return {
+                value,
+                item: (
+                  <CommandItem
+                    key={startable.workflow.file}
+                    value={value}
+                    onSelect={() => choose(startable)}
+                    className="items-start"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="truncate">{startable.workflow.name}</span>
+                      {startable.workflow.description === undefined ? null : (
+                        <span className="truncate text-xs text-muted-foreground">
+                          {startable.workflow.description}
+                        </span>
+                      )}
+                    </div>
+                    <Hint>{scopeOf(startable)}</Hint>
+                  </CommandItem>
+                ),
+              };
+            }),
+          },
+          {
+            title: "Settings",
+            rows: [
+              {
+                value: SETTINGS,
+                item: (
+                  <CommandItem key={SETTINGS} value={SETTINGS} onSelect={() => pick(onAppSettings)}>
+                    <span className="min-w-0 flex-1 truncate">Open settings</span>
+                    <Kbd>⌘,</Kbd>
+                  </CommandItem>
+                ),
+              },
+            ],
+          },
+          {
+            title: "Runs",
+            rows: runs.map(({ run, project }) => {
+              const value = `${run.name} ${project.name} ${run.id}`;
+              return {
+                value,
+                item: (
+                  <CommandItem
+                    key={run.id}
+                    value={value}
+                    onSelect={() => pick(() => onSelectRun(run.id))}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {run.name} · {project.name}
+                    </span>
+                    <Hint>{run.ask ? "needs you" : run.status}</Hint>
+                  </CommandItem>
+                ),
+              };
+            }),
+          },
+        ]
+      : [
+          {
+            title: `Run ${picking.workflow.name} in`,
+            rows: picking.projects.map((project) => ({
+              value: project.dir,
+              item: (
+                <CommandItem
+                  key={project.dir}
+                  value={project.dir}
+                  onSelect={() => pick(() => onStartWorkflow(picking.workflow, project.dir))}
+                >
+                  <FolderIcon />
+                  <span className="shrink-0">{project.name}</span>
+                  <Hint>{project.dir}</Hint>
+                </CommandItem>
+              ),
+            })),
+          },
+        ];
+
+  const found = ranked(bands, search);
+
+  // The catalogs land after the dialog opens and a search reorders what landed, so the cursor
+  // follows the best match instead of sitting where the last render left it.
+  useEffect(() => setCursor(found.top ?? ""), [search, found.top]);
+
+  useEffect(() => list.current?.scrollTo({ top: 0 }), [search]);
+
   return (
     <CommandDialog
       open={open}
@@ -111,6 +204,7 @@ export function CommandPalette({
       <Command
         value={cursor}
         onValueChange={setCursor}
+        shouldFilter={false}
         onKeyDown={(event) => {
           if (event.key !== "Backspace" || search !== "" || picking === undefined) return;
           event.preventDefault();
@@ -126,67 +220,14 @@ export function CommandPalette({
               : `Run ${picking.workflow.name} in`
           }
         />
-        <CommandList>
+        <CommandList ref={list}>
           <CommandEmpty>Nothing matches.</CommandEmpty>
-          {picking !== undefined ? (
-            <CommandGroup heading={`Run ${picking.workflow.name} in`}>
-              {picking.projects.map((project) => (
-                <CommandItem
-                  key={project.dir}
-                  value={project.dir}
-                  onSelect={() => pick(() => onStartWorkflow(picking.workflow, project.dir))}
-                >
-                  <FolderIcon />
-                  <span className="shrink-0">{project.name}</span>
-                  <Hint>{project.dir}</Hint>
-                </CommandItem>
-              ))}
+          {picking === undefined && index.reading ? <ReadingCatalogs /> : null}
+          {found.bands.map((band) => (
+            <CommandGroup key={band.title} heading={band.title}>
+              {band.rows.map((row) => row.item)}
             </CommandGroup>
-          ) : (
-            <>
-              {index.reading ? <ReadingCatalogs /> : null}
-              <CommandGroup heading="Workflows">
-                {index.startable.map((startable) => (
-                  <CommandItem
-                    key={startable.workflow.file}
-                    value={startValue(startable)}
-                    onSelect={() => choose(startable)}
-                    className="items-start"
-                  >
-                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate">{startable.workflow.name}</span>
-                      {startable.workflow.description === undefined ? null : (
-                        <span className="truncate text-xs text-muted-foreground">
-                          {startable.workflow.description}
-                        </span>
-                      )}
-                    </div>
-                    <Hint>{scopeOf(startable)}</Hint>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-              <CommandGroup heading="Settings">
-                <CommandItem value={SETTINGS} onSelect={() => pick(onAppSettings)}>
-                  <span className="min-w-0 flex-1 truncate">Open settings</span>
-                  <Kbd>⌘,</Kbd>
-                </CommandItem>
-              </CommandGroup>
-              <CommandGroup heading="Runs">
-                {runs.map(({ run, project }) => (
-                  <CommandItem
-                    key={run.id}
-                    value={`${run.name} ${project.name} ${run.id}`}
-                    onSelect={() => pick(() => onSelectRun(run.id))}
-                  >
-                    <span className="min-w-0 flex-1 truncate">
-                      {run.name} · {project.name}
-                    </span>
-                    <Hint>{run.ask ? "needs you" : run.status}</Hint>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </>
-          )}
+          ))}
         </CommandList>
       </Command>
     </CommandDialog>

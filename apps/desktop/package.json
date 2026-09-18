@@ -22,6 +22,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@workspace/terminal": "workspace:*",
     "@workspace/ui": "workspace:*",
+    "cmdk": "^1.1.1",
     "lucide-react": "^1.34.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

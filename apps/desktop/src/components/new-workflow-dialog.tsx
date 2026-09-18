@@ -43,6 +43,8 @@ import type { Config } from "@/hooks/use-config";
 import { useParamAttachments } from "@/hooks/use-param-attachments";
 import { fill, initialValues, paramsOf, withAttachments } from "@/lib/params";
 import type { Values } from "@/lib/params";
+import { ranked } from "@/lib/ranking";
+import type { Band } from "@/lib/ranking";
 import {
   AGENT,
   agentsIn,
@@ -58,6 +60,22 @@ type Trouble = { title: string; detail: string };
 
 function detailOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+type WorkflowRow = { value: string; disabled: boolean; workflow: Workflow };
+
+/** The shelves as rows a search ranks, each carrying what cmdk matches the workflow on. */
+function bandsOf(workflows: Workflow[]): Band<WorkflowRow>[] {
+  return shelves(workflows).map((shelf) => ({
+    title: shelf.title,
+    rows: shelf.workflows.map((workflow) => ({
+      value: `${workflow.scope} ${workflow.worktree ?? ""} ${workflow.name} ${
+        workflow.description ?? ""
+      }`.trim(),
+      disabled: workflow.error !== undefined,
+      workflow,
+    })),
+  }));
 }
 
 type NewWorkflowDialogProps = {
@@ -123,6 +141,9 @@ export function NewWorkflowDialog({
   const [agent, setAgent] = useState("");
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [starting, setStarting] = useState(false);
+  const [search, setSearch] = useState("");
+  const [cursor, setCursor] = useState("");
+  const list = useRef<HTMLDivElement>(null);
   const claimed = useRef<Promise<string> | undefined>(undefined);
   /** What a dismissed dialog left to the start still in flight, holding the claim it had. */
   const parked = useRef<{ held: Promise<string> | undefined } | undefined>(undefined);
@@ -157,6 +178,14 @@ export function NewWorkflowDialog({
     );
   }, [dir]);
 
+  const found = ranked(bandsOf(workflows), search);
+
+  // The catalogs land after the dialog opens and a search reorders what landed, so the cursor
+  // follows the best match instead of sitting where the last render left it.
+  useEffect(() => setCursor(found.top ?? ""), [search, found.top]);
+
+  useEffect(() => list.current?.scrollTo({ top: 0 }), [search]);
+
   const drop = (held: Promise<string> | undefined) => {
     if (held !== undefined) held.then(discardRun).catch(() => undefined);
   };
@@ -169,6 +198,7 @@ export function NewWorkflowDialog({
     else drop(held);
     onClose();
     setPicked(undefined);
+    setSearch("");
     setProblems({});
     setTrouble(undefined);
     attach.reset();
@@ -311,23 +341,25 @@ export function NewWorkflowDialog({
               <DialogTitle>New workflow</DialogTitle>
               <DialogDescription>Search the catalogs and pick a workflow to run.</DialogDescription>
             </DialogHeader>
-            <Command>
-              <CommandInput placeholder="Search workflows" />
-              <CommandList>
+            <Command value={cursor} onValueChange={setCursor} shouldFilter={false}>
+              <CommandInput
+                placeholder="Search workflows"
+                value={search}
+                onValueChange={setSearch}
+              />
+              <CommandList ref={list}>
                 {reading ? (
                   <ReadingCatalogs />
                 ) : (
                   <CommandEmpty>No workflow matches.</CommandEmpty>
                 )}
-                {shelves(workflows).map((shelf) => (
-                  <CommandGroup key={shelf.scope} heading={shelf.title}>
-                    {shelf.workflows.map((workflow) => (
+                {found.bands.map((band) => (
+                  <CommandGroup key={band.title} heading={band.title}>
+                    {band.rows.map(({ value, disabled, workflow }) => (
                       <CommandItem
                         key={workflow.file}
-                        value={`${workflow.scope} ${workflow.worktree ?? ""} ${workflow.name} ${
-                          workflow.description ?? ""
-                        }`}
-                        disabled={workflow.error !== undefined}
+                        value={value}
+                        disabled={disabled}
                         onSelect={() => choose(workflow)}
                         className="flex-col items-start gap-0.5"
                       >
