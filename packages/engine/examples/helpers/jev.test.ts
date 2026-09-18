@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  reading,
   aliasesOf,
   codeAt,
-  connections,
-  briefing,
   changedIn,
   comment,
   declarations,
+  diffFor,
   declarationsThrough,
   graphOf,
   importsIn,
@@ -14,12 +14,11 @@ import {
   parseHunks,
   relatedTo,
   resolveImport,
-  signalsOf,
+  probeSignals,
   sizeOf,
   testNamesIn,
   testsFor,
   testSummaries,
-  tiers,
   twinsOf,
   type Report,
   type Tree,
@@ -344,21 +343,23 @@ describe("relatedTo and testsFor", () => {
   });
 });
 
-describe("signalsOf", () => {
-  test("takes the strongest per concern above the floor, and never follows a test gap", () => {
+describe("probeSignals", () => {
+  test("takes the strongest per probe above the floor, and never follows a test gap", () => {
     const matrix = [
-      { path: "a", cells: { correctness: 0.9, security: 0.1, reliability: 0.3, compatibility: 0.1, testGap: 0.95 } },
-      { path: "b", cells: { correctness: 0.8, security: 0.1, reliability: 0.2, compatibility: 0.1, testGap: 0.95 } },
-      { path: "c", cells: { correctness: 0.7, security: 0.1, reliability: 0.1, compatibility: 0.1, testGap: 0.95 } },
-      { path: "d", cells: { correctness: 0.1, security: 0.1, reliability: 0.25, compatibility: 0.1, testGap: 0.95 } },
+      { path: "a", probes: { staleCache: 0.9, flagLeak: 0.1, reliability: 0.3, testGap: 0.95 } },
+      { path: "b", probes: { staleCache: 0.8, flagLeak: 0.1, reliability: 0.2, testGap: 0.95 } },
+      { path: "c", probes: { staleCache: 0.7, flagLeak: 0.1, reliability: 0.1, testGap: 0.95 } },
+      { path: "d", probes: { staleCache: 0.1, flagLeak: 0.1, reliability: 0.25, testGap: 0.95 } },
     ];
-    const picked = signalsOf(matrix, { floor: 0.2, perConcern: 2 });
-    expect(picked.map((one) => `${one.path}/${one.dimension}`)).toEqual([
-      "a/correctness",
-      "b/correctness",
+    const dimensions = { staleCache: "correctness", flagLeak: "security", reliability: "reliability", testGap: "testGap" } as const;
+    const picked = probeSignals(matrix, dimensions, { floor: 0.2, perProbe: 2 });
+    expect(picked.map((one) => `${one.path}/${one.probe}`)).toEqual([
+      "a/staleCache",
+      "b/staleCache",
       "a/reliability",
       "d/reliability",
     ]);
+    expect(picked[0]?.dimension).toBe("correctness");
   });
 });
 
@@ -392,18 +393,22 @@ describe("comment", () => {
         cut: false,
         tier: "deep",
         cells: { correctness: 0.12, security: 0.83, reliability: 0.2, compatibility: 0.31, testGap: 0.44 },
+        probes: { security: 0.83 },
+        windows: [],
       },
       {
         path: "src/b.ts",
         cut: true,
         tier: "skim",
         cells: { correctness: 0.9, security: 0.1, reliability: 0.1, compatibility: 0.1, testGap: 0.8 },
+        probes: { correctness: 0.9 },
+        windows: [],
       },
     ],
     profiles: [{ path: "src/a.ts", category: "behavior", priority: 2.2 }],
     inspected: [
-      { path: "src/a.ts", dimension: "security", probability: 0.83 },
-      { path: "src/b.ts", dimension: "correctness", probability: 0.9 },
+      { path: "src/a.ts", dimension: "security", probe: "security", probability: 0.83 },
+      { path: "src/b.ts", dimension: "correctness", probe: "correctness", probability: 0.9 },
     ],
     connections: [
       {
@@ -418,6 +423,7 @@ describe("comment", () => {
         path: "src/a.ts",
         line: 42,
         dimension: "security",
+        probe: "security",
         probability: 0.83,
         mechanism: "injection",
         severity: 2.4,
@@ -427,6 +433,7 @@ describe("comment", () => {
         path: "src/a.ts",
         line: 42,
         dimension: "correctness",
+        probe: "correctness",
         probability: 0.12,
         mechanism: "dataFlow",
         severity: 1.1,
@@ -465,56 +472,55 @@ describe("comment", () => {
     expect(said).toContain("No signal held up to the evidence in its hunks.");
   });
 
-  test("briefs the reader on where to look without claiming a defect", () => {
-    const said = briefing(report);
-    expect(said).toContain("this is where to look, not what is wrong");
-    expect(said).toContain("- `src/a.ts:42` — Security: injection; Correctness: data flow");
-    expect(said).toContain("## Suspected, no hunk carried it\n\n- `src/b.ts`");
-    expect(said).toContain("## Rated as needing careful review\n\n- `src/a.ts`");
+  test("orders the deep files by rank, gives the first whole, and names the suspected lines", () => {
+    const ranked = {
+      ...report,
+      matrix: [
+        { ...report.matrix[0]!, rank: 1.2, windows: [{ probe: "staleCache", line: 42, probability: 0.61 }, { probe: "testGap", line: 42, probability: 0.9 }] },
+        { ...report.matrix[1]!, tier: "deep" as const, rank: 4.5, windows: [{ probe: "parity", line: 7, probability: 0.2 }, { probe: "parity", line: 9, probability: 0.45 }] },
+        { path: "src/c.css", cut: false, tier: "ignore" as const, cells: report.matrix[0]!.cells, probes: {}, windows: [] },
+      ],
+    };
+    const said = reading(ranked, (file) => (file === "src/b.ts" ? "export const b = 1;" : undefined));
+    expect(said.indexOf("src/b.ts")).toBeLessThan(said.indexOf("src/a.ts"));
+    expect(said).toContain("## Read whole\n\n- `src/b.ts`");
+    expect(said).toContain("## Read from the diff\n\n- `src/a.ts`: line 42, a write that leaves a view stale");
+    expect(said).not.toContain("line 7");
+    expect(said).not.toContain("line 9");
+    expect(said).toContain("## Leave to the build\n\n- `src/c.css`");
+    expect(said).toContain("## src/b.ts\n\n```\nexport const b = 1;\n```");
+    expect(said).toContain("a place to look, not a finding");
   });
 });
 
-describe("connections and tiers", () => {
-  const report: Report = {
-    files: 3,
-    tests: 0,
-    context: 2,
-    floor: 0.2,
-    perConcern: 3,
+describe("diffFor", () => {
+  const block = (path: string, lines: number): string =>
+    `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1,${lines} @@\n${Array.from({ length: lines }, (_, i) => `+line ${i} of ${path} padded to make the patch long enough to cut`).join("\n")}\n`;
+  const diff =
+    block("src/deep.ts", 3) + block("src/skim.ts", 80) + block("src/deep.test.ts", 80) + block("src/gen.css", 2) + block("bun.lock", 2);
+  const report = {
     matrix: [
-      { path: "src/deep.ts", cut: false, tier: "deep", cells: CELLS },
-      { path: "src/skim.ts", cut: false, tier: "skim", cells: CELLS },
-      { path: "src/gen.ts", cut: false, tier: "ignore", cells: CELLS },
+      { path: "src/deep.ts", tier: "deep" },
+      { path: "src/skim.ts", tier: "skim" },
+      { path: "src/gen.css", tier: "ignore" },
     ],
-    profiles: [],
-    inspected: [],
-    connections: [
-      { path: "src/skim.ts", tier: "skim", excerpts: [{ path: "src/x.ts", role: "importer", text: "// line 4\nskim()" }] },
-      { path: "src/deep.ts", tier: "deep", excerpts: [{ path: "src/y.ts", role: "imported", text: "// line 9\nexport function y() {}" }] },
-      { path: "src/gen.ts", tier: "ignore", excerpts: [{ path: "src/z.ts", role: "importer", text: "gen()" }] },
-    ],
-    findings: [],
-    funnel: { cells: 15, inspected: 0, located: 0, routed: 0 },
-  };
+  } as unknown as Report;
 
-  test("carries the deep files first, names each excerpt's relation, and leaves the ignored out", () => {
-    const said = connections(report);
-    expect(said.indexOf("## src/deep.ts (deep)")).toBeLessThan(said.indexOf("## src/skim.ts (skim)"));
-    expect(said).toContain("### src/y.ts — it calls this");
-    expect(said).toContain("### src/x.ts — this calls it");
-    expect(said).not.toContain("src/gen.ts");
-    expect(said).toContain("Do not grep or re-read these");
+  test("carries deep files whole, cuts skim and test files, and names what the build checks", () => {
+    const said = diffFor(report, diff);
+    expect(said).toContain("+line 2 of src/deep.ts");
+    expect(said).toContain("+line 0 of src/skim.ts");
+    expect(said).not.toContain("+line 79 of src/skim.ts");
+    expect(said).toContain("+line 0 of src/deep.test.ts");
+    expect(said).not.toContain("+line 79 of src/deep.test.ts");
+    expect(said).toMatch(/\.\.\. \d+ more lines cut, open the file for the rest/);
+    expect(said).not.toContain("+line 0 of src/gen.css");
+    expect(said).not.toContain("+line 0 of bun.lock");
+    expect(said).toContain("Not shown, left to the build: `src/gen.css`, `bun.lock`");
   });
 
-  test("nothing to carry renders nothing", () => {
-    expect(connections({ ...report, connections: [] })).toBe("");
-  });
-
-  test("lists every changed file under its tier", () => {
-    const said = tiers(report);
-    expect(said).toContain("## Ignore\n\n- `src/gen.ts`");
-    expect(said).toContain("## Deep\n\n- `src/deep.ts`");
-    expect(said).toContain("## Skim\n\n- `src/skim.ts`");
+  test("without a report the whole diff goes", () => {
+    expect(diffFor(null, diff)).toBe(diff);
   });
 });
 

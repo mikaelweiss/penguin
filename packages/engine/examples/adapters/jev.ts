@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { adapter, PenguinError } from "penguin";
@@ -9,7 +10,9 @@ import {
   graphOf,
   parseHunks,
   relatedTo,
-  signalsOf,
+  probeSignals,
+  codeFor,
+  docsFor,
   sizeOf,
   testSummaries,
   type Cells,
@@ -58,6 +61,9 @@ const PROFILED = 5;
 const ROUTED = 1.5;
 /** A source file past this size is generated or vendored, and reading it buys nothing. */
 const FILE_BYTES = 1_000_000;
+/** How much of the pull request's own text a screen carries, for the probes that hold the change to what it claims. */
+const ABOUT_CHARS = 6_000;
+const DOC = /\.(?:mdx?|txt|rst)$|(?:^|\/)docs\/.*\.html$/;
 /** What a person reads in a minute: a few files, tens of changed lines. Past either, no question is asked. */
 const EYEBALL_FILES = 5;
 const EYEBALL_LINES = 100;
@@ -70,6 +76,9 @@ const ASKS = 0.5;
 const CLEAR = 0.5;
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** One window of a file judged by one probe. */
+type Window = { probe: string; hunk: Hunk; probability: number };
 
 type Noul = { type: "noul"; instructions: Json; criteria?: { true: Json; false: Json } };
 type Choice<Option extends string> = { type: "choice"; instructions: Json; criteria: Record<Option, Json> };
@@ -235,131 +244,355 @@ const MECHANISMS: Record<Dimension, Record<string, string>> = {
   },
 };
 
+type Probe = { dimension: Dimension; docs?: boolean; ask: Noul };
+
 /**
- * The five screening questions over one file. `related` carries what the tree says that the
- * patch does not: the declarations the file imports, the file it was copied from, and the
- * lines of the files that import it.
+ * What one screen call asks over one file. Each probe is a shape a review has accepted before:
+ * a cache one view refreshes and another does not, an error shown as nothing, a control that
+ * does nothing, a route past the flag, a doc the code contradicts. `related` carries what the
+ * tree says that the patch does not, and `pr` what the author says the change is.
  */
-export const SCREENING = {
-  correctness: noul(
-    {
-      question: "Does file.patch directly support that this change introduces incorrect runtime behavior?",
-      inspect: [
-        "file.patch, read against related for what the code it calls returns and what its callers expect",
-        "Each changed function's name and doc comment against the condition its body enforces",
-        "A twin entry in related, the file this one was copied from, against the lines that differ",
-      ],
-      focus: "Concrete behavior, state, data flow, or async errors in the added or changed lines",
-      ignore: ["Style preferences", "Naming concerns", "Speculation the code does not support"],
-    },
-    {
-      true: {
-        what: "The patch holds a realistic path to a wrong runtime result",
-        examples: [
-          "A condition now handles the opposite case",
-          "A caller in related passes a value the new signature misreads",
-          "A filter or query admits cases that its own name, doc comment, or caller says it must exclude",
-          "A loop or traversal reads only the first element of a collection it should walk",
-          "A parser accepts values outside the range its consumer assumes",
+export const PROBES = {
+  correctness: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question: "Does file.patch directly support that this change introduces incorrect runtime behavior?",
+        inspect: [
+          "file.patch, read against related for what the code it calls returns and what its callers expect",
+          "Each changed function's name and doc comment against the condition its body enforces",
+        ],
+        focus: "Concrete behavior, state, data flow, or async errors in the added or changed lines",
+        ignore: ["Style preferences", "Naming concerns", "Speculation the code does not support"],
+      },
+      {
+        true: {
+          what: "The patch holds a realistic path to a wrong runtime result",
+          examples: [
+            "A condition now handles the opposite case",
+            "A caller in related passes a value the new signature misreads",
+            "A filter or query admits cases that its own name, doc comment, or caller says it must exclude",
+            "A loop or traversal reads only the first element of a collection it should walk",
+          ],
+        },
+        false: {
+          what: "The patch is correct, non-behavioral, or shows no direct evidence of a bug",
+          examples: ["Formatting only", "A refactor that preserves data flow"],
+        },
+      },
+    ),
+  },
+  staleCache: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question:
+          "Does file.patch add or change a write, a mutation, delete, update, or store write, whose success path refreshes fewer places than show the data it changed?",
+        inspect: [
+          "file.patch, for what the write changes and what its success path invalidates, patches, refetches, or resets",
+          "related, for the query keys, stores, and importers that show the same data under another key, view, or mode",
+        ],
+        focus: "Whether every list, cache, or view that displays the changed rows is refreshed or patched, not whether the write itself is right",
+      },
+      {
+        true: {
+          what: "Some place that shows the changed data keeps showing the old data after the write succeeds",
+          examples: [
+            "The success path invalidates the folder list, and related shows the same rows listed under an area, search, or detail key too",
+            "A cache patch updates one query's rows while a second query in related holds copies of the same rows",
+            "A delete awaits the refetch of the deleted row's own query, so the refetch rejects and the delete reports an error",
+            "A send succeeds and the list that would show the new row is not invalidated, so the action can be repeated",
+          ],
+        },
+        false: { what: "Every consumer of the changed data is refreshed or patched, or the patch holds no write" },
+      },
+    ),
+  },
+  errorAsEmpty: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question: "Does file.patch show a failed request as an empty, default, or loading state instead of an error?",
+        inspect: "file.patch, for how a query's data, isError, isLoading, or a catch block feeds what renders or returns",
+      },
+      {
+        true: {
+          what: "A failure reaches the user as nothing wrong",
+          examples: [
+            "`query.data ?? []` renders the empty state while the query errored",
+            "isLoading is derived from the data alone and never reads isError, so a 403 or 500 renders as no rows",
+            "A catch returns a default the caller cannot tell from a real result",
+          ],
+        },
+        false: { what: "The error state renders or propagates as an error, or the patch makes no request" },
+      },
+    ),
+  },
+  deadControl: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question:
+          "Does file.patch render a control or accept a handler that does nothing: a handler missing or a no-op, a prop received and never used, a callback passed down and dropped?",
+        inspect: [
+          "file.patch, for each rendered control and where its handler comes from",
+          "related, for what the importers pass in and what the imported component does with it",
         ],
       },
-      false: {
-        what: "The patch is correct, non-behavioral, or shows no direct evidence of a bug",
-        examples: ["Formatting only", "A refactor that preserves data flow"],
+      {
+        true: {
+          what: "A control the user can reach has no effect, or a value the caller sends goes nowhere",
+          examples: [
+            "A button renders enabled and the importer in related passes no handler for it",
+            "A component accepts a permissions prop and never reads it",
+            "A handler is destructured and never attached",
+          ],
+        },
+        false: { what: "Every control's handler reaches an effect, or the patch renders no control" },
       },
-    },
-  ),
-  security: noul(
-    {
-      question: "Does file.patch directly support that this change introduces or weakens a security boundary?",
-      inspect: "file.patch, with related for where its inputs come from",
-      focus: "Authorization, injection, secret exposure, trust boundaries, and unsafe defaults",
-    },
-    {
-      true: {
-        what: "The patch creates a concrete path around a security control or into an unsafe sink",
-        examples: [
-          "An authorization check is removed",
-          "Untrusted input reaches command execution",
-          "A new route, procedure, or handler is reachable without the feature flag, role, or ownership check its neighbours perform",
+    ),
+  },
+  transition: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question:
+          "Does file.patch hold state that is set on one path and not reset on the path back, or a value captured before a list changes and used after?",
+        inspect: "file.patch, for every state set, ref write, and effect dependency, and for each what clears or recomputes it",
+      },
+      {
+        true: {
+          what: "A state or index goes stale on a path the patch does not handle",
+          examples: [
+            "A status set to loading on the slow path and never set on the cached path, so it sticks",
+            "An index into a list captured before more pages load and read after they do",
+            "A selection cleared on one navigation action and kept on the others",
+            "Seeding that runs only when a dialog opens, so a second open with new inputs keeps the old values",
+            "A latch set once that a later change never clears",
+          ],
+        },
+        false: { what: "Every transition resets what it must, or the patch holds no such state" },
+      },
+    ),
+  },
+  parity: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question:
+          "Does the twin in related, the file this one was copied or ported from, do something on a path that file.patch skips or does differently?",
+        inspect: "The twin entry in related against file.patch, where they correspond",
+      },
+      {
+        true: {
+          what: "The copy diverges from the twin on a path that matters",
+          examples: [
+            "The twin clears the selection on every navigation and the copy on one",
+            "The twin invalidates two keys and the copy one",
+            "The twin sorts by kind and the copy by name",
+            "The twin queues a follow-up job the copy does not",
+          ],
+        },
+        false: { what: "No twin in related, or the copy matches the twin on every path that matters" },
+      },
+    ),
+  },
+  constant: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question:
+          "Does file.patch use a literal, unit, divisor, mapping, or label that does not match what its name, its comment, its consumer, or a doc in related says it should be?",
+        inspect: "Each literal in file.patch against the name and comment beside it and the caller or doc in related",
+      },
+      {
+        true: {
+          what: "A value is wrong for what it is named or used as",
+          examples: [
+            "Elapsed-time units divided by working-time divisors",
+            "A false boolean rendered as Required",
+            "A route pattern that matches a path it must not",
+            "A query key or screen key that differs from the one the twin shares",
+          ],
+        },
+        false: { what: "Every literal matches what is said about it, or the patch holds none" },
+      },
+    ),
+  },
+  staleDoc: {
+    dimension: "correctness",
+    ask: noul(
+      {
+        question: "Does a doc entry in related describe a label, control, order, color, or behavior that file.patch changes or removes?",
+        inspect: "The doc entries in related, which are walkthroughs that mention the labels file.patch touches, against what file.patch now does",
+      },
+      {
+        true: {
+          what: "A walkthrough now tells the tester something the code no longer does",
+          examples: [
+            "The doc names a button style the patch changes",
+            "The doc tells the tester to expect an order the patch no longer produces",
+            "The doc names a control the patch renames or removes",
+          ],
+        },
+        false: { what: "No doc entry in related, or every line of it still holds" },
+      },
+    ),
+  },
+  docMismatch: {
+    dimension: "correctness",
+    docs: true,
+    ask: noul(
+      {
+        question:
+          "Does file.patch, a document, describe a control, label, order, color, step, or outcome that the code in related does not implement or contradicts?",
+        inspect: "Each step and claim in file.patch against the code entries in related, which are the source patches of the same change that share its words",
+      },
+      {
+        true: {
+          what: "A tester following the doc would mark a step failed against this code",
+          examples: [
+            "The doc says the video keeps playing and the code pauses it",
+            "The doc expects one group listed first and the code sorts alphabetically",
+            "The doc names a header control that no code renders",
+            "The doc describes a state this build cannot reach",
+          ],
+        },
+        false: { what: "Every claim in the doc matches the code, or related holds no code" },
+      },
+    ),
+  },
+  security: {
+    dimension: "security",
+    ask: noul(
+      {
+        question: "Does file.patch directly support that this change introduces or weakens a security boundary?",
+        inspect: "file.patch, with related for where its inputs come from",
+        focus: "Authorization, injection, secret exposure, trust boundaries, and unsafe defaults",
+      },
+      {
+        true: {
+          what: "The patch creates a concrete path around a security control or into an unsafe sink",
+          examples: ["An authorization check is removed", "Untrusted input reaches command execution"],
+        },
+        false: { what: "No security boundary is weakened by the patch", not_for: "Code that merely uses security-related names" },
+      },
+    ),
+  },
+  flagLeak: {
+    dimension: "security",
+    ask: noul(
+      {
+        question:
+          "Does file.patch make a route, control, or behavior reachable outside the feature flag, kill switch, role, or ownership check that pr says gates it, or that its neighbours in related use?",
+        inspect: [
+          "pr, for the flag or switch the author says gates this change",
+          "file.patch, for each new route, control, or branch and what gates it",
+          "related, for the check the neighbouring routes or controls perform",
         ],
       },
-      false: {
-        what: "No security boundary is weakened by the patch",
-        not_for: "Code that merely uses security-related names",
+      {
+        true: {
+          what: "Something new ships outside the gate the change claims or its neighbours use",
+          examples: [
+            "A new route registered without the flag guard its sibling routes pass",
+            "A control added to a shared component that also renders on pages the flag does not cover",
+            "A rename or behavior change shipped outside the kill switch the description says covers the change",
+          ],
+        },
+        false: { what: "Every new path sits behind the gate, or pr names no gate and the neighbours use none" },
       },
-    },
-  ),
-  reliability: noul(
-    {
-      question: "Does file.patch directly support that this change can crash, race, leak, deadlock, or recover poorly?",
-      inspect: "file.patch, with related for what the code it calls can throw or leave open",
-      focus: "Realistic resource, concurrency, cancellation, and failure paths",
-    },
-    {
-      true: {
-        what: "A changed path can lose work, leak resources, hang, crash, or leave inconsistent state",
-        examples: [
-          "Cleanup is skipped after failure",
-          "Concurrent work updates shared state unsafely",
-          "An external, irreversible effect (abort, delete, send, commit to storage) runs before the local record that depends on it is saved, so a rollback or crash leaves the record pointing at nothing",
-          "A record is deleted before the resource it points at is removed, so a failure in between strands the resource with no way to find it",
-          "Work is reported done before the step that makes it durable runs, so an unmount, termination, or failure in between loses it",
-          "A discard or cancel path clears local state but leaves the remote or on-disk side of it open",
-        ],
+    ),
+  },
+  reliability: {
+    dimension: "reliability",
+    ask: noul(
+      {
+        question: "Does file.patch directly support that this change can crash, race, leak, deadlock, or recover poorly?",
+        inspect: "file.patch, with related for what the code it calls can throw or leave open",
+        focus: "Realistic resource, concurrency, cancellation, and failure paths",
       },
-      false: { what: "The patch preserves safe lifecycle and failure handling" },
-    },
-  ),
-  compatibility: noul(
-    {
-      question: "Does file.patch directly support that this change can break an existing caller, format, protocol, or public behavior?",
-      inspect: "file.patch, with the importer entries in related for who calls what changed and how",
-      focus: "Externally observed contracts rather than internal implementation details",
-    },
-    {
-      true: {
-        what: "An existing consumer can fail because a contract changed without a safe migration",
-        examples: ["A required field is removed", "An importer in related still calls a removed or renamed export"],
+      {
+        true: {
+          what: "A changed path can lose work, leak resources, hang, crash, or leave inconsistent state",
+          examples: [
+            "Cleanup is skipped after failure",
+            "Concurrent work updates shared state unsafely",
+            "An irreversible effect runs before the local record that depends on it is saved",
+            "Work is reported done before the step that makes it durable runs",
+          ],
+        },
+        false: { what: "The patch preserves safe lifecycle and failure handling" },
       },
-      false: { what: "The changed contract remains compatible, or every caller in related was updated with it" },
-    },
-  ),
-  testGap: noul(
-    {
-      question:
-        "Does file.patch change important behavior that no test named in changedTests exercises?",
-      inspect:
-        "changedTests lists every test file the change adds or edits, with the names of its tests. A test counts when its name describes the behavior file.patch adds or changes, even from a different file. targeted marks the test files the tree ties to this file",
-      focus: "New branches, boundaries, failure paths, and component interactions",
-    },
-    {
-      true: {
-        what: "Important changed behavior has no test in changedTests whose name covers it",
-        examples: ["A new failure branch has no test named for it", "A protocol change has no test that names the compatibility case"],
+    ),
+  },
+  compatibility: {
+    dimension: "compatibility",
+    ask: noul(
+      {
+        question: "Does an importer in related still call what file.patch removed, renamed, or reshaped, in a way that now fails or misbehaves?",
+        inspect: "The importer entries in related, for the exact call, against the signature or shape file.patch leaves",
+        focus: "A caller the patch did not update, not the fact that a contract changed",
       },
-      false: {
-        what: "A test in changedTests names the important behavior, or the patch is non-behavioral",
-        examples: ["A test named for the branch appears in changedTests", "Documentation-only change", "A type or interface with no runtime behavior"],
+      {
+        true: {
+          what: "A caller in related is broken by the change and not updated with it",
+          examples: ["An importer still passes a removed field", "An importer still calls a renamed export", "A persisted format changes with no migration for what is stored"],
+        },
+        false: { what: "Every importer in related was updated with the change, or none uses what changed" },
       },
-    },
-  ),
-  tier: choice(
-    {
-      question: "How closely does a person have to read file.patch for this review to be sound?",
-      inspect: "file.patch, and what related says the code around it expects",
-      focus: "What a mistake in these lines would cost, not how long the patch is",
-    },
-    TIER_CRITERIA,
-  ),
-};
+    ),
+  },
+  testGap: {
+    dimension: "testGap",
+    ask: noul(
+      {
+        question: "Does file.patch change important behavior that no test named in changedTests exercises?",
+        inspect:
+          "changedTests lists every test file the change adds or edits, with the names of its tests. A test counts when its name describes the behavior file.patch adds or changes, even from a different file. targeted marks the test files the tree ties to this file",
+        focus: "New branches, boundaries, failure paths, and component interactions",
+      },
+      {
+        true: {
+          what: "Important changed behavior has no test in changedTests whose name covers it",
+          examples: ["A new failure branch has no test named for it", "A new route has no test that names the permission-denied case"],
+        },
+        false: {
+          what: "A test in changedTests names the important behavior, or the patch is non-behavioral",
+          examples: ["Documentation-only change", "A type or interface with no runtime behavior"],
+        },
+      },
+    ),
+  },
+} satisfies Record<string, Probe>;
+
+export type ProbeName = keyof typeof PROBES;
+export const PROBE_NAMES = Object.keys(PROBES) as ProbeName[];
+export const PROBE_DIMENSIONS = Object.fromEntries(
+  PROBE_NAMES.map((name) => [name, PROBES[name].dimension]),
+) as Record<string, Dimension>;
+
+const TIER = choice(
+  {
+    question: "How closely does a person have to read file.patch for this review to be sound?",
+    inspect: "file.patch, and what related says the code around it expects",
+    focus: "What a mistake in these lines would cost, not how long the patch is",
+  },
+  TIER_CRITERIA,
+);
+
+/** The probes one file gets: the document probe for a document, the rest for code. */
+export function screeningFor(doc: boolean): Record<string, Question> {
+  const asked = PROBE_NAMES.filter((name) => (PROBES[name] as Probe).docs === true === doc);
+  return { ...Object.fromEntries(asked.map((name) => [name, PROBES[name].ask])), tier: TIER };
+}
 
 /**
  * One question per window of a file: does this window alone show the concern? The criteria
- * are the screen's own, so a window is judged on the concrete mechanisms and not on the label.
+ * are the probe's own, so a window is judged on the concrete mechanisms and not on the label.
  */
-export function windowQuestions(dimension: Dimension, hunks: Hunk[]): Record<string, Noul> {
-  const screened = SCREENING[dimension].criteria;
+export function windowQuestions(probe: ProbeName, hunks: Hunk[]): Record<string, Noul> {
+  const screened = PROBES[probe].ask.criteria;
   return Object.fromEntries(
     hunks.map((hunk, index) => [
       hunk.id,
@@ -370,18 +603,61 @@ export function windowQuestions(dimension: Dimension, hunks: Hunk[]): Record<str
           ignore: "Evidence that sits in another hunk",
         },
         {
-          true: {
-            what: "These lines hold the mechanism of the concern",
-            mechanisms: screened?.true ?? null,
-          },
-          false: {
-            what: "These lines do not show it, even where another hunk of the file might",
-            mechanisms: screened?.false ?? null,
-          },
+          true: { what: "These lines hold the mechanism of the concern", mechanisms: screened?.true ?? null },
+          false: { what: "These lines do not show it, even where another hunk of the file might", mechanisms: screened?.false ?? null },
         },
       ),
     ]),
   );
+}
+/** The most windows one file is judged on, and the most questions one call carries. */
+const HUNKS_EACH = 12;
+const QUESTIONS_EACH = 60;
+/** The most files one ranking call compares. */
+const RANKED_EACH = 20;
+/** The windows each candidate shows when ranked. */
+const WINDOWS_SHOWN = 2;
+
+/** The concerns the deep files are ranked on, side by side. The strongest answer is a file's rank. */
+const RANKINGS: Record<string, string> = {
+  worst: "Which candidate window most likely holds a defect a reviewer would block the merge on?",
+  staleCache: "Which candidate window most likely writes data and leaves a list, cache, or view that shows it unrefreshed?",
+  errorAsEmpty: "Which candidate window most likely shows a failed request as an empty, default, or loading state?",
+  transition: "Which candidate window most likely leaves state stale on a transition it does not handle, or uses an index captured before its list changed?",
+  deadControl: "Which candidate window most likely renders a control or accepts a handler that does nothing?",
+  gate: "Which candidate window most likely ships a route, control, or behavior outside the flag, switch, or permission check that gates its neighbours?",
+  claim: "Which candidate window most likely contradicts what pr says the change does, or what a walkthrough in it describes?",
+};
+
+/**
+ * One question per probe per window: does this window alone show the probe's concern? The
+ * window is small enough to answer about, and the file and its connections stay in view.
+ */
+export function hunkQuestions(probes: ProbeName[], hunks: Hunk[]): Record<string, Noul> {
+  const out: Record<string, Noul> = {};
+  for (const probe of probes) {
+    const ask = PROBES[probe].ask;
+    const asked = typeof ask.instructions === "object" && ask.instructions !== null && !Array.isArray(ask.instructions)
+      ? (ask.instructions as Record<string, Json>)
+      : { question: ask.instructions };
+    hunks.forEach((hunk, index) => {
+      out[`${probe}__${hunk.id}`] = noul(
+        {
+          ...asked,
+          window: `Answer for the lines of \`hunks[${index}]\` alone, read with the rest of file.patch and related as context. Evidence that sits only in another window does not count.`,
+        },
+        ask.criteria,
+      );
+    });
+  }
+  return out;
+}
+
+/** A record's entries in groups, so one call never carries more questions than it should. */
+export function chunked<T>(entries: [string, T][], size: number): [string, T][][] {
+  const groups: [string, T][][] = [];
+  for (let from = 0; from < entries.length; from += size) groups.push(entries.slice(from, from + size));
+  return groups;
 }
 
 /**
@@ -686,6 +962,11 @@ export default adapter({
       state: Json,
       questions: Q,
     ): Promise<Answers<Q>> {
+      const cacheDir = process.env["PENGUIN_JEV_CACHE"];
+      const cacheKey = cacheDir === undefined || cacheDir === "" ? undefined : path.join(cacheDir, `${crypto.createHash("sha256").update(JSON.stringify({ model: MODEL, state, questions })).digest("hex")}.json`);
+      if (cacheKey !== undefined && fs.existsSync(cacheKey)) {
+        return JSON.parse(fs.readFileSync(cacheKey, "utf8")) as Answers<Q>;
+      }
       for (let attempt = 0; ; attempt++) {
         const response = await fetch(ENDPOINT, {
           method: "POST",
@@ -713,6 +994,10 @@ export default adapter({
         spent.model = reply.model ?? spent.model;
         spent.input += reply.usage?.input_tokens ?? 0;
         spent.output += reply.usage?.output_tokens ?? 0;
+        if (cacheKey !== undefined) {
+          fs.mkdirSync(path.dirname(cacheKey), { recursive: true });
+          fs.writeFileSync(cacheKey, JSON.stringify(reply.answers));
+        }
         return reply.answers as Answers<Q>;
       }
     }
@@ -741,32 +1026,20 @@ export default adapter({
     }
 
     /**
-     * One signal followed into its hunks: every window judged on its own for direct evidence,
-     * the strongest classified and rated, the serious ones routed. A file can hold the same
-     * concern in two places, so a signal can end as two findings.
+     * One signal followed into its windows: the strongest windows the screen already judged,
+     * each classified and rated, the serious ones routed. A file can hold the same concern in
+     * two places, so a signal can end as two findings.
      */
     async function locate(
       spent: Usage,
       signal: Signal,
       file: ChangedFile,
       related: Excerpt[],
+      windows: Window[],
     ): Promise<Finding[]> {
-      const hunks: Hunk[] = parseHunks(file.patch);
-      if (hunks.length === 0) return [];
-      const concern = { dimension: signal.dimension, definition: CONCERNS[signal.dimension] };
-      const judged = await ask(
-        spent,
-        {
-          file: file.path,
-          suspectedConcern: { ...concern, screeningProbability: signal.probability },
-          related,
-          candidateHunks: hunks,
-        },
-        windowQuestions(signal.dimension, hunks),
-      );
-      const strongest = hunks
-        .map((hunk) => ({ hunk, probability: judged[hunk.id]?.noul ?? 0 }))
-        .filter((one) => one.probability >= EVIDENCE)
+      const concern = { dimension: signal.dimension, probe: signal.probe, definition: CONCERNS[signal.dimension] };
+      const strongest = windows
+        .filter((one) => one.probe === signal.probe && one.probability >= EVIDENCE)
         .sort((a, b) => b.probability - a.probability)
         .slice(0, PER_SIGNAL);
 
@@ -807,6 +1080,7 @@ export default adapter({
           path: file.path,
           line: hunk.startLine,
           dimension: signal.dimension,
+          probe: signal.probe,
           probability: signal.probability,
           mechanism,
           severity,
@@ -815,7 +1089,6 @@ export default adapter({
       }
       return findings;
     }
-
     const fresh = (): Usage => ({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0 });
 
     function noted(spent: Usage): void {
@@ -936,30 +1209,111 @@ export default adapter({
 
       /**
        * The pass over one diff, with the checkout at `dir` holding the code it changes: every
-       * file screened on five concerns, the strongest cells followed into their hunks, and the
-       * findings scored and routed. Null when the diff holds nothing to screen.
+       * window of every file judged by every probe, the strongest followed, and the findings
+       * scored and routed. `about` is the pull request's own text, for the probes that hold
+       * the change to what the author claims. Null when the diff holds nothing to screen.
        */
-      async review(options: { dir: string; diff: string }): Promise<Report | null> {
+      async review(options: { dir: string; diff: string; about?: string }): Promise<Report | null> {
         const { files, tests } = changedIn(options.diff);
         if (files.length === 0) return null;
         const tree = await treeOf(options.dir);
         const graph = graphOf(tree);
         const spent = fresh();
+        const pr = (options.about ?? "").slice(0, ABOUT_CHARS);
         let context = 0;
 
         const screened = await mapLimit(files, IN_FLIGHT, async (file) => {
-          const related: Excerpt[] = relatedTo(graph, tree, file.path);
+          const doc = DOC.test(file.path);
+          const related: Excerpt[] = doc
+            ? codeFor(files, file)
+            : [...relatedTo(graph, tree, file.path), ...docsFor(tree, file.patch)];
           context += related.length;
-          const changedTests = testSummaries(graph, tests, file.path);
-          const answers = await ask(
-            spent,
-            { file: { path: file.path, patch: file.patch }, related, changedTests },
-            SCREENING,
-          );
+          const changedTests = doc ? [] : testSummaries(graph, tests, file.path);
+          const hunks = parseHunks(file.patch).slice(0, HUNKS_EACH);
+          const asked = PROBE_NAMES.filter((name) => ((PROBES[name] as { docs?: boolean }).docs === true) === doc);
+          const state = {
+            pr,
+            file: { path: file.path, patch: file.patch },
+            hunks: hunks.map((hunk, index) => ({ index, id: hunk.id, startLine: hunk.startLine, patch: hunk.patch })),
+            related,
+            changedTests,
+          };
+          const groups = chunked(Object.entries(hunkQuestions(asked, hunks)), QUESTIONS_EACH);
+          const windows: Window[] = [];
+          for (const group of groups) {
+            const answers = await ask(spent, state, Object.fromEntries(group));
+            for (const [key, answer] of Object.entries(answers)) {
+              const [probe, id] = key.split("__") as [string, string];
+              const hunk = hunks.find((one) => one.id === id);
+              if (hunk !== undefined && "noul" in answer) windows.push({ probe, hunk, probability: answer.noul });
+            }
+          }
+          const rated = await ask(spent, { file: state.file, related }, { tier: TIER });
+          const probes: Record<string, number> = {};
+          for (const name of asked) {
+            probes[name] = Math.max(0, ...windows.filter((one) => one.probe === name).map((one) => one.probability));
+          }
           const cells = Object.fromEntries(
-            DIMENSIONS.map((dimension) => [dimension, answers[dimension].noul]),
+            DIMENSIONS.map((dimension) => [
+              dimension,
+              Math.max(0, ...asked.filter((name) => PROBE_DIMENSIONS[name] === dimension).map((name) => probes[name] ?? 0)),
+            ]),
           ) as Cells;
-          return { file, cells, related, tier: answers.tier.choice as Tier };
+          return { file, cells, probes, windows, related, tier: rated.tier.choice as Tier };
+        });
+
+        // Every file looks a little suspect on its own. Side by side, the one that matters stands out.
+        const candidates = screened
+          .filter((one) => one.tier === "deep")
+          .map((one) => {
+            const best = one.windows
+              .filter((window) => window.probe !== "testGap")
+              .sort((a, b) => b.probability - a.probability);
+            const shown = [...new Set(best.map((window) => window.hunk.id))].slice(0, WINDOWS_SHOWN).map((id) => best.find((window) => window.hunk.id === id)!);
+            if (shown.length === 0) return undefined;
+            return {
+              path: one.file.path,
+              probability: best[0]!.probability,
+              windows: shown.map((window) => ({ line: window.hunk.startLine, suspected: PROBE_DIMENSIONS[window.probe] ?? "correctness", patch: window.hunk.patch })),
+            };
+          })
+          .filter((one): one is NonNullable<typeof one> => one !== undefined)
+          .sort((a, b) => b.probability - a.probability);
+        const rank = new Map<string, number>();
+        const ranks = new Map<string, Record<string, number>>();
+        await mapLimit(chunked(candidates.map((one) => [one.path, one] as [string, typeof one]), RANKED_EACH), IN_FLIGHT, async (group) => {
+          if (group.length < 2) {
+            for (const [path] of group) {
+              rank.set(path, 1);
+              ranks.set(path, {});
+            }
+            return;
+          }
+          // The same comparison in two orders, so where a file sits in the list does not decide its rank.
+          const orders = [group.map(([, one]) => one), [...group].reverse().map(([, one]) => one)];
+          const summed = new Map<string, Record<string, number>>();
+          for (const order of orders) {
+            const ids = order.map((one, index) => ({ id: `c${index}`, path: one.path, windows: one.windows }));
+            const options = Object.fromEntries(ids.map((one) => [one.id, one.path]));
+            const asked = Object.fromEntries(
+              Object.entries(RANKINGS).map(([name, question]) => [
+                name,
+                choice({ question, inspect: "Each candidate's windows against the other candidates', with pr for what the change claims to do" }, options),
+              ]),
+            );
+            const answers = await ask(spent, { pr, candidates: ids }, asked);
+            for (const one of ids) {
+              const held = summed.get(one.path) ?? {};
+              for (const [name, answer] of Object.entries(answers)) {
+                held[name] = (held[name] ?? 0) + ((answer.probabilities[one.id] ?? 0) * ids.length) / orders.length;
+              }
+              summed.set(one.path, held);
+            }
+          }
+          for (const [path, each] of summed) {
+            ranks.set(path, each);
+            rank.set(path, Math.max(...Object.values(each)));
+          }
         });
 
         const byPath = new Map(screened.map((one) => [one.file.path, one]));
@@ -967,9 +1321,10 @@ export default adapter({
           PER_CONCERN.most,
           Math.max(PER_CONCERN.least, Math.ceil(files.length / PER_CONCERN.filesEach)),
         );
-        const inspected = signalsOf(
-          screened.map(({ file, cells }) => ({ path: file.path, cells })),
-          { floor: FLOOR, perConcern },
+        const inspected = probeSignals(
+          screened.map(({ file, probes }) => ({ path: file.path, probes })),
+          PROBE_DIMENSIONS,
+          { floor: FLOOR, perProbe: perConcern },
         );
 
         const strongest = (cells: Cells): number => Math.max(...Object.values(cells));
@@ -996,7 +1351,9 @@ export default adapter({
 
         const located = await mapLimit(inspected, IN_FLIGHT, (signal) => {
           const held = byPath.get(signal.path);
-          return held === undefined ? Promise.resolve([]) : locate(spent, signal, held.file, held.related);
+          return held === undefined
+            ? Promise.resolve([])
+            : locate(spent, signal, held.file, held.related, held.windows);
         });
         const findings = located.flat().sort((a, b) => b.severity - a.severity);
 
@@ -1008,7 +1365,16 @@ export default adapter({
           context,
           floor: FLOOR,
           perConcern,
-          matrix: screened.map(({ file, cells, tier }) => ({ path: file.path, cut: file.cut, tier, cells })),
+          matrix: screened.map(({ file, cells, probes, windows, tier }) => ({
+            path: file.path,
+            cut: file.cut,
+            tier,
+            cells,
+            probes,
+            windows: windows.map((one) => ({ probe: one.probe, line: one.hunk.startLine, probability: one.probability })),
+            rank: rank.get(file.path),
+            ranks: ranks.get(file.path),
+          })),
           profiles,
           inspected,
           connections: screened.map(({ file, tier, related }) => ({
@@ -1018,7 +1384,7 @@ export default adapter({
           })),
           findings,
           funnel: {
-            cells: files.length * DIMENSIONS.length,
+            cells: files.length * PROBE_NAMES.length,
             inspected: inspected.length,
             located: findings.length,
             routed: findings.filter((one) => one.owner !== null).length,

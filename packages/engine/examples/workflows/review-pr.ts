@@ -1,119 +1,53 @@
+import fs from "node:fs";
+import path from "node:path";
 import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
-import { reviewBrief, type Page } from "../helpers/brief.ts";
-import {
-  briefing as jevBriefing,
-  comment as jevComment,
-  connections as jevConnections,
-  tiers as jevTiers,
-} from "../helpers/jev.ts";
+import { diffFor, reading, type Report } from "../helpers/jev.ts";
 import { narrate } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
 /** What every review worktree is named under, and what the sweep reads a PR number back out of. */
 const PREFIX = "review-pr-";
 
-/** How many times one judgment may send the gatherer back for code it cannot read itself. */
-const QUESTIONS = 2;
-
 /**
  * How sure the evidence check must be before its answer counts. Below it the claim stands as
- * the judge wrote it, because an unsure check is no evidence either way.
+ * the reviewer wrote it, because an unsure check is no evidence either way.
  */
 const SETTLED = 0.7;
 
-/** Room for a claim and the file and line it rests on, and no room for a paragraph. */
-const LINE = 300;
-
-function line(about: string): z.ZodString {
-  return z.string().max(LINE).describe(about);
-}
-
 /** One finding: what is wrong, and the code it rests on, so the claim can be checked. */
 const Claimed = z.object({
-  claim: line("what is wrong and why it matters, in one line"),
-  where: line("the file and line the claim rests on, as path:line, or the path when no one line carries it"),
-});
-
-const Findings = z.object({
-  blockers: z
-    .array(Claimed)
-    .describe("the issues that must change before an approve"),
-  nonBlockers: z
-    .array(Claimed)
-    .describe("the improvements the author may take or leave"),
-});
-
-/** What the reader hands the judge: everything the tree says that the diff does not. */
-const Dossier = z.object({
-  files: z
-    .array(
-      z.object({
-        path: line("the changed file, spelled as the diff spells it"),
-        tier: z
-          .enum(["ignore", "skim", "deep"])
-          .describe(
-            "ignore when a command checks it better, skim when a mistake there is cheap, deep when the review turns on it",
-          ),
-        change: line("what the diff does to this file"),
-        read: z
-          .array(line("one thing read about this file and what it says, with file:line"))
-          .describe(
-            "the callers, the called, the contracts, and the config that decide whether the change is right",
-          ),
-      }),
-    )
-    .describe("every changed file, in the order the diff names them"),
-  flows: z
-    .array(
-      z.object({
-        name: line("what the flow does"),
-        entry: line("where execution enters it, with file:line"),
-        steps: z.array(line("one step of the flow, with file:line")),
-        exits: z.array(line("one way it can end, success, error, or early return, with file:line")),
-        effects: z.array(line("one thing it writes, with file:line")),
-      }),
-    )
-    .describe("the end to end paths the change sits in"),
-  state: z
-    .array(
-      z.object({
-        name: line("the state, with the file:line that holds it"),
-        writers: z.array(line("one writer, with file:line")),
-        readers: z.array(line("one reader, with file:line")),
-      }),
-    )
-    .describe("every piece of state the change introduces or touches"),
-  facts: z
-    .array(line("one fact, with file:line"))
-    .describe("what the diff does not show and a reader of the diff alone would have to guess"),
-});
-
-/** What the reader answers when the judge asks for code the dossier does not hold. */
-const Answers = z.object({
-  answers: z.array(
-    z.object({
-      question: line("the question, as it was asked"),
-      answer: z.string().describe("what the code says, in a few lines, or that it does not say"),
-      refs: z.array(line("a file:line the answer rests on")),
-    }),
-  ),
-});
-
-/** The findings, plus what the judge could not settle without reading code. */
-const Verdict = Findings.extend({
-  questions: z
-    .array(line("one question about the code, answerable by reading it"))
+  claim: z.string().describe("what is wrong and why it matters, in one line"),
+  where: z
+    .string()
     .describe(
-      "what the tree must answer before these findings are final, empty when the dossier answers them",
+      "the file and line the claim rests on, as path:line, or the path when no one line carries it",
     ),
 });
 
+const Behavior = z.object({
+  before: z.string().describe("what happens for the user today, eight words or fewer"),
+  after: z.string().describe("what happens for the user after this change, eight words or fewer"),
+});
+
+const Flow = z.object({
+  name: z.string().describe("what the flow does, as a person would say it"),
+  steps: z
+    .array(z.string().describe("one action to take and what to see, in one sentence"))
+    .describe("how to reach the flow in the product and what should happen, in order"),
+});
+
+export const Findings = z.object({
+  behaviors: z
+    .array(Behavior)
+    .describe("every behavior this change adds, removes, or alters, in reading order"),
+  flows: z.array(Flow).describe("the user flows the change touches, each with the steps that test it"),
+  blockers: z.array(Claimed).describe("the issues that must change before an approve"),
+  nonBlockers: z.array(Claimed).describe("the improvements the author may take or leave"),
+});
+
 type Claimed = z.infer<typeof Claimed>;
-type Findings = z.infer<typeof Findings>;
-type Dossier = z.infer<typeof Dossier>;
-type Answers = z.infer<typeof Answers>;
-type Verdict = z.infer<typeof Verdict>;
+export type Findings = z.infer<typeof Findings>;
 type Note = { author: string; at: string; body: string };
 
 function listed(items: string[]): string {
@@ -124,12 +58,31 @@ function claimed(claims: Claimed[]): string {
   return listed(claims.map((one) => `${one.claim} (\`${one.where}\`)`));
 }
 
-function report(findings: Findings): string {
-  return `### Blockers\n\n${claimed(findings.blockers)}\n\n### Non-blockers\n\n${claimed(findings.nonBlockers)}`;
+function cell(text: string): string {
+  return text.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 }
 
-function verdictOf(judged: Verdict): Findings {
-  return { blockers: judged.blockers, nonBlockers: judged.nonBlockers };
+function behaviors(found: Findings["behaviors"]): string {
+  if (found.length === 0) return "none";
+  const rows = found.map((one) => `| ${cell(one.before)} | ${cell(one.after)} |`);
+  return ["| Before | After |", "| --- | --- |", ...rows].join("\n");
+}
+
+function flows(found: Findings["flows"]): string {
+  if (found.length === 0) return "none";
+  return found
+    .map((one) => `**${one.name}**\n\n${one.steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`)
+    .join("\n\n");
+}
+
+/** The findings as the comment the author reads. */
+export function report(findings: Findings): string {
+  return [
+    `### What changes\n\n${behaviors(findings.behaviors)}`,
+    `### How to test\n\n${flows(findings.flows)}`,
+    `### Blockers\n\n${claimed(findings.blockers)}`,
+    `### Non-blockers\n\n${claimed(findings.nonBlockers)}`,
+  ].join("\n\n");
 }
 
 function noted(notes: Note[]): string {
@@ -155,20 +108,18 @@ function changed(base: string, diff: string): string {
   return `# Base\n\norigin/${base}\n\n# Changed files\n\n${listed}\n\n# Diff\n\n${diff}`;
 }
 
-/** The tree, as the only shape the judge ever sees it in. */
-function dossierOf(found: Dossier): string {
-  return `# Dossier\n\nAnother session read the working tree and reports this. It is all you get of the code.\n\n\`\`\`json\n${JSON.stringify(found, null, 2)}\n\`\`\``;
-}
-
-function asking(questions: string[]): string {
-  return `The judge cannot read the tree and needs these answered from it. Read what each one needs, answer it from the code, and cite the file and line. Facts only, no verdicts.\n\n${listed(questions)}`;
-}
-
-function answering(found: Answers): string {
-  const said = found.answers
-    .map((one) => `## ${one.question}\n\n${one.answer}\n\n${listed(one.refs)}`)
-    .join("\n\n");
-  return `The reader answered your questions from the tree:\n\n${said}\n\nJudge again with these facts and return the full findings.`;
+/** Jev's map of the change, for a reviewer that would otherwise read every file the same way. */
+function mapped(report: Report | null, dir: string): string {
+  if (report === null) return "";
+  const read = (file: string): string | undefined => {
+    try {
+      return fs.readFileSync(path.join(dir, file), "utf8");
+    } catch {
+      return undefined;
+    }
+  };
+  const map = reading(report, read);
+  return map === "" ? "" : `\n\n${map}`;
 }
 
 export default workflow({
@@ -269,12 +220,6 @@ export default workflow({
     const changes = github.pr.changes(params.pr);
     let inbound = changes.next();
     let previous: Findings | undefined;
-    /** What Jev's pass over this round's code told the reader, empty when the pass did not run. */
-    let screening = "";
-    /** The tree around the change, read by the import graph so the reader does not go find it. */
-    let around = "";
-    /** Which of the last round's findings the new code no longer shows. */
-    let settled = "";
     let inDraft = pr.isDraft;
     let paused = pr.isInMergeQueue;
     let owed = true;
@@ -282,22 +227,21 @@ export default workflow({
     let posted = 0;
     let head = "";
     let dir = "";
-    let reader = "";
+    let reviewer = "";
 
     type Change = Awaited<ReturnType<typeof changes.next>>;
-    /** The changes that are context for a running turn rather than a reason to stop. */
-    type News = Extract<Change, { kind: "commits" | "description" | "comments" }>;
-    type Phase = "gather" | "judge";
-    type Stop = "approved" | "closed" | "draft" | "queued";
+    type Stop = "approved" | "closed" | "draft" | "queued" | "stale";
     type Ran<T> = { stop: Stop } | { value: T };
 
-    /** The tree a round reads, cut when one is owed. The reader opens on it and dies with it. */
+    const opened = (): Promise<string> => agent.open({ cwd: dir, autocompact: "200000" });
+
+    /** The tree a round reads, cut when one is owed. The reviewer opens on it and dies with it. */
     const hold = async (): Promise<boolean> => {
       if (dir !== "") return true;
       const cut = await openWorktree(ctx, name, { ref });
       if (cut === "") return false;
       dir = cut;
-      reader = await agent.open({ model: "small", cwd: dir, autocompact: "200000" });
+      reviewer = await opened();
       return true;
     };
 
@@ -309,7 +253,7 @@ export default workflow({
       if (dir === "") return;
       const held = dir;
       dir = "";
-      reader = "";
+      reviewer = "";
       head = "";
       // Best-effort teardown: the review's outcome must not wait on a gate about a folder.
       try {
@@ -319,20 +263,10 @@ export default workflow({
       }
     };
 
-    const screened = (): string =>
-      [screening, around].filter((one) => one !== "").map((one) => `\n\n${one}`).join("");
-
-    const answered = (): string => (settled === "" ? "" : `\n\n${settled}`);
-
-    const gathering = (): string =>
+    const opening = (map: string, shown: string): string =>
       previous === undefined
-        ? `Gather the dossier for this pull request. The working tree holds its code.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}${screened()}`
-        : `New code arrived since the last round, and the working tree holds it. The last round found:\n\n${report(previous)}\n\nRead what changed and the code those findings name, then return the dossier for the code the tree holds now.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}${screened()}`;
-
-    const judging = (found: Dossier): string =>
-      previous === undefined
-        ? `Judge this pull request.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}\n\n${dossierOf(found)}`
-        : `New code arrived since the last review. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, judge what changed, and return the full updated findings.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}${answered()}\n\n${dossierOf(found)}`;
+        ? `Review this pull request. The working tree holds its code.\n\n${briefing()}\n\n${changed(pr.baseRefName, shown)}${map}`
+        : `New code arrived since the last review, and the working tree holds it. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, review what changed, and return the full updated findings.\n\n${briefing()}\n\n${changed(pr.baseRefName, shown)}${map}`;
 
     // The worktree only mirrors the PR head, so a force-push is a reset, not a merge.
     const synced = async (): Promise<void> => {
@@ -373,30 +307,23 @@ export default workflow({
     };
 
     /**
-     * Jev's typed pass over the diff the tree holds: posted as its own comment, and handed to
-     * the reader as the places to look first. A failure costs the pass, not the round.
+     * Jev's pass over the diff the tree holds: the reviewer's reading order, the places to look
+     * first, and the diff cut to what each tier needs. Nothing of it reaches the PR. A failure
+     * costs the map, not the round, and the whole diff goes.
      */
-    const screen = async (): Promise<void> => {
-      screening = "";
-      around = "";
-      let report;
+    const screen = async (): Promise<{ map: string; diff: string }> => {
+      let found: Report | null;
       try {
-        report = await jev.review({ dir, diff });
+        found = await jev.review({ dir, diff, about: `${pr.title}\n\n${description}` });
       } catch (error) {
         await view.show(`The Jev pass did not run: ${messageOf(error)}`);
-        return;
+        return { map: "", diff };
       }
-      if (report === null) {
-        await view.show("The diff holds nothing for Jev to screen.");
-        return;
-      }
-      screening = jevBriefing(report);
-      around = [jevTiers(report), jevConnections(report)].filter((one) => one !== "").join("\n\n");
-      await github.pr.comment(params.pr, { body: jevComment(report, `\`${head.slice(0, 7)}\``) });
-      posted += 1;
+      if (found === null) return { map: "", diff };
       await view.show(
-        `Posted Jev's pass on PR #${pr.number}: ${report.files} files screened, ${report.findings.length} findings`,
+        `Jev screened ${found.files} files: ${found.matrix.filter((one) => one.tier === "deep").length} to read closely`,
       );
+      return { map: mapped(found, dir), diff: diffFor(found, diff) };
     };
 
     /** The claims the code at their own cited line does not carry. A failed check clears none of them. */
@@ -421,66 +348,44 @@ export default workflow({
      * A blocker has to be carried by the code it cites. One that is not still reaches the author,
      * as a non-blocker saying so, because a claim the check cannot place is not a claim disproved.
      */
+    /** A weak blocker stops blocking and says so. A weak non-blocker is noise, so it goes. */
     const vetted = async (findings: Findings): Promise<Findings> => {
-      const failed = await weak(findings.blockers);
+      const failed = await weak([...findings.blockers, ...findings.nonBlockers]);
       if (failed.size === 0) return findings;
+      const offset = findings.blockers.length;
       const blockers = findings.blockers.filter((_, index) => !failed.has(index));
       const demoted = findings.blockers
         .filter((_, index) => failed.has(index))
-        .map((one) => ({ ...one, claim: `${one.claim} — the code at this line does not show this` }));
-      await view.show(
-        `${demoted.length} of ${findings.blockers.length} blockers are not carried by the code they cite, so they no longer block.`,
-      );
-      return { blockers, nonBlockers: [...findings.nonBlockers, ...demoted] };
+        .map((one) => ({ ...one, claim: `${one.claim}. The code at this line does not show this` }));
+      const nonBlockers = findings.nonBlockers.filter((_, index) => !failed.has(offset + index));
+      const dropped = findings.nonBlockers.filter((_, index) => failed.has(offset + index));
+      if (demoted.length > 0) {
+        await view.show(
+          `${demoted.length} of ${findings.blockers.length} blockers are not carried by the code they cite, so they no longer block.`,
+        );
+      }
+      if (dropped.length > 0) {
+        await view.show(
+          `${dropped.length} of ${findings.nonBlockers.length} non-blockers are not carried by the code they cite, so they are dropped:\n\n${claimed(dropped)}`,
+        );
+      }
+      return { ...findings, blockers, nonBlockers: [...nonBlockers, ...demoted] };
     };
 
-    /** What the last round found that this round's code no longer shows. The judge still decides. */
-    const recheck = async (): Promise<void> => {
-      settled = "";
-      if (previous === undefined) return;
-      const claims = [...previous.blockers, ...previous.nonBlockers];
-      const failed = await weak(claims);
-      if (failed.size === 0) return;
-      const gone = claims.filter((_, index) => failed.has(index));
-      settled = `# Already answered\n\nJev re-read the code these earlier findings name, and it no longer shows them:\n\n${claimed(gone)}\n\nConfirm each from the dossier before you drop it. A finding the code still shows stays.`;
-    };
-
-    const post = async (findings: Findings, page: Page | null): Promise<void> => {
+    const post = async (findings: Findings): Promise<void> => {
       await github.pr.comment(params.pr, { body: report(findings) });
       posted += 1;
-      if (page !== null && page.png !== null) await view.image(page.png);
     };
 
-    /** What news that lands mid-turn tells the session that was running. */
-    const update = async (change: News, phase: Phase): Promise<string> => {
-      if (change.kind === "commits") {
-        await synced();
-        const carry =
-          phase === "gather"
-            ? "Read what changed and return the dossier for the code the tree holds now."
-            : "Your dossier covers the code before this push. Judge the current diff, and ask for whatever the dossier no longer answers.";
-        return `New code was pushed to the PR. The working tree now holds it. ${carry}\n\n${changed(pr.baseRefName, diff)}`;
-      }
-      if (change.kind === "description") {
-        description = change.body;
-        return `The PR description changed. The new description:\n\n${change.body}\n\nTake it as added context and continue.`;
-      }
-      notes = notes.concat(change.comments);
-      return `New comments arrived on the PR:\n\n${noted(change.comments)}\n\nTake them as added context and continue.`;
-    };
-
-    /** One turn run against the changes watch: news re-asks the same session, an outcome ends the round. */
-    const raced = async <Shape extends z.ZodObject>(
-      phase: Phase,
-      session: string,
-      skill: string,
-      prompt: string,
-      result: Shape,
-    ): Promise<Ran<z.infer<Shape>>> => {
-      let turn = agent.turn(session, { skill, prompt }, { result });
-      let shown = narrate(view, turn.output);
+    /**
+     * One turn run against the changes watch. A push, a close, an approval, a draft, or a queue
+     * ends the round; anything else is context for the next one and the turn runs on.
+     */
+    const raced = async (prompt: string): Promise<Ran<Findings>> => {
+      const turn = agent.turn(reviewer, { skill: "review-pr", prompt }, { result: Findings });
+      const shown = narrate(view, turn.output);
       const stopTurn = async (): Promise<void> => {
-        await agent.stop(session);
+        await agent.stop(reviewer);
         await turn.value.catch(() => {});
         await shown;
       };
@@ -493,7 +398,7 @@ export default workflow({
           inbound.then(() => "change" as const),
         ]);
         if (first === "turn") break;
-        const change = await inbound;
+        const change: Change = await inbound;
         inbound = changes.next();
         if (change.kind === "closed") {
           await stopTurn();
@@ -515,16 +420,14 @@ export default workflow({
           await view.show(`PR #${pr.number} is queued to merge, the review waits`);
           return { stop: "queued" };
         }
-        if (change.kind === "ready") continue;
-        if (change.kind === "dequeued") continue;
-        if (change.kind === "reviewed") continue;
-        // The base a stacked pull request moves onto holds the same work, so its diff stands.
-        if (change.kind === "retargeted") continue;
         // A stale round syncs before the watch reports, so a push the tree holds already is not news.
-        if (change.kind === "commits" && (await since()) !== "moved") continue;
-        await stopTurn();
-        turn = agent.turn(session, { skill, prompt: await update(change, phase) }, { result });
-        shown = narrate(view, turn.output);
+        if (change.kind === "commits" && (await since()) === "moved") {
+          await stopTurn();
+          await view.show(`New code was pushed to PR #${pr.number}, the round starts over on it`);
+          return { stop: "stale" };
+        }
+        if (change.kind === "description") description = change.body;
+        if (change.kind === "comments") notes = notes.concat(change.comments);
       }
 
       // A turn that will not finish pauses the run. The review takes it up again on the resume.
@@ -535,58 +438,14 @@ export default workflow({
       }
     };
 
-    /**
-     * One judgment. The judge holds no tools, so what it cannot settle from the dossier it
-     * asks for, and the reader answers. The trips are bounded: a judge that keeps asking
-     * has to decide on what it holds.
-     */
-    const settle = async (judge: string, prompt: string): Promise<Ran<Verdict>> => {
-      let ran = await raced("judge", judge, "review-judge", prompt, Verdict);
-      for (let round = 0; round < QUESTIONS; round++) {
-        if ("stop" in ran) return ran;
-        if (ran.value.questions.length === 0) return ran;
-        const answered = await raced(
-          "gather",
-          reader,
-          "review-gather",
-          asking(ran.value.questions),
-          Answers,
-        );
-        if ("stop" in answered) return answered;
-        ran = await raced("judge", judge, "review-judge", answering(answered.value), Verdict);
-      }
-      return ran;
-    };
-
-    const review = async (): Promise<
-      "approved" | "sent" | "closed" | "draft" | "queued" | "stale"
-    > => {
+    const review = async (): Promise<"approved" | "sent" | Stop> => {
       await synced();
-      await recheck();
-      await screen();
-      const gathered = await raced("gather", reader, "review-gather", gathering(), Dossier);
-      if ("stop" in gathered) return gathered.stop;
+      const seen = await screen();
+      const reviewed = await raced(opening(seen.map, seen.diff));
+      if ("stop" in reviewed) return reviewed.stop;
 
-      // The prompt carries the whole case, so the judge runs with nothing
-      // to call: no tools to define, no MCP servers to wait on, and a context that stays flat.
-      const judge = await agent.open({ tools: [], settings: [] });
-      const judged = await settle(judge, judging(gathered.value));
-      if ("stop" in judged) return judged.stop;
-
-      let findings = await vetted(verdictOf(judged.value));
+      let findings = await vetted(reviewed.value);
       previous = findings;
-
-      /**
-       * The reader writes the page, not the judge: the judge holds no tools, so it can
-       * neither write the JSON nor run the renderer.
-       */
-      const briefed = (found: Findings): Promise<Page | null> =>
-        reviewBrief(ctx, reader, {
-          about: `${briefing()}\n\nThe base is origin/${pr.baseRefName} and the working tree holds the head. The review judged the code you read, and every finding below goes on the page.\n\n${report(found)}`,
-          branch: `pr-${pr.number}`,
-        });
-      let page = await briefed(findings);
-
       while (findings.blockers.length > 0) {
         const answer = await view.ask(
           `${report(findings)}\n\nPost this without approving?`,
@@ -594,21 +453,19 @@ export default workflow({
         );
         if (answer === "send") {
           if (await overtaken()) return "stale";
-          await post(findings, page);
+          await post(findings);
           await view.show(`Posted feedback on PR #${pr.number} without approving`);
           return "sent";
         }
-        const said = await settle(
-          judge,
-          `The user says:\n\n${answer}\n\nAnswer it, adjust the findings where the user is right, and return the full updated findings. When the answer turns on code your dossier does not hold, ask for it in questions rather than guess.`,
+        const said = await raced(
+          `The user says:\n\n${answer}\n\nAnswer it, read whatever code it turns on, adjust the findings where the user is right, and return the full updated findings.`,
         );
         if ("stop" in said) return said.stop;
-        findings = await vetted(verdictOf(said.value));
+        findings = await vetted(said.value);
         previous = findings;
-        page = await briefed(findings);
       }
       if (await overtaken()) return "stale";
-      await post(findings, page);
+      await post(findings);
       try {
         await github.pr.approve(params.pr);
         await view.show(`Approved PR #${pr.number}`);
@@ -635,8 +492,11 @@ export default workflow({
             paused = true;
             continue;
           }
-          // A round the new code overtook owes a review still, so the loop goes straight round again.
-          if (outcome === "stale") continue;
+          // A round the new code overtook owes a review still, on a reviewer that has not read the old code.
+          if (outcome === "stale") {
+            reviewer = await opened();
+            continue;
+          }
           owed = false;
           continue;
         }

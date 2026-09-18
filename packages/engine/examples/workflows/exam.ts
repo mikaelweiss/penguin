@@ -36,6 +36,7 @@ import { openWorktree } from "../helpers/worktree.ts";
 import { runsDir } from "../../src/paths.ts";
 import { Out as PlanOut } from "./plan.ts";
 import { checklist, Review } from "./review.ts";
+import { Findings, report } from "./review-pr.ts";
 import { Out as TriageOut } from "./triage.ts";
 
 const WINDOW = "200000";
@@ -75,69 +76,6 @@ const Graded = z.object({
 
 type Graded = z.infer<typeof Graded>;
 
-/** Room for a claim and the file and line it rests on, as the review skills ask for it. */
-const LINE = 300;
-
-function line(about: string): z.ZodString {
-  return z.string().max(LINE).describe(about);
-}
-
-const Dossier = z.object({
-  files: z
-    .array(
-      z.object({
-        path: line("the changed file, spelled as the diff spells it"),
-        tier: z
-          .enum(["ignore", "skim", "deep"])
-          .describe(
-            "ignore when a command checks it better, skim when a mistake there is cheap, deep when the review turns on it",
-          ),
-        change: line("what the diff does to this file"),
-        read: z
-          .array(line("one thing read about this file and what it says, with file:line"))
-          .describe(
-            "the callers, the called, the contracts, and the config that decide whether the change is right",
-          ),
-      }),
-    )
-    .describe("every changed file, in the order the diff names them"),
-  flows: z
-    .array(
-      z.object({
-        name: line("what the flow does"),
-        entry: line("where execution enters it, with file:line"),
-        steps: z.array(line("one step of the flow, with file:line")),
-        exits: z.array(line("one way it can end, success, error, or early return, with file:line")),
-        effects: z.array(line("one thing it writes, with file:line")),
-      }),
-    )
-    .describe("the end to end paths the change sits in"),
-  state: z
-    .array(
-      z.object({
-        name: line("the state, with the file:line that holds it"),
-        writers: z.array(line("one writer, with file:line")),
-        readers: z.array(line("one reader, with file:line")),
-      }),
-    )
-    .describe("every piece of state the change introduces or touches"),
-  facts: z
-    .array(line("one fact, with file:line"))
-    .describe("what the diff does not show and a reader of the diff alone would have to guess"),
-});
-
-type Dossier = z.infer<typeof Dossier>;
-
-const Reviewed = z.object({
-  blockers: z.array(z.string()).describe("the issues that must change before an approve"),
-  nonBlockers: z.array(z.string()).describe("the improvements the author may take or leave"),
-  questions: z
-    .array(line("one question about the code, answerable by reading it"))
-    .describe("what the tree must answer before these findings are final, empty when none"),
-});
-
-type Reviewed = z.infer<typeof Reviewed>;
-
 const Assessment = z.object({
   issues: z
     .array(
@@ -171,15 +109,6 @@ const FindingsJudged = z.object({
   invented: z.array(z.string()).describe("the candidate findings the recorded ones do not name"),
 });
 
-function listed(items: string[]): string {
-  return items.length === 0 ? "none" : items.map((item) => `- ${item}`).join("\n");
-}
-
-/** The findings as the review posts them, which is the shape the key recorded. */
-function report(found: Reviewed): string {
-  return `### Blockers\n\n${listed(found.blockers)}\n\n### Non-blockers\n\n${listed(found.nonBlockers)}`;
-}
-
 /** The proposal as open-pr shows it, which is the shape the key recorded. */
 function proposal(assessed: Assessment): string {
   return assessed.issues
@@ -203,10 +132,6 @@ function askedInstead(out: z.infer<typeof PlanOut>): string {
 function split(tasks: string[]): string {
   const numbered = tasks.map((task, index) => `${index + 1}. ${task}`).join("\n");
   return `The ticket splits into ${tasks.length} tasks:\n\n${numbered}`;
-}
-
-function dossierOf(found: Dossier): string {
-  return `# Dossier\n\nAnother session read the working tree and reports this. It is all you get of the code.\n\n\`\`\`json\n${JSON.stringify(found, null, 2)}\n\`\`\``;
 }
 
 function graded(grade: Grade, candidate: string): Graded {
@@ -387,22 +312,12 @@ async function tryReview(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
   const { dir } = await scratch(ctx, picked, held.prHead ?? held.head);
   if (dir === "") return graded(failed("no scratch worktree to run in"), "");
   try {
-    // Both halves of the review run on the model under test: the judge half is the skill's own
-    // judgment, and grading it is the exam's judge, which is a different session and model.
-    await ctx.view.show(`review-gather and review-judge both run on ${ctx.params.model}`);
-    const reader = await ctx.agent.open({ model: ctx.params.model, cwd: dir, autocompact: WINDOW });
-    const found = await narrated(ctx.view, () =>
-      ctx.agent.turn(reader, { skill: "review-gather", prompt: held.prompt }, { result: Dossier }),
+    // The review runs on the model under test; grading it is the exam's judge, a different session and model.
+    const reviewer = await ctx.agent.open({ model: ctx.params.model, cwd: dir, autocompact: WINDOW });
+    const reviewed = await narrated(ctx.view, () =>
+      ctx.agent.turn(reviewer, { skill: "review-pr", prompt: held.prompt }, { result: Findings }),
     );
-    const judge = await ctx.agent.open({ model: ctx.params.model, tools: [], settings: [] });
-    const judged = await narrated(ctx.view, () =>
-      ctx.agent.turn(
-        judge,
-        { skill: "review-judge", prompt: `${held.prompt}\n\n${dossierOf(found)}` },
-        { result: Reviewed },
-      ),
-    );
-    const candidate = report(judged);
+    const candidate = report(reviewed);
     return graded(await judgeFindings(ctx, held, candidate), candidate);
   } finally {
     await dropped(ctx, dir);

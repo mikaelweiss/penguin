@@ -41,15 +41,20 @@ export const LABELS: Record<Dimension, string> = {
 
 export type ChangedFile = { path: string; patch: string; cut: boolean };
 export type Hunk = { id: string; startLine: number; patch: string };
-export type Excerpt = { path: string; role: "imported" | "importer" | "test" | "twin"; text: string };
+export type Excerpt = {
+  path: string;
+  role: "imported" | "importer" | "test" | "twin" | "doc" | "code";
+  text: string;
+};
 export type Tree = { files: string[]; read(file: string): string | undefined };
 export type Cells = Record<Dimension, number>;
 export type Profile = { path: string; category: string; priority: number };
-export type Signal = { path: string; dimension: Dimension; probability: number };
+export type Signal = { path: string; dimension: Dimension; probe: string; probability: number };
 export type Finding = {
   path: string;
   line: number;
   dimension: Dimension;
+  probe: string;
   probability: number;
   mechanism: string;
   severity: number;
@@ -70,7 +75,19 @@ export type Report = {
   /** The cells the pass followed: the strongest per concern, at or above the floor. */
   floor: number;
   perConcern: number;
-  matrix: { path: string; cut: boolean; tier: Tier; cells: Cells }[];
+  matrix: {
+    path: string;
+    cut: boolean;
+    tier: Tier;
+    cells: Cells;
+    probes: Record<string, number>;
+    /** Every window judged, so a reader can see where each probe fired. */
+    windows: { probe: string; line: number; probability: number }[];
+    /** How much more likely than its peers this file holds a blocking defect, 1 being even odds. */
+    rank?: number;
+    /** The rank on each concern the file was compared on. */
+    ranks?: Record<string, number>;
+  }[];
   profiles: Profile[];
   inspected: Signal[];
   connections: Connection[];
@@ -676,30 +693,8 @@ export function testSummaries(graph: Graph, tests: ChangedFile[], file: string):
   return kept;
 }
 
-/** The concerns a pass follows into hunks. A test gap is a fact about the file, and its cell says it. */
-export const FOLLOWED = DIMENSIONS.filter((one) => one !== "testGap");
 /** On the 0 to 3 priority rubric, where a file is named as one to read closely. */
 const CAREFUL = 2;
-
-/**
- * The cells a pass follows: per concern, the strongest files at or above the floor, up to a
- * quota. One loud concern cannot take every slot from the others.
- */
-export function signalsOf(
-  matrix: { path: string; cells: Cells }[],
-  options: { floor: number; perConcern: number },
-): Signal[] {
-  const picked: Signal[] = [];
-  for (const dimension of FOLLOWED) {
-    const ranked = matrix
-      .map((one) => ({ path: one.path, dimension, probability: one.cells[dimension] }))
-      .filter((one) => one.probability >= options.floor)
-      .sort((a, b) => b.probability - a.probability)
-      .slice(0, options.perConcern);
-    picked.push(...ranked);
-  }
-  return picked.sort((a, b) => b.probability - a.probability);
-}
 
 function row(cells: string[]): string {
   return `| ${cells.join(" | ")} |`;
@@ -808,84 +803,119 @@ export function comment(report: Report, on: string): string {
   return parts.join("\n\n");
 }
 
+/** How much of the tree the reviewer's prompt carries whole, in characters, and which share of the deep files it is. */
+const WHOLE_CHARS = 120_000;
+const WHOLE_SHARE = 1 / 3;
+/** The most suspected lines named per file, and the least a window must score to be named. */
+const NAMED_WINDOWS = 2;
+const NAMED_FLOOR = 0.5;
+
+/** What each probe suspects, as the reviewer reads it beside a line. */
+const SUSPECTED: Record<string, string> = {
+  correctness: "wrong behavior",
+  staleCache: "a write that leaves a view stale",
+  errorAsEmpty: "a failure shown as nothing",
+  deadControl: "a control that does nothing",
+  transition: "state left stale on a transition",
+  parity: "diverges from its twin",
+  constant: "a literal that does not match its name",
+  staleDoc: "a walkthrough it contradicts",
+  docMismatch: "describes what the code does not do",
+  security: "a weakened boundary",
+  flagLeak: "reachable outside its gate",
+  reliability: "a bad failure path",
+  compatibility: "a caller it breaks",
+};
+
+function suspected(row: Report["matrix"][number]): string {
+  const best = new Map<number, { probe: string; probability: number }>();
+  for (const one of row.windows) {
+    if (one.probe === "testGap" || one.probability < NAMED_FLOOR) continue;
+    const held = best.get(one.line);
+    if (held === undefined || held.probability < one.probability) best.set(one.line, one);
+  }
+  const named = [...best.entries()]
+    .sort((a, b) => b[1].probability - a[1].probability)
+    .slice(0, NAMED_WINDOWS);
+  if (named.length === 0) return "";
+  return `: ${named.map(([line, one]) => `line ${line}, ${SUSPECTED[one.probe] ?? one.probe}`).join("; ")}`;
+}
+
 /**
- * The pass as the reader's briefing: the same facts, addressed to the session that will read
- * the tree. It says where to look and what was suspected, never that a defect is there.
+ * The pass as the reviewer's reading order: the deep files by rank, the first of them whole,
+ * each with the lines the probes suspect, then what to skim and what to leave. It says where
+ * to look, never that a defect is there.
  */
-export function briefing(report: Report): string {
+export function reading(report: Report, read: (file: string) => string | undefined): string {
+  const deep = [...report.matrix]
+    .filter((one) => one.tier === "deep")
+    .sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0));
+  const skim = report.matrix.filter((one) => one.tier === "skim").map((one) => one.path);
+  const ignore = report.matrix.filter((one) => one.tier === "ignore").map((one) => one.path);
+  const whole: { path: string; text: string }[] = [];
+  let spent = 0;
+  for (const row of deep.slice(0, Math.ceil(deep.length * WHOLE_SHARE))) {
+    const text = read(row.path);
+    if (text === undefined || text.length > CLAIM_CHARS || spent + text.length > WHOLE_CHARS) continue;
+    whole.push({ path: row.path, text });
+    spent += text.length;
+  }
+  const given = new Set(whole.map((one) => one.path));
+  const named = (rows: typeof deep): string =>
+    rows.map((one) => `- \`${one.path}\`${suspected(one)}`).join("\n");
+  const first = deep.filter((one) => given.has(one.path));
+  const rest = deep.filter((one) => !given.has(one.path));
   const parts = [
-    "# Jev screening",
-    `A fast model screened every changed file on five concerns and followed the strongest into their hunks. It reads one file at a time and cannot run anything, so this is where to look, not what is wrong. Confirm or dismiss each line from the code.`,
+    "# Reading order",
+    "A fast model screened every changed file and ranked the ones that decide the review side by side. Read in this order. The first ones are in full under Files, with the lines it suspects and why. A suspicion is a place to look, not a finding.",
   ];
-  if (report.findings.length > 0) {
+  if (first.length > 0) parts.push(`## Read whole\n\n${named(first)}`);
+  if (rest.length > 0) parts.push(`## Read from the diff\n\n${named(rest)}`);
+  if (skim.length > 0) parts.push(`## Skim\n\n${listed(skim)}`);
+  if (ignore.length > 0) parts.push(`## Leave to the build\n\n${listed(ignore)}`);
+  if (whole.length > 0) {
     parts.push(
-      `## Suspected, with a hunk\n\n${grouped(report.findings)
-        .map((one) => `- \`${one.path}:${one.line}\` — ${concerns(one)}`)
-        .join("\n")}`,
+      `# Files\n\n${whole.map((one) => `## ${one.path}\n\n\`\`\`\n${one.text}\n\`\`\``).join("\n\n")}`,
     );
-  }
-  const open = unlocated(report);
-  if (open.length > 0) {
-    parts.push(`## Suspected, no hunk carried it\n\n${listed(open)}`);
-  }
-  const close = report.profiles.filter((one) => one.priority >= CAREFUL);
-  if (close.length > 0) {
-    parts.push(`## Rated as needing careful review\n\n${listed(close.map((one) => one.path))}`);
   }
   return parts.join("\n\n");
 }
 
-/** How much of the tree the reader's prompt carries, in characters. Deep files fill it first. */
-const CONNECTION_CHARS = 120_000;
-
-const ROLES: Record<Excerpt["role"], string> = {
-  imported: "it calls this",
-  importer: "this calls it",
-  test: "this tests it",
-  twin: "it was copied from this",
-};
+/** How much of a skim or test file's patch the reviewer's prompt carries, in characters. */
+const SKIM_CHARS = 2_000;
 
 /**
- * The tree around the change, already read, so the reader does not go find it again. Deep files
- * first, then skim, cut at a budget. Every excerpt carries the line it starts on.
+ * The diff as the reviewer's prompt carries it: deep files whole, skim and test files cut
+ * short, ignore files and lockfiles named only. The reviewer opens a file for what is cut. Without a report
+ * the whole diff goes.
  */
-export function connections(report: Report): string {
-  const order: Tier[] = ["deep", "skim"];
-  const held = report.connections
-    .filter((one) => order.includes(one.tier))
-    .sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier));
-  const parts: string[] = [];
-  let spent = 0;
-  let dropped = 0;
-  for (const one of held) {
-    const body = one.excerpts
-      .map((excerpt) => `### ${excerpt.path} — ${ROLES[excerpt.role]}\n\n\`\`\`\n${excerpt.text}\n\`\`\``)
-      .join("\n\n");
-    if (body === "") continue;
-    if (spent + body.length > CONNECTION_CHARS) {
-      dropped += 1;
+export function diffFor(report: Report | null, diff: string): string {
+  if (report === null) return diff;
+  const tiers = new Map(report.matrix.map((one) => [one.path, one.tier]));
+  const kept: string[] = [];
+  const left: string[] = [];
+  for (const block of diff.split(/^(?=diff --git )/m)) {
+    if (!block.startsWith("diff --git ")) {
+      if (block !== "") kept.push(block);
       continue;
     }
-    parts.push(`## ${one.path} (${one.tier})\n\n${body}`);
-    spent += body.length;
+    const named = pathOf(block.split("\n"));
+    const tier = named === undefined ? undefined : tiers.get(named);
+    if (named !== undefined && (tier === "ignore" || LOCKED.test(named))) {
+      left.push(named);
+      continue;
+    }
+    if ((tier === "skim" || (named !== undefined && TEST.test(named))) && block.length > SKIM_CHARS) {
+      const shown = block.slice(0, SKIM_CHARS).replace(/\n[^\n]*$/, "");
+      const more = block.slice(shown.length).split("\n").length - 1;
+      kept.push(`${shown}\n... ${more} more lines cut, open the file for the rest\n`);
+      continue;
+    }
+    kept.push(block);
   }
-  if (parts.length === 0) return "";
   const note =
-    dropped === 0
-      ? ""
-      : `\n\n${dropped} more changed files have connections too large to carry here. Read those from the tree.`;
-  return `# Connections\n\nThe import graph already read the tree around each changed file: what it calls, what calls it, what tests it, and the file it was copied from. Line numbers are in the excerpts. Do not grep or re-read these; go to the tree only for what is missing here.${note}\n\n${parts.join("\n\n")}`;
-}
-
-/** The tiers as one list, so a reader knows what it may skip without opening it. */
-export function tiers(report: Report): string {
-  const rows = TIERS.map((tier) => ({
-    tier,
-    paths: report.matrix.filter((one) => one.tier === tier).map((one) => one.path),
-  })).filter((one) => one.paths.length > 0);
-  if (rows.length === 0) return "";
-  const said = rows.map((one) => `## ${titled(one.tier)}\n\n${listed(one.paths)}`).join("\n\n");
-  return `# Tiers\n\nA fast model rated how closely each changed file needs reading. Take these unless the code tells you otherwise, and say so in the dossier when it does.\n\n${said}`;
+    left.length === 0 ? "" : `\nNot shown, left to the build: ${left.map((one) => `\`${one}\``).join(", ")}\n`;
+  return `${kept.join("")}${note}`;
 }
 
 /** A file at or under this many characters goes to the check whole. */
@@ -909,4 +939,104 @@ export function codeAt(tree: Tree, where: string, span = CLAIM_SPAN): string | u
   const from = Math.max(0, at - 1 - Math.floor(span / 2));
   const to = Math.min(lines.length, from + span);
   return `// ${file}, from line ${from + 1} of ${lines.length}\n${lines.slice(from, to).join("\n")}`;
+}
+
+/** The most walkthroughs and source patches one file carries as context, and the labels read off a patch. */
+const DOCS_EACH = 2;
+const CODE_EACH = 3;
+const CODE_CHARS = 8_000;
+const LABELS_EACH = 40;
+const DOC_FILE = /(?:^|\/)docs\/.*\.(?:mdx?|html)$/;
+/** A quoted string that reads as something a person sees: capitalized, a few words, no code punctuation. */
+const LABEL = /(["'`])([A-Z][A-Za-z0-9 ,.'&/-]{3,40})\1/g;
+/** A word a walkthrough shares with code: a bold or backticked term, or a quoted label. */
+const TERM =
+  /(?:\*\*([^*\n]{3,40})\*\*|`([^`\n]{3,40})`|<(?:code|strong)>([^<\n]{3,40})<\/(?:code|strong)>|"([A-Z][^"\n]{3,40})")/g;
+
+function labelsOf(patch: string): string[] {
+  const found = new Set<string>();
+  for (const line of patch.split("\n")) {
+    if (!line.startsWith("+")) continue;
+    for (const match of line.matchAll(LABEL)) {
+      const label = (match[2] ?? "").trim();
+      if (label.split(" ").length <= 6) found.add(label);
+    }
+  }
+  return [...found].slice(0, LABELS_EACH);
+}
+
+/**
+ * The walkthroughs under docs/ that name what a patch touches: the ones that mention the
+ * labels its added lines render, the lines around each mention. A doc that describes a
+ * control the patch changes is a defect the patch alone cannot show.
+ */
+export function docsFor(tree: Tree, patch: string): Excerpt[] {
+  const labels = labelsOf(patch);
+  if (labels.length === 0) return [];
+  const scored: { path: string; text: string; hits: number }[] = [];
+  for (const file of tree.files) {
+    if (!DOC_FILE.test(file)) continue;
+    const text = tree.read(file);
+    if (text === undefined) continue;
+    const said = mentions(text, labels);
+    if (said === "") continue;
+    scored.push({ path: file, text: said, hits: said.split("// line ").length - 1 });
+  }
+  return scored
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, DOCS_EACH)
+    .map((one) => ({ path: one.path, role: "doc", text: shortened(one.text) }));
+}
+
+/**
+ * The source patches of the same change that a changed document describes: the ones that
+ * share its bold, backticked, or quoted terms. The document is judged against them.
+ */
+export function codeFor(files: ChangedFile[], doc: ChangedFile): Excerpt[] {
+  const terms = new Set<string>();
+  for (const line of doc.patch.split("\n")) {
+    if (!line.startsWith("+")) continue;
+    for (const match of line.matchAll(TERM)) {
+      const term = (match.slice(1).find((group) => group !== undefined) ?? "").trim().toLowerCase();
+      if (term !== "") terms.add(term);
+    }
+  }
+  if (terms.size === 0) return [];
+  const scored = files
+    .filter((file) => file.path !== doc.path && SOURCE.test(file.path))
+    .map((file) => {
+      const lower = file.patch.toLowerCase();
+      const hits = [...terms].filter((term) => lower.includes(term)).length;
+      return { file, hits };
+    })
+    .filter((one) => one.hits > 0)
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, CODE_EACH);
+  return scored.map(({ file }) => ({
+    path: file.path,
+    role: "code",
+    text: file.patch.length > CODE_CHARS ? `${file.patch.slice(0, CODE_CHARS)}\n// cut here` : file.patch,
+  }));
+}
+
+/**
+ * The probes a pass follows: per probe, the strongest files at or above the floor, up to a
+ * quota. One loud probe cannot take every slot from the others.
+ */
+export function probeSignals(
+  matrix: { path: string; probes: Record<string, number> }[],
+  dimensionOf: Record<string, Dimension>,
+  options: { floor: number; perProbe: number },
+): Signal[] {
+  const picked: Signal[] = [];
+  for (const [probe, dimension] of Object.entries(dimensionOf)) {
+    if (dimension === "testGap") continue;
+    const ranked = matrix
+      .map((one) => ({ path: one.path, dimension, probe, probability: one.probes[probe] ?? 0 }))
+      .filter((one) => one.probability >= options.floor)
+      .sort((a, b) => b.probability - a.probability)
+      .slice(0, options.perProbe);
+    picked.push(...ranked);
+  }
+  return picked.sort((a, b) => b.probability - a.probability);
 }

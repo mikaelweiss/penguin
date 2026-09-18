@@ -25,7 +25,6 @@ const PAGE: Rendered = {
   version: 1,
   problems: [],
 };
-const REFUSED: Rendered = { html: "", md: "", png: null, version: 0, problems: ["title: missing"] };
 
 function said(session: string, ask: Ask): Turn {
   if (typeof ask === "string") return { session, skill: undefined, prompt: ask };
@@ -183,11 +182,12 @@ test("make-workflow reviews the draft on the reviewing adapter, and writes it on
   expect(bench.openedFor("design-workflow")).toEqual({});
 });
 
-const DOSSIER = { files: [], flows: [], state: [], facts: [] };
-const CLEAN = { blockers: [], nonBlockers: [], questions: [] };
+const CLEAN = { behaviors: [], flows: [], blockers: [], nonBlockers: [] };
 
-/** review-pr to its approved rounds: each round's gather, judgment, and page. Jev triages it into the review. */
-function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?: number } = {}) {
+/** review-pr to its approved rounds: one reviewer turn each. Jev triages it into the review. */
+function pullRequest(
+  options: { judged?: unknown; rounds?: number; overtaken?: boolean; weak?: string[] } = {},
+) {
   const opens: Opened[] = [];
   const turns: Turn[] = [];
   const wheres: Where[] = [];
@@ -211,11 +211,24 @@ function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?:
       : new Promise((settle) => {
           waiting = settle;
         });
-  const pages = briefs(wheres, options.renders ?? [], shown, opened);
+  // An overtaken round's first turn hangs until a push stops it, and the tree moves under it.
+  if (options.overtaken === true) queued.push({ kind: "commits" });
+  let stopped: (() => void) | undefined;
+  let shas = 0;
+  let trees = 0;
+  const pages = briefs(wheres, [], shown, opened);
   const values: unknown[] = [];
-  for (let round = 0; round < rounds; round++) values.push(DOSSIER, options.judged ?? CLEAN, {});
+  if (options.overtaken === true) values.push(CLEAN);
+  for (let round = 0; round < rounds; round++) values.push(options.judged ?? CLEAN);
   const jev = {
     review: () => Promise.resolve(null),
+    check: (input: { claims: { claim: string; where: string }[] }) =>
+      Promise.resolve(
+        input.claims.map((one) => {
+          const weak = (options.weak ?? []).includes(one.where);
+          return { ...one, read: true, confidence: weak ? 0.9 : 0.1, verdict: weak ? "unsupported" : "supported" };
+        }),
+      ),
     triage: { pr: () => Promise.resolve({ eyeball: false, reason: "one file" }) },
   };
   const agent = {
@@ -225,12 +238,20 @@ function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?:
     },
     turn: (session: string, ask: Ask) => {
       turns.push(said(session, ask));
-      return {
-        output: (async function* () {})(),
-        value: Promise.resolve(values[turns.length - 1] ?? {}),
-      };
+      const output = (async function* () {})();
+      if (options.overtaken === true && turns.length === 1) {
+        const value = new Promise<never>((_, fail) => {
+          stopped = () => fail(new Error("the turn was stopped"));
+        });
+        return { output, value };
+      }
+      return { output, value: Promise.resolve(values[turns.length - 1] ?? {}) };
     },
-    stop: () => Promise.resolve(),
+    stop: () => {
+      stopped?.();
+      stopped = undefined;
+      return Promise.resolve();
+    },
   };
   const pr = {
     number: 7,
@@ -264,9 +285,15 @@ function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?:
   const vcs = {
     fetch: () => Promise.resolve(),
     resetHard: () => Promise.resolve(),
-    sha: () => Promise.resolve({ sha: "abc" }),
+    sha: () => {
+      shas += 1;
+      return Promise.resolve({ sha: options.overtaken === true && shas > 1 ? "def" : "abc" });
+    },
     worktree: {
-      add: () => Promise.resolve({ existed: false, path: "/tmp/trees/review-pr-7" }),
+      add: () => {
+        trees += 1;
+        return Promise.resolve({ existed: false, path: "/tmp/trees/review-pr-7" });
+      },
       remove: () => Promise.resolve(),
     },
   };
@@ -303,88 +330,91 @@ function pullRequest(options: { judged?: unknown; renders?: Rendered[]; rounds?:
     events,
     comments,
     openedFor,
+    trees: () => trees,
     run: () => reviewPr.run(ctx as never),
   };
 }
 
-test("review-pr gathers on the configured adapter, and opens no session to triage", async () => {
+test("review-pr reviews on the configured adapter, and opens no session to triage", async () => {
   const bench = pullRequest();
 
   const done = await bench.run();
 
   expect(done).toEqual({ rounds: 1, posted: 1 });
-  expect(bench.openedFor("review-gather")).not.toHaveProperty("adapter");
-  expect(bench.turns.map((turn) => turn.skill)).not.toContain("triage-pr");
+  expect(bench.openedFor("review-pr")).not.toHaveProperty("adapter");
+  expect(bench.turns.map((turn) => turn.skill)).toEqual(["review-pr"]);
 });
 
-test("the review-pr judge stays where its empty tool list is honoured", async () => {
+test("the reviewer opens on the worktree with the window its rounds are built on", async () => {
   const bench = pullRequest();
 
   await bench.run();
 
-  expect(bench.openedFor("review-judge")).toEqual({ tools: [], settings: [] });
-});
-
-test("the gatherer keeps the worktree and the window its rounds are built on", async () => {
-  const bench = pullRequest();
-
-  await bench.run();
-
-  expect(bench.openedFor("review-gather")).toEqual({
-    model: "small",
+  expect(bench.openedFor("review-pr")).toEqual({
     cwd: "/tmp/trees/review-pr-7",
     autocompact: "200000",
   });
 });
 
-test("the brief is written where the tree is, and scoped to the pull request", async () => {
+test("the comment carries the findings, and no page is rendered for them", async () => {
   const bench = pullRequest();
 
   await bench.run();
 
-  expect(bench.wheres).toEqual([{ name: "review", branch: "pr-7" }]);
-  expect(bench.openedFor("brief")).toEqual({
-    model: "small",
-    cwd: "/tmp/trees/review-pr-7",
-    autocompact: "200000",
-  });
+  expect(bench.comments).toEqual([{ body: expect.stringContaining("### Blockers") }]);
+  expect(bench.wheres).toEqual([]);
+  expect(bench.shown).toEqual([]);
 });
 
-test("the comment carries the page the person reads, and the shot goes up after it", async () => {
-  const bench = pullRequest();
-
-  await bench.run();
-
-  expect(bench.comments).toEqual([{ bodyFile: "/briefs/review.md" }]);
-  expect(bench.shown).toEqual(["/briefs/review.png"]);
-});
-
-test("blockers still wait at the send gate before the page is posted", async () => {
+test("blockers still wait at the send gate before the findings are posted", async () => {
   const bench = pullRequest({
-    judged: { blockers: ["the toggle has no test"], nonBlockers: [], questions: [] },
+    judged: { ...CLEAN, blockers: [{ claim: "the toggle has no test", where: "src/widget.ts:1" }] },
   });
 
   await bench.run();
 
   expect(bench.events).toEqual(["ask", "comment"]);
-  expect(bench.comments).toEqual([{ bodyFile: "/briefs/review.md" }]);
+  expect(bench.comments).toEqual([{ body: expect.stringContaining("the toggle has no test (`src/widget.ts:1`)") }]);
 });
 
-test("a second round's page is a new version, so the tab the person left open reloads", async () => {
+test("a finding the code at its line does not carry is demoted or dropped before it posts", async () => {
+  const bench = pullRequest({
+    judged: {
+      ...CLEAN,
+      blockers: [{ claim: "the toggle has no test", where: "src/widget.ts:1" }],
+      nonBlockers: [
+        { claim: "the label is stale", where: "src/widget.ts:2" },
+        { claim: "the name is unclear", where: "src/widget.ts:3" },
+      ],
+    },
+    weak: ["src/widget.ts:1", "src/widget.ts:2"],
+  });
+
+  await bench.run();
+
+  expect(bench.events).toEqual(["comment"]);
+  const said = bench.comments[0] as { body: string };
+  expect(said.body).toContain("the toggle has no test. The code at this line does not show this");
+  expect(said.body).toContain("the name is unclear");
+  expect(said.body).not.toContain("the label is stale");
+});
+
+test("a push mid-round starts over on a fresh reviewer and the same worktree", async () => {
+  const bench = pullRequest({ overtaken: true });
+
+  const done = await bench.run();
+
+  expect(done).toEqual({ rounds: 2, posted: 1 });
+  expect(bench.turns.map((turn) => turn.session)).toEqual(["session-1", "session-2"]);
+  expect(bench.trees()).toBe(1);
+});
+
+test("a push after the post opens a second round on a fresh reviewer", async () => {
   const bench = pullRequest({ rounds: 2 });
 
   const done = await bench.run();
 
   expect(done).toEqual({ rounds: 2, posted: 2 });
-  expect(bench.opened).toEqual(["/briefs/review.html?v=1", "/briefs/review.html?v=2"]);
+  expect(bench.turns.map((turn) => turn.session)).toEqual(["session-1", "session-2"]);
 });
 
-test("a brief that would not render leaves the report as the comment", async () => {
-  const bench = pullRequest({ renders: [REFUSED, REFUSED, REFUSED] });
-
-  await bench.run();
-
-  const said = bench.comments[0] as { body: string };
-  expect(said.body).toContain("### Blockers");
-  expect(bench.shown).toEqual([]);
-});

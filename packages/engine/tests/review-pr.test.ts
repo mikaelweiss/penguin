@@ -17,8 +17,8 @@ type Options = {
   stuck?: string[];
   /** Listing the worktrees fails outright. */
   blind?: boolean;
-  /** What the judge returns each round, so a round can block instead of approving. */
-  blockers?: string[][];
+  /** What the reviewer returns each round, so a round can block instead of approving. */
+  blockers?: { claim: string; where: string }[][];
 };
 
 const REVIEWED = "1200";
@@ -27,8 +27,9 @@ function harness(options: Options) {
   const shown: string[] = [];
   const removed: Removed[] = [];
   const added: string[] = [];
-  const readers: string[] = [];
+  const reviewers: string[] = [];
   const posts: string[] = [];
+  const prompts: string[] = [];
   /** Which worktrees were alive each time the run parked to wait. */
   const parked: string[][] = [];
 
@@ -85,18 +86,14 @@ function harness(options: Options) {
     open: (opts?: { cwd?: string }) => {
       sessions += 1;
       const session = `session-${sessions}`;
-      if (opts?.cwd !== undefined) readers.push(opts.cwd);
+      if (opts?.cwd !== undefined) reviewers.push(opts.cwd);
       return Promise.resolve(session);
     },
     stop: () => Promise.resolve(),
-    turn: (_session: string, ask: { skill: string }) => {
-      const value = (): unknown => {
-        if (ask.skill === "review-judge") {
-          return { blockers: blockers.shift() ?? [], nonBlockers: [], questions: [] };
-        }
-        return { files: [], flows: [], state: [], facts: [], answers: [] };
-      };
-      return { output: (async function* () {})(), value: Promise.resolve(value()) };
+    turn: (_session: string, ask: { skill: string; prompt: string }) => {
+      prompts.push(ask.prompt);
+      const value = { behaviors: [], flows: [], blockers: blockers.shift() ?? [], nonBlockers: [] };
+      return { output: (async function* () {})(), value: Promise.resolve(value) };
     },
   };
 
@@ -121,6 +118,7 @@ function harness(options: Options) {
 
   const jev = {
     review: () => Promise.resolve(null),
+    check: () => Promise.resolve([]),
     triage: { pr: () => Promise.resolve({ eyeball: false, reason: "too big to eyeball" }) },
   };
 
@@ -144,8 +142,9 @@ function harness(options: Options) {
     shown,
     removed,
     added,
-    readers,
+    reviewers,
     posts,
+    prompts,
     parked,
     held: () => held.map((tree) => tree.name),
     run: () =>
@@ -163,7 +162,30 @@ test("the review drops its tree before it parks, and cuts a fresh one when new c
   expect(run.parked).toEqual([[], []]);
   expect(run.added).toEqual([`review-pr-${REVIEWED}`, `review-pr-${REVIEWED}`]);
   // A session cannot outlive the tree it was opened on, so the second round reads from a new one.
-  expect(run.readers).toHaveLength(2);
+  expect(run.reviewers).toHaveLength(2);
+});
+
+test("one turn reviews a round, and the second round carries the first round's findings", async () => {
+  const run = harness({ changes: [{ kind: "commits" }] });
+
+  await run.run();
+
+  expect(run.prompts).toHaveLength(2);
+  expect(run.prompts[0]).toContain("Review this pull request");
+  expect(run.prompts[1]).toContain("New code arrived since the last review");
+  expect(run.prompts[1]).toContain("### What changes");
+});
+
+test("the comment carries what changes, how to test it, and the findings", async () => {
+  const run = harness({});
+
+  await run.run();
+
+  expect(run.posts).toHaveLength(1);
+  expect(run.posts[0]).toContain("### What changes");
+  expect(run.posts[0]).toContain("### How to test");
+  expect(run.posts[0]).toContain("### Blockers\n\nnone");
+  expect(run.posts[0]).toContain("### Non-blockers\n\nnone");
 });
 
 test("the teardown forces, so a tree with a stray edit in it still goes", async () => {
@@ -256,11 +278,12 @@ test("a repository that will not list its worktrees still gets its review", asyn
 });
 
 test("a round that blocks still drops its tree before it waits for the fix", async () => {
-  const run = harness({ blockers: [["the null check is missing"]] });
+  const run = harness({ blockers: [[{ claim: "the null check is missing", where: "src/one.ts:3" }]] });
 
   await run.run();
 
   expect(run.posts).toHaveLength(1);
+  expect(run.posts[0]).toContain("- the null check is missing (`src/one.ts:3`)");
   expect(run.parked).toEqual([[]]);
   expect(run.held()).toEqual([]);
 });
