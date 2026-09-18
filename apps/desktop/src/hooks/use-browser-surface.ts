@@ -67,7 +67,7 @@ export function useBrowserSurface({ mount, tabs, active, showing }: Surface): st
     for (const id of close) browserClose(id).catch(() => {});
   }, [ids]);
 
-  // Open, show, hide, bounds. `tabs` stays in the ref so a title or url event cannot re-enter here.
+  // Hide, then open or show, then bounds. `tabs` stays in the ref so a title or url event cannot re-enter here.
   useEffect(() => {
     const showable = mount.current;
     const pass = surfacePass({
@@ -77,6 +77,11 @@ export function useBrowserSurface({ mount, tabs, active, showing }: Surface): st
       showing: showing && showable !== null,
     });
     for (const id of pass.close) browserClose(id).catch(() => {});
+
+    // Hide first. A switch that shows before it hides leaves the last workflow drawn over this one.
+    for (const id of pass.hide) {
+      browserHide(id).catch(() => forgetTab(id));
+    }
 
     if (pass.open !== undefined && showable !== null) {
       const rect = rectOf(showable);
@@ -101,10 +106,6 @@ export function useBrowserSurface({ mount, tabs, active, showing }: Surface): st
       const shown = pass.show;
       browserBounds(shown, rect).catch(() => forgetTab(shown));
       browserShow(shown).catch(() => forgetTab(shown));
-    }
-
-    for (const id of pass.hide) {
-      browserHide(id).catch(() => forgetTab(id));
     }
   }, [mount, active, showing]);
 

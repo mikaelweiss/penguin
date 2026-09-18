@@ -11,6 +11,7 @@ import {
   pageUrl,
   shownUrl,
   typedUrl,
+  type Held,
   type RunTabs,
 } from "@/lib/browser";
 
@@ -21,6 +22,23 @@ function urls(held: RunTabs): string[] {
 function activeUrl(held: RunTabs): string | undefined {
   return held.tabs.find((tab) => tab.id === held.active)?.url;
 }
+
+test("applying or opening a url on one run leaves another run's tabs alone", () => {
+  const other = applyOpens(NO_TABS, ["https://b.test/", "https://b2.test/"]).next;
+  let held: Held = { a: NO_TABS, b: other };
+
+  held = { ...held, a: applyOpens(held.a ?? NO_TABS, ["https://a.test/"]).next };
+  expect(held.b).toBe(other);
+  expect(urls(held.b)).toEqual(["https://b.test/", "https://b2.test/"]);
+  expect(held.b.active).toBe(other.active);
+  expect(held.b.applied).toBe(other.applied);
+
+  held = { ...held, a: openTab(held.a ?? NO_TABS, "https://a2.test/") };
+  expect(held.b).toBe(other);
+  expect(urls(held.b)).toEqual(["https://b.test/", "https://b2.test/"]);
+  expect(held.b.active).toBe(other.active);
+  expect(held.b.applied).toBe(other.applied);
+});
 
 test("three urls from one run are three tabs, the last one selected", () => {
   const { next, opened } = applyOpens(NO_TABS, [
