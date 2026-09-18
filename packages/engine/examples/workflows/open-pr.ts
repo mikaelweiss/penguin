@@ -186,7 +186,7 @@ export default workflow({
       vcs.against(onto),
       github.pr.titles(STYLE_DEPTH),
     ]);
-    // The branch's review brief, when it has one. The person read that page, so the pull request carries it.
+    // The branch's review brief, when it has one. The person read that page, so the turn writes from it.
     const pages = (await brief.where({ name: "review" })).replace(/\.json$/, "");
     const reviewed = fs.existsSync(`${pages}.md`) ? fs.readFileSync(`${pages}.md`, "utf8") : "";
     const work = [
@@ -195,7 +195,7 @@ export default workflow({
       ...(reviewed === ""
         ? []
         : [
-            `# The brief\n\nThis is the body the pull request will carry. Write a title that names the same change.\n\n${reviewed}`,
+            `# The brief\n\nThis is the review of the branch. Write a title and body that name the same change.\n\n${reviewed}`,
           ]),
       `# Commits\n\n${commits.subjects.join("\n")}`,
       `# Diff stat\n\n${stat.text.trim()}`,
@@ -214,9 +214,8 @@ export default workflow({
     const written = await narrated(view, () =>
       agent.turn(writer, { skill: "open-pr", prompt: work }, { result: Description }),
     );
-    const said = reviewed === "" ? written.body : reviewed;
-    // The note is the caller's, so it goes under a body written knowing nothing of it.
-    const body = params.note === "" ? said : `${said}\n\n${params.note}`;
+    // The note is the caller's, so it goes under a body the agent wrote knowing nothing of it.
+    const body = params.note === "" ? written.body : `${written.body}\n\n${params.note}`;
 
     const made = await github.pr.ensure({ head: head.branch, base, title: written.title, body });
     if (made.landed) {

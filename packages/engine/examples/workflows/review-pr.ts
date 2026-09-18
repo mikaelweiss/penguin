@@ -353,10 +353,7 @@ export default workflow({
     };
 
     const post = async (findings: Findings, page: Page | null): Promise<void> => {
-      await github.pr.comment(
-        params.pr,
-        page === null ? { body: report(findings) } : { bodyFile: page.md },
-      );
+      await github.pr.comment(params.pr, { body: report(findings) });
       posted += 1;
       if (page !== null && page.png !== null) await view.image(page.png);
     };
