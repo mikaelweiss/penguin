@@ -7,6 +7,12 @@ description: Reads the code around a pull request checked out in the working tre
 
 The input gives the PR title, description, and comments, the base branch, the list of changed files, and the diff. The working tree holds the PR code.
 
+The input also carries work already done for you, and redoing it is the slowest mistake you can make here:
+
+- **Tiers.** A fast model rated how closely each changed file needs reading. Take those ratings. Change one only when the code shows the rating is wrong, and say so in that file's `read`.
+- **Connections.** The import graph already read the tree around each changed file: what it calls, what calls it, what tests it, and the file it was copied from, as real source with line numbers. Step 3 below is mostly answered there. Do not grep or open a file to rebuild it.
+- **Jev screening.** Places a fast model found suspicious. They are prompts, not facts. Confirm or dismiss each from the code.
+
 You read, someone else judges. The judge never sees the tree: it gets the diff, your dossier, and nothing else. So a fact you leave out is one it has to guess at, and a fact the diff already shows is one it pays for twice.
 
 Every entry is a fact with the file and line it came from. No verdicts, no severity, no advice, no "this looks wrong". A judgment slipped into the dossier is one the judge cannot check.
@@ -19,15 +25,15 @@ You gather, the workflow posts. It shows the findings to the user, waits for the
 
 So do not run `gh pr comment`, `gh pr review`, or any `gh api` call that writes. A comment you post is a second copy of the review, and it lands before the user has said what they want done. Reading the PR with `gh` is fine. Approving is the workflow's move too, never yours.
 
-## Step 1 - Tier the changed files
+## Step 1 - Take the tiers
 
-The changed files and the diff are in the input. Start from them. Do not run `git diff`, `git log`, or `gh pr view` to rebuild what the input already holds; read the tree only for what the diff does not show.
-
-Give every changed file one of three tiers, and return a tier for every one of them:
+The changed files, the diff, and a tier for every file are in the input. Return a tier for every changed file, the one you were given unless the code contradicts it:
 
 1. `ignore` - it does not really matter to a review, or a command checks it better than reading does.
 2. `skim` - a mistake here is cheap, but it is worth a look.
 3. `deep` - it is high impact and the review turns on it.
+
+Do not run `git diff`, `git log`, or `gh pr view` to rebuild what the input already holds.
 
 Run the repo's own commands to establish the state the code is in, so the judge knows which failures this change owns and which it inherited.
 
@@ -37,13 +43,14 @@ Read the `skim` files for anything that might cause trouble. What you find goes 
 
 ## Step 3 - Read the connections
 
-Bugs live in the connections, so for every `deep` file follow what the change connects to, not the neighborhood around it:
+Bugs live in the connections. The Connections section of the input already holds most of them for every `deep` and `skim` file: the callers, the called, the tests, and the counterpart the file was copied from. Read that section. Turn what it says into entries in each file's `read` list: what it says, and the line it says it at.
 
-- Callers of every new or changed exported symbol. Find them with grep or ast-grep, then read the enclosing function at each call site.
-- Functions the changed code calls, when their behavior matters to the change.
-- Types, schemas, and contracts the changed code implements or consumes.
+Go to the tree only for what the graph could not follow:
+
+- Code wired together without an import: a route, a string key, dependency injection, dynamic dispatch, a config value.
 - Configuration that alters the changed code's behavior.
-- The counterpart implementation, when the change claims parity with existing code.
+- A caller whose enclosing function you need to see in full, when the excerpt's few lines around the call are not enough to tell.
+- A file the Connections section says it had to leave out.
 
 Each one is an entry in that file's `read` list: what you read, what it says, and where.
 

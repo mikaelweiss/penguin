@@ -4,21 +4,28 @@ import { adapter, PenguinError } from "penguin";
 import { authGate, storedFields } from "../helpers/auth.ts";
 import {
   changedIn,
+  codeAt,
   DIMENSIONS,
   graphOf,
   parseHunks,
   relatedTo,
+  signalsOf,
   sizeOf,
-  testsFor,
+  testSummaries,
   type Cells,
   type ChangedFile,
+  type Checked,
+  type Claim,
   type Dimension,
   type Excerpt,
   type Finding,
   type Hunk,
   type Profile,
   type Report,
+  type Signal,
+  type Tier,
   type Tree,
+  type Verdict,
 } from "../helpers/jev.ts";
 import { priced } from "../helpers/prices.ts";
 import type { Usage } from "../helpers/turns.ts";
@@ -34,16 +41,21 @@ const PASS_MS = 15_000;
 const RETRIES = 2;
 /** Jev takes 1200 requests a minute, so a handful in flight keeps a pass to seconds without nearing it. */
 const IN_FLIGHT = 6;
-/** A cell at or above this probability is a signal the pass follows into its hunks. */
-const SIGNAL = 0.7;
-/** How many signals one pass inspects, and how many files it profiles. */
-const INSPECTED = 8;
+/**
+ * Per concern, the pass follows the strongest cells at or above the floor, up to a quota. A
+ * screen reads one patch with excerpts around it, so a real defect can sit well under 0.5
+ * while still topping its column; rank within the concern is the signal, not the number.
+ */
+const FLOOR = 0.2;
+/** The quota grows with the change: one slot per this many files, between the two bounds. */
+const PER_CONCERN = { least: 3, most: 12, filesEach: 6 };
+/** A window at or above this probability holds evidence, and the most of them one signal follows. */
+const EVIDENCE = 0.5;
+const PER_SIGNAL = 2;
+/** How many files the pass profiles. */
 const PROFILED = 5;
-/** On the 0 to 3 severity rubric: where a finding names an owner, and where it asks for changes. */
+/** On the 0 to 3 severity rubric, where a finding names the reviewer it goes to. */
 const ROUTED = 1.5;
-const BLOCKING = 2;
-/** An evidence pick below this confidence is a guess, and the signal is dropped. */
-const LOCATED = 0.55;
 /** A source file past this size is generated or vendored, and reading it buys nothing. */
 const FILE_BYTES = 1_000_000;
 /** What a person reads in a minute: a few files, tens of changed lines. Past either, no question is asked. */
@@ -123,6 +135,55 @@ const OWNERS = {
   maintainer: "The owning domain or feature maintainer",
 };
 
+const TIER_CRITERIA: Record<Tier, Json> = {
+  ignore: {
+    what: "A person reading it learns nothing that a build, a type check, or a test would not catch first",
+    examples: [
+      "Build and project scaffolding: tsconfig, project.json, a bundler config, a package manifest",
+      "Generated output, a lock file, a pure rename, formatting only",
+      "A stylesheet or token file with no logic in it",
+    ],
+  },
+  skim: {
+    what: "It carries behavior, but a mistake in it is cheap or shows on sight",
+    examples: ["Wiring and registration", "Constants and types", "A straightforward mapper or query", "A test fixture"],
+  },
+  deep: {
+    what: "The review turns on it",
+    examples: [
+      "It decides behavior under a condition",
+      "It guards a boundary: authorization, validation, a feature flag",
+      "It coordinates state, concurrency, or ordering",
+      "It handles failure, cancellation, or cleanup",
+    ],
+  },
+};
+
+/**
+ * What the evidence check may answer about one claim a review makes. A claim names a mechanism
+ * and what would follow from it. Only the mechanism has to be on the page: the consequence is
+ * the reader's inference, and holding the code to it reads every true claim as unsupported.
+ */
+const CLAIM_VERDICTS: Record<Verdict, Json> = {
+  supported: {
+    what: "The code holds the mechanism the claim rests on",
+    examples: [
+      "The claim names an ordering, and the code performs those steps in that order",
+      "The claim names a missing check, and the code takes that path without it",
+      "The claim names a condition or value, and the code uses that condition or value",
+    ],
+    note: "What the claim says would follow is an inference. The code does not have to state it, and a consequence the code never mentions does not make the claim unsupported",
+  },
+  unsupported: {
+    what: "The code does not hold the mechanism, whatever is true elsewhere in the codebase",
+    examples: ["These lines do something unrelated to the claim", "The mechanism lives in a file this code only calls"],
+  },
+  contradicted: {
+    what: "The code does the opposite of the mechanism the claim describes, so the claim is wrong about these lines",
+    examples: ["The claim says a guard is missing, and the guard is right there", "The claim says two steps run in an order, and the code runs them the other way"],
+  },
+};
+
 const CONCERNS: Record<Dimension, string> = {
   correctness: "The code likely contains incorrect runtime behavior.",
   security: "The code introduces or weakens a security boundary.",
@@ -176,20 +237,31 @@ const MECHANISMS: Record<Dimension, Record<string, string>> = {
 
 /**
  * The five screening questions over one file. `related` carries what the tree says that the
- * patch does not: the declarations the file imports and the lines of the files that import it.
+ * patch does not: the declarations the file imports, the file it was copied from, and the
+ * lines of the files that import it.
  */
-const SCREENING = {
+export const SCREENING = {
   correctness: noul(
     {
       question: "Does file.patch directly support that this change introduces incorrect runtime behavior?",
-      inspect: "file.patch, read against related for what the code it calls returns and what its callers expect",
+      inspect: [
+        "file.patch, read against related for what the code it calls returns and what its callers expect",
+        "Each changed function's name and doc comment against the condition its body enforces",
+        "A twin entry in related, the file this one was copied from, against the lines that differ",
+      ],
       focus: "Concrete behavior, state, data flow, or async errors in the added or changed lines",
       ignore: ["Style preferences", "Naming concerns", "Speculation the code does not support"],
     },
     {
       true: {
         what: "The patch holds a realistic path to a wrong runtime result",
-        examples: ["A condition now handles the opposite case", "A caller in related passes a value the new signature misreads"],
+        examples: [
+          "A condition now handles the opposite case",
+          "A caller in related passes a value the new signature misreads",
+          "A filter or query admits cases that its own name, doc comment, or caller says it must exclude",
+          "A loop or traversal reads only the first element of a collection it should walk",
+          "A parser accepts values outside the range its consumer assumes",
+        ],
       },
       false: {
         what: "The patch is correct, non-behavioral, or shows no direct evidence of a bug",
@@ -206,7 +278,11 @@ const SCREENING = {
     {
       true: {
         what: "The patch creates a concrete path around a security control or into an unsafe sink",
-        examples: ["An authorization check is removed", "Untrusted input reaches command execution"],
+        examples: [
+          "An authorization check is removed",
+          "Untrusted input reaches command execution",
+          "A new route, procedure, or handler is reachable without the feature flag, role, or ownership check its neighbours perform",
+        ],
       },
       false: {
         what: "No security boundary is weakened by the patch",
@@ -223,7 +299,14 @@ const SCREENING = {
     {
       true: {
         what: "A changed path can lose work, leak resources, hang, crash, or leave inconsistent state",
-        examples: ["Cleanup is skipped after failure", "Concurrent work updates shared state unsafely"],
+        examples: [
+          "Cleanup is skipped after failure",
+          "Concurrent work updates shared state unsafely",
+          "An external, irreversible effect (abort, delete, send, commit to storage) runs before the local record that depends on it is saved, so a rollback or crash leaves the record pointing at nothing",
+          "A record is deleted before the resource it points at is removed, so a failure in between strands the resource with no way to find it",
+          "Work is reported done before the step that makes it durable runs, so an unmount, termination, or failure in between loses it",
+          "A discard or cancel path clears local state but leaves the remote or on-disk side of it open",
+        ],
       },
       false: { what: "The patch preserves safe lifecycle and failure handling" },
     },
@@ -244,24 +327,62 @@ const SCREENING = {
   ),
   testGap: noul(
     {
-      question: "Does file.patch change important behavior without adequate targeted evidence in changedTests?",
-      compare: ["file.patch", "changedTests"],
+      question:
+        "Does file.patch change important behavior that no test named in changedTests exercises?",
+      inspect:
+        "changedTests lists every test file the change adds or edits, with the names of its tests. A test counts when its name describes the behavior file.patch adds or changes, even from a different file. targeted marks the test files the tree ties to this file",
       focus: "New branches, boundaries, failure paths, and component interactions",
     },
     {
       true: {
-        what: "Important changed behavior has no targeted changed test",
-        examples: ["A new failure branch has no assertion", "A protocol change lacks a compatibility test"],
+        what: "Important changed behavior has no test in changedTests whose name covers it",
+        examples: ["A new failure branch has no test named for it", "A protocol change has no test that names the compatibility case"],
       },
       false: {
-        what: "Changed tests exercise the important behavior, or the patch is non-behavioral",
-        examples: ["A focused regression test covers the branch", "Documentation-only change"],
+        what: "A test in changedTests names the important behavior, or the patch is non-behavioral",
+        examples: ["A test named for the branch appears in changedTests", "Documentation-only change", "A type or interface with no runtime behavior"],
       },
     },
   ),
+  tier: choice(
+    {
+      question: "How closely does a person have to read file.patch for this review to be sound?",
+      inspect: "file.patch, and what related says the code around it expects",
+      focus: "What a mistake in these lines would cost, not how long the patch is",
+    },
+    TIER_CRITERIA,
+  ),
 };
 
-type Signal = { file: ChangedFile; dimension: Dimension; probability: number };
+/**
+ * One question per window of a file: does this window alone show the concern? The criteria
+ * are the screen's own, so a window is judged on the concrete mechanisms and not on the label.
+ */
+export function windowQuestions(dimension: Dimension, hunks: Hunk[]): Record<string, Noul> {
+  const screened = SCREENING[dimension].criteria;
+  return Object.fromEntries(
+    hunks.map((hunk, index) => [
+      hunk.id,
+      noul(
+        {
+          question: `Do the lines of \`candidateHunks[${index}]\` directly show suspectedConcern?`,
+          inspect: `\`candidateHunks[${index}]\` alone, read against related for what the code it calls does and what its callers expect`,
+          ignore: "Evidence that sits in another hunk",
+        },
+        {
+          true: {
+            what: "These lines hold the mechanism of the concern",
+            mechanisms: screened?.true ?? null,
+          },
+          false: {
+            what: "These lines do not show it, even where another hunk of the file might",
+            mechanisms: screened?.false ?? null,
+          },
+        },
+      ),
+    ]),
+  );
+}
 
 /**
  * The reasons a pull request needs the full review, over the diff and what the author and
@@ -619,85 +740,80 @@ export default adapter({
       };
     }
 
-    /** One signal followed into its hunks: the evidence, the mechanism, the severity, the owner. */
-    async function locate(spent: Usage, signal: Signal): Promise<Finding | null> {
-      const hunks: Hunk[] = parseHunks(signal.file.patch);
-      if (hunks.length === 0) return null;
+    /**
+     * One signal followed into its hunks: every window judged on its own for direct evidence,
+     * the strongest classified and rated, the serious ones routed. A file can hold the same
+     * concern in two places, so a signal can end as two findings.
+     */
+    async function locate(
+      spent: Usage,
+      signal: Signal,
+      file: ChangedFile,
+      related: Excerpt[],
+    ): Promise<Finding[]> {
+      const hunks: Hunk[] = parseHunks(file.patch);
+      if (hunks.length === 0) return [];
       const concern = { dimension: signal.dimension, definition: CONCERNS[signal.dimension] };
-      const picked = await ask(
+      const judged = await ask(
         spent,
         {
-          file: signal.file.path,
+          file: file.path,
           suspectedConcern: { ...concern, screeningProbability: signal.probability },
+          related,
           candidateHunks: hunks,
         },
-        {
-          evidence: choice(
-            {
-              question: "Which candidate hunk provides the strongest direct evidence for suspectedConcern?",
-              fallback: "Select noMatch when no hunk provides sufficient evidence",
-            },
-            {
-              ...Object.fromEntries(
-                hunks.map((hunk) => [hunk.id, `Candidate beginning at changed-file line ${hunk.startLine}`]),
-              ),
-              noMatch: "No candidate hunk directly supports the suspected concern",
-            },
-          ),
-        },
+        windowQuestions(signal.dimension, hunks),
       );
-      const evidence = picked.evidence;
-      if (evidence.choice === "noMatch" || evidence.confidence < LOCATED) return null;
-      const hunk = hunks.find((one) => one.id === evidence.choice);
-      if (hunk === undefined) return null;
+      const strongest = hunks
+        .map((hunk) => ({ hunk, probability: judged[hunk.id]?.noul ?? 0 }))
+        .filter((one) => one.probability >= EVIDENCE)
+        .sort((a, b) => b.probability - a.probability)
+        .slice(0, PER_SIGNAL);
 
-      const classified = await ask(
-        spent,
-        { file: signal.file.path, suspectedConcern: concern, selectedEvidence: hunk },
-        {
-          mechanism: choice(
-            "Which mechanism best describes the suspected concern supported by selectedEvidence?",
-            MECHANISMS[signal.dimension],
-          ),
-        },
-      );
-      const mechanism = classified.mechanism.choice;
-      if (mechanism === "noIssue") return null;
-
-      const rated = await ask(
-        spent,
-        { file: signal.file.path, suspectedConcern: concern, selectedEvidence: hunk },
-        {
-          severity: score(
-            "Assuming selectedEvidence exhibits suspectedConcern, rate the likely production impact.",
-            SEVERITY,
-          ),
-        },
-      );
-      const severity = rated.severity.score;
-      let owner: string | null = null;
-      if (severity >= ROUTED) {
-        const routed = await ask(
+      const findings: Finding[] = [];
+      for (const { hunk } of strongest) {
+        const classified = await ask(
           spent,
+          { file: file.path, suspectedConcern: concern, related, selectedEvidence: hunk },
           {
-            file: signal.file.path,
-            concern: { dimension: signal.dimension, mechanism, severity },
-            selectedEvidence: hunk,
+            mechanism: choice(
+              "Which mechanism best describes the suspected concern supported by selectedEvidence?",
+              MECHANISMS[signal.dimension],
+            ),
+            severity: score(
+              "Assuming selectedEvidence exhibits suspectedConcern, rate the likely production impact.",
+              SEVERITY,
+            ),
           },
-          { owner: choice("Which reviewer is best suited to investigate this concern?", OWNERS) },
         );
-        owner = routed.owner.choice;
+        const mechanism = classified.mechanism.choice;
+        if (mechanism === "noIssue") continue;
+        // The report prints one decimal, so the action follows the number the reader sees.
+        const severity = Math.round(classified.severity.score * 10) / 10;
+        let owner: string | null = null;
+        if (severity >= ROUTED) {
+          const routed = await ask(
+            spent,
+            {
+              file: file.path,
+              concern: { dimension: signal.dimension, mechanism, severity },
+              selectedEvidence: hunk,
+            },
+            { owner: choice("Which reviewer is best suited to investigate this concern?", OWNERS) },
+          );
+          owner = routed.owner.choice;
+        }
+        findings.push({
+          path: file.path,
+          line: hunk.startLine,
+          dimension: signal.dimension,
+          probability: signal.probability,
+          mechanism,
+          severity,
+          owner,
+        });
       }
-      return {
-        path: signal.file.path,
-        line: hunk.startLine,
-        dimension: signal.dimension,
-        probability: signal.probability,
-        mechanism,
-        severity,
-        owner,
-        action: severity >= BLOCKING ? "request changes" : "comment",
-      };
+      return findings;
     }
 
     const fresh = (): Usage => ({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0 });
@@ -776,6 +892,49 @@ export default adapter({
       },
 
       /**
+       * Each claim read against the code it names, in the checkout at `dir`. A claim whose
+       * file the tree does not hold comes back unread and supported: an unreadable claim is
+       * unchecked, never disproved.
+       */
+      async check(options: { dir: string; claims: Claim[] }): Promise<Checked[]> {
+        if (options.claims.length === 0) return [];
+        const tree = await treeOf(options.dir);
+        const spent = fresh();
+        const checked = await mapLimit(options.claims, IN_FLIGHT, async (claim): Promise<Checked> => {
+          const code = codeAt(tree, claim.where);
+          if (code === undefined) {
+            return { ...claim, verdict: "supported", confidence: 0, read: false };
+          }
+          const answers = await ask(
+            spent,
+            { claim: claim.claim, where: claim.where, code },
+            {
+              verdict: choice(
+                {
+                  question: "Does `code` hold the mechanism that `claim` rests on?",
+                  inspect: "`code` alone, which is the file `where` names, or a window of it around that line",
+                  ignore: [
+                    "Whether the problem would matter, or how bad it would be",
+                    "Whether the consequence the claim predicts is spelled out anywhere",
+                    "Whether the claim holds somewhere else in the codebase",
+                  ],
+                },
+                CLAIM_VERDICTS,
+              ),
+            },
+          );
+          return {
+            ...claim,
+            verdict: answers.verdict.choice as Verdict,
+            confidence: answers.verdict.confidence,
+            read: true,
+          };
+        });
+        noted(spent);
+        return checked;
+      },
+
+      /**
        * The pass over one diff, with the checkout at `dir` holding the code it changes: every
        * file screened on five concerns, the strongest cells followed into their hunks, and the
        * findings scored and routed. Null when the diff holds nothing to screen.
@@ -791,10 +950,7 @@ export default adapter({
         const screened = await mapLimit(files, IN_FLIGHT, async (file) => {
           const related: Excerpt[] = relatedTo(graph, tree, file.path);
           context += related.length;
-          const changedTests = testsFor(graph, tests, file.path).map((test) => ({
-            path: test.path,
-            patch: test.patch,
-          }));
+          const changedTests = testSummaries(graph, tests, file.path);
           const answers = await ask(
             spent,
             { file: { path: file.path, patch: file.patch }, related, changedTests },
@@ -803,15 +959,18 @@ export default adapter({
           const cells = Object.fromEntries(
             DIMENSIONS.map((dimension) => [dimension, answers[dimension].noul]),
           ) as Cells;
-          return { file, cells };
+          return { file, cells, related, tier: answers.tier.choice as Tier };
         });
 
-        const signals: Signal[] = screened
-          .flatMap(({ file, cells }) =>
-            DIMENSIONS.map((dimension) => ({ file, dimension, probability: cells[dimension] })),
-          )
-          .filter((one) => one.probability >= SIGNAL)
-          .sort((a, b) => b.probability - a.probability);
+        const byPath = new Map(screened.map((one) => [one.file.path, one]));
+        const perConcern = Math.min(
+          PER_CONCERN.most,
+          Math.max(PER_CONCERN.least, Math.ceil(files.length / PER_CONCERN.filesEach)),
+        );
+        const inspected = signalsOf(
+          screened.map(({ file, cells }) => ({ path: file.path, cells })),
+          { floor: FLOOR, perConcern },
+        );
 
         const strongest = (cells: Cells): number => Math.max(...Object.values(cells));
         const profiled = [...screened]
@@ -835,11 +994,11 @@ export default adapter({
           return { path: file.path, category: answers.category.choice, priority: answers.priority.score };
         });
 
-        const inspected = signals.slice(0, INSPECTED);
-        const located = await mapLimit(inspected, IN_FLIGHT, (signal) => locate(spent, signal));
-        const findings = located
-          .filter((one): one is Finding => one !== null)
-          .sort((a, b) => b.severity - a.severity);
+        const located = await mapLimit(inspected, IN_FLIGHT, (signal) => {
+          const held = byPath.get(signal.path);
+          return held === undefined ? Promise.resolve([]) : locate(spent, signal, held.file, held.related);
+        });
+        const findings = located.flat().sort((a, b) => b.severity - a.severity);
 
         noted(spent);
 
@@ -847,13 +1006,19 @@ export default adapter({
           files: files.length,
           tests: tests.length,
           context,
-          signal: SIGNAL,
-          matrix: screened.map(({ file, cells }) => ({ path: file.path, cut: file.cut, cells })),
+          floor: FLOOR,
+          perConcern,
+          matrix: screened.map(({ file, cells, tier }) => ({ path: file.path, cut: file.cut, tier, cells })),
           profiles,
+          inspected,
+          connections: screened.map(({ file, tier, related }) => ({
+            path: file.path,
+            tier,
+            excerpts: related,
+          })),
           findings,
           funnel: {
             cells: files.length * DIMENSIONS.length,
-            signals: signals.length,
             inspected: inspected.length,
             located: findings.length,
             routed: findings.filter((one) => one.owner !== null).length,

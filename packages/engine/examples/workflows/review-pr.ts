@@ -1,7 +1,12 @@
 import { attempt, messageOf, workflow } from "penguin";
 import { z } from "zod";
 import { reviewBrief, type Page } from "../helpers/brief.ts";
-import { comment as jevComment } from "../helpers/jev.ts";
+import {
+  briefing as jevBriefing,
+  comment as jevComment,
+  connections as jevConnections,
+  tiers as jevTiers,
+} from "../helpers/jev.ts";
 import { narrate } from "../helpers/turns.ts";
 import { openWorktree } from "../helpers/worktree.ts";
 
@@ -11,6 +16,12 @@ const PREFIX = "review-pr-";
 /** How many times one judgment may send the gatherer back for code it cannot read itself. */
 const QUESTIONS = 2;
 
+/**
+ * How sure the evidence check must be before its answer counts. Below it the claim stands as
+ * the judge wrote it, because an unsure check is no evidence either way.
+ */
+const SETTLED = 0.7;
+
 /** Room for a claim and the file and line it rests on, and no room for a paragraph. */
 const LINE = 300;
 
@@ -18,12 +29,18 @@ function line(about: string): z.ZodString {
   return z.string().max(LINE).describe(about);
 }
 
+/** One finding: what is wrong, and the code it rests on, so the claim can be checked. */
+const Claimed = z.object({
+  claim: line("what is wrong and why it matters, in one line"),
+  where: line("the file and line the claim rests on, as path:line, or the path when no one line carries it"),
+});
+
 const Findings = z.object({
   blockers: z
-    .array(z.string())
+    .array(Claimed)
     .describe("the issues that must change before an approve"),
   nonBlockers: z
-    .array(z.string())
+    .array(Claimed)
     .describe("the improvements the author may take or leave"),
 });
 
@@ -92,6 +109,7 @@ const Verdict = Findings.extend({
     ),
 });
 
+type Claimed = z.infer<typeof Claimed>;
 type Findings = z.infer<typeof Findings>;
 type Dossier = z.infer<typeof Dossier>;
 type Answers = z.infer<typeof Answers>;
@@ -102,8 +120,12 @@ function listed(items: string[]): string {
   return items.length === 0 ? "none" : items.map((item) => `- ${item}`).join("\n");
 }
 
+function claimed(claims: Claimed[]): string {
+  return listed(claims.map((one) => `${one.claim} (\`${one.where}\`)`));
+}
+
 function report(findings: Findings): string {
-  return `### Blockers\n\n${listed(findings.blockers)}\n\n### Non-blockers\n\n${listed(findings.nonBlockers)}`;
+  return `### Blockers\n\n${claimed(findings.blockers)}\n\n### Non-blockers\n\n${claimed(findings.nonBlockers)}`;
 }
 
 function verdictOf(judged: Verdict): Findings {
@@ -247,6 +269,12 @@ export default workflow({
     const changes = github.pr.changes(params.pr);
     let inbound = changes.next();
     let previous: Findings | undefined;
+    /** What Jev's pass over this round's code told the reader, empty when the pass did not run. */
+    let screening = "";
+    /** The tree around the change, read by the import graph so the reader does not go find it. */
+    let around = "";
+    /** Which of the last round's findings the new code no longer shows. */
+    let settled = "";
     let inDraft = pr.isDraft;
     let paused = pr.isInMergeQueue;
     let owed = true;
@@ -291,15 +319,20 @@ export default workflow({
       }
     };
 
+    const screened = (): string =>
+      [screening, around].filter((one) => one !== "").map((one) => `\n\n${one}`).join("");
+
+    const answered = (): string => (settled === "" ? "" : `\n\n${settled}`);
+
     const gathering = (): string =>
       previous === undefined
-        ? `Gather the dossier for this pull request. The working tree holds its code.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`
-        : `New code arrived since the last round, and the working tree holds it. The last round found:\n\n${report(previous)}\n\nRead what changed and the code those findings name, then return the dossier for the code the tree holds now.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}`;
+        ? `Gather the dossier for this pull request. The working tree holds its code.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}${screened()}`
+        : `New code arrived since the last round, and the working tree holds it. The last round found:\n\n${report(previous)}\n\nRead what changed and the code those findings name, then return the dossier for the code the tree holds now.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}${screened()}`;
 
     const judging = (found: Dossier): string =>
       previous === undefined
         ? `Judge this pull request.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}\n\n${dossierOf(found)}`
-        : `New code arrived since the last review. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, judge what changed, and return the full updated findings.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}\n\n${dossierOf(found)}`;
+        : `New code arrived since the last review. The last review found:\n\n${report(previous)}\n\nCheck whether each finding still holds, judge what changed, and return the full updated findings.\n\n${briefing()}\n\n${changed(pr.baseRefName, diff)}${answered()}\n\n${dossierOf(found)}`;
 
     // The worktree only mirrors the PR head, so a force-push is a reset, not a merge.
     const synced = async (): Promise<void> => {
@@ -340,10 +373,12 @@ export default workflow({
     };
 
     /**
-     * Jev's typed pass over the diff the tree holds, posted as its own comment before the deep
-     * review opens a session. A failure costs the post, not the round.
+     * Jev's typed pass over the diff the tree holds: posted as its own comment, and handed to
+     * the reader as the places to look first. A failure costs the pass, not the round.
      */
-    const screened = async (): Promise<void> => {
+    const screen = async (): Promise<void> => {
+      screening = "";
+      around = "";
       let report;
       try {
         report = await jev.review({ dir, diff });
@@ -355,11 +390,59 @@ export default workflow({
         await view.show("The diff holds nothing for Jev to screen.");
         return;
       }
+      screening = jevBriefing(report);
+      around = [jevTiers(report), jevConnections(report)].filter((one) => one !== "").join("\n\n");
       await github.pr.comment(params.pr, { body: jevComment(report, `\`${head.slice(0, 7)}\``) });
       posted += 1;
       await view.show(
         `Posted Jev's pass on PR #${pr.number}: ${report.files} files screened, ${report.findings.length} findings`,
       );
+    };
+
+    /** The claims the code at their own cited line does not carry. A failed check clears none of them. */
+    const weak = async (claims: Claimed[]): Promise<Set<number>> => {
+      if (dir === "" || claims.length === 0) return new Set();
+      try {
+        const checked = await jev.check({ dir, claims });
+        return new Set(
+          checked
+            .map((one, index) =>
+              one.read && one.confidence >= SETTLED && one.verdict !== "supported" ? index : -1,
+            )
+            .filter((index) => index !== -1),
+        );
+      } catch (error) {
+        await view.show(`The evidence check did not run, so every claim stands: ${messageOf(error)}`);
+        return new Set();
+      }
+    };
+
+    /**
+     * A blocker has to be carried by the code it cites. One that is not still reaches the author,
+     * as a non-blocker saying so, because a claim the check cannot place is not a claim disproved.
+     */
+    const vetted = async (findings: Findings): Promise<Findings> => {
+      const failed = await weak(findings.blockers);
+      if (failed.size === 0) return findings;
+      const blockers = findings.blockers.filter((_, index) => !failed.has(index));
+      const demoted = findings.blockers
+        .filter((_, index) => failed.has(index))
+        .map((one) => ({ ...one, claim: `${one.claim} — the code at this line does not show this` }));
+      await view.show(
+        `${demoted.length} of ${findings.blockers.length} blockers are not carried by the code they cite, so they no longer block.`,
+      );
+      return { blockers, nonBlockers: [...findings.nonBlockers, ...demoted] };
+    };
+
+    /** What the last round found that this round's code no longer shows. The judge still decides. */
+    const recheck = async (): Promise<void> => {
+      settled = "";
+      if (previous === undefined) return;
+      const claims = [...previous.blockers, ...previous.nonBlockers];
+      const failed = await weak(claims);
+      if (failed.size === 0) return;
+      const gone = claims.filter((_, index) => failed.has(index));
+      settled = `# Already answered\n\nJev re-read the code these earlier findings name, and it no longer shows them:\n\n${claimed(gone)}\n\nConfirm each from the dossier before you drop it. A finding the code still shows stays.`;
     };
 
     const post = async (findings: Findings, page: Page | null): Promise<void> => {
@@ -479,7 +562,8 @@ export default workflow({
       "approved" | "sent" | "closed" | "draft" | "queued" | "stale"
     > => {
       await synced();
-      await screened();
+      await recheck();
+      await screen();
       const gathered = await raced("gather", reader, "review-gather", gathering(), Dossier);
       if ("stop" in gathered) return gathered.stop;
 
@@ -489,7 +573,7 @@ export default workflow({
       const judged = await settle(judge, judging(gathered.value));
       if ("stop" in judged) return judged.stop;
 
-      let findings = verdictOf(judged.value);
+      let findings = await vetted(verdictOf(judged.value));
       previous = findings;
 
       /**
@@ -519,7 +603,7 @@ export default workflow({
           `The user says:\n\n${answer}\n\nAnswer it, adjust the findings where the user is right, and return the full updated findings. When the answer turns on code your dossier does not hold, ask for it in questions rather than guess.`,
         );
         if ("stop" in said) return said.stop;
-        findings = verdictOf(said.value);
+        findings = await vetted(verdictOf(said.value));
         previous = findings;
         page = await briefed(findings);
       }

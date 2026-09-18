@@ -1,19 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import {
+  aliasesOf,
+  codeAt,
+  connections,
+  briefing,
   changedIn,
   comment,
   declarations,
+  declarationsThrough,
   graphOf,
   importsIn,
   mentions,
   parseHunks,
   relatedTo,
   resolveImport,
+  signalsOf,
   sizeOf,
+  testNamesIn,
   testsFor,
+  testSummaries,
+  tiers,
+  twinsOf,
   type Report,
   type Tree,
 } from "./jev.ts";
+
+const CELLS = { correctness: 0.1, security: 0.1, reliability: 0.1, compatibility: 0.1, testGap: 0.1 };
 
 const DIFF = `diff --git a/src/a.ts b/src/a.ts
 index 1..2 100644
@@ -79,6 +91,134 @@ describe("parseHunks", () => {
       ["hunk_2", 11],
     ]);
     expect(hunks[1]?.patch).toBe("@@ -10,2 +11,2 @@\n-old\n+new");
+  });
+
+  test("splits a long hunk into windows, each starting where its first kept line lands", () => {
+    const body = Array.from({ length: 90 }, (_, index) => (index === 45 ? "-gone" : `+line ${index + 1}`));
+    const hunks = parseHunks(["@@ -0,0 +5,89 @@", ...body].join("\n"));
+    expect(hunks.map((one) => one.startLine)).toEqual([5, 45, 84]);
+    expect(hunks[1]?.patch.startsWith("@@ from line 45 of the new file @@\n+line 41")).toBe(true);
+    expect(hunks[2]?.patch.split("\n")).toHaveLength(11);
+  });
+});
+
+describe("importsIn for php", () => {
+  test("reads plain, aliased, and grouped use lines as the class they name", () => {
+    const found = importsIn(
+      `<?php\nnamespace App\\A;\n\nuse App\\Models\\Project;\nuse App\\Support\\Locked as L;\nuse App\\Domains\\{One, Two\\Three};\nuse function App\\helper;\n`,
+      "app/A/Thing.php",
+    );
+    expect(found).toEqual([
+      { module: "App\\Models\\Project", names: ["Project"] },
+      { module: "App\\Support\\Locked", names: ["Locked"] },
+      { module: "App\\helper", names: ["helper"] },
+      { module: "App\\Domains\\One", names: ["One"] },
+      { module: "App\\Domains\\Two\\Three", names: ["Three"] },
+    ]);
+  });
+});
+
+describe("aliasesOf and resolveImport", () => {
+  const files: Record<string, string> = {
+    "tsconfig.base.json": `{\n  // paths\n  "compilerOptions": { "paths": { "@app/core": ["libs/core/src/index.ts"], "@app/*": ["libs/*/src/index.ts"], } }\n}`,
+    "apps/api/composer.json": `{ "autoload": { "psr-4": { "App\\\\": "app/" } }, "autoload-dev": { "psr-4": { "Tests\\\\": "tests/" } } }`,
+    "libs/core/src/index.ts": "",
+    "libs/ui/src/index.ts": "",
+    "apps/api/app/Models/Project.php": "",
+    "apps/api/tests/Feature/ProjectTest.php": "",
+  };
+  const tree: Tree = { files: Object.keys(files), read: (file) => files[file] };
+  const aliases = aliasesOf(tree);
+  const has = (file: string): boolean => file in files;
+
+  test("reads tsconfig paths through comments and trailing commas, and composer psr-4 by folder", () => {
+    expect(aliases.paths).toEqual([
+      { key: "@app/core", target: "libs/core/src/index.ts" },
+      { key: "@app/*", target: "libs/*/src/index.ts" },
+    ]);
+    expect(aliases.namespaces).toEqual([
+      { prefix: "Tests\\", dir: "apps/api/tests" },
+      { prefix: "App\\", dir: "apps/api/app" },
+    ]);
+  });
+
+  test("lands an alias, a wildcard alias, and a php class on the tree's files", () => {
+    expect(resolveImport("libs/x/src/a.ts", "@app/core", has, aliases)).toBe("libs/core/src/index.ts");
+    expect(resolveImport("libs/x/src/a.ts", "@app/ui", has, aliases)).toBe("libs/ui/src/index.ts");
+    expect(resolveImport("libs/x/src/a.ts", "@app/none", has, aliases)).toBeUndefined();
+    expect(resolveImport("apps/api/app/A.php", "App\\Models\\Project", has, aliases)).toBe("apps/api/app/Models/Project.php");
+    expect(resolveImport("apps/api/app/A.php", "Illuminate\\Support\\Str", has, aliases)).toBeUndefined();
+  });
+});
+
+describe("declarations for php and through barrels", () => {
+  test("takes a php class as its callers see it: the declaration and each public signature", () => {
+    const said = declarations(
+      `<?php\n\nfinal class Thing\n{\n    public function __construct(private Dep $dep) {}\n\n    public function run(\n        int $a,\n    ): int {\n        return $a;\n    }\n\n    private function hidden(): void {}\n}\n`,
+      [],
+      "app/Thing.php",
+    );
+    expect(said).toContain("// line 3\nfinal class Thing");
+    expect(said).toContain("// line 7\n    public function run(\n        int $a,\n    ): int {");
+    expect(said).not.toContain("hidden");
+  });
+
+  test("follows a barrel's re-export to the file that declares the name", () => {
+    const files: Record<string, string> = {
+      "lib/index.ts": `export { run } from "./run.ts";\nexport * from "./more.ts";\nexport const HERE = 1;\n`,
+      "lib/run.ts": `export function run(): number {\n  return 1;\n}\n`,
+      "lib/more.ts": `export function more(): number {\n  return 2;\n}\n`,
+    };
+    const tree: Tree = { files: Object.keys(files), read: (file) => files[file] };
+    const graph = graphOf(tree);
+    const said = declarationsThrough(graph, tree, "lib/index.ts", ["run", "more", "HERE"]);
+    expect(said).toContain("export const HERE = 1;");
+    expect(said).toContain("// from lib/run.ts\n// line 1\nexport function run(): number {");
+    expect(said).toContain("// from lib/more.ts");
+  });
+});
+
+describe("testNamesIn and testSummaries", () => {
+  test("reads vitest names, php test methods, and attributed methods from added lines", () => {
+    const names = testNamesIn(
+      [
+        "@@ -0,0 +1,9 @@",
+        "+describe('thing', () => {",
+        "+  it('starts on save', async () => {",
+        "+  test.each(cases)('handles %s', () => {",
+        "-  it('gone', () => {",
+        "+    public function test_start_rejects_a_reused_id(): void",
+        "+    #[Test]",
+        "+    public function completes_once(): void",
+        "+    public function helper(): void",
+      ].join("\n"),
+    );
+    expect(names).toEqual([
+      "thing",
+      "starts on save",
+      "handles %s",
+      "start rejects a reused id",
+      "completes once",
+    ]);
+  });
+
+  test("puts the tests the tree ties to the file first and marks them", () => {
+    const files: Record<string, string> = {
+      "src/a.ts": "export function a(): number {\n  return 1;\n}\n",
+      "src/a.test.ts": `import { a } from "./a.ts";\n`,
+      "src/other.test.ts": "",
+    };
+    const tree: Tree = { files: Object.keys(files), read: (file) => files[file] };
+    const graph = graphOf(tree);
+    const tests = [
+      { path: "src/other.test.ts", patch: "+it('other', () => {})", cut: false },
+      { path: "src/a.test.ts", patch: "+it('a works', () => {})", cut: false },
+      { path: "src/empty.test.ts", patch: "+const x = 1;", cut: false },
+    ];
+    expect(testSummaries(graph, tests, "src/a.ts")).toEqual([
+      { path: "src/a.test.ts", targeted: true, tests: ["a works"] },
+      { path: "src/other.test.ts", targeted: false, tests: ["other"] },
+    ]);
   });
 });
 
@@ -204,25 +344,75 @@ describe("relatedTo and testsFor", () => {
   });
 });
 
+describe("signalsOf", () => {
+  test("takes the strongest per concern above the floor, and never follows a test gap", () => {
+    const matrix = [
+      { path: "a", cells: { correctness: 0.9, security: 0.1, reliability: 0.3, compatibility: 0.1, testGap: 0.95 } },
+      { path: "b", cells: { correctness: 0.8, security: 0.1, reliability: 0.2, compatibility: 0.1, testGap: 0.95 } },
+      { path: "c", cells: { correctness: 0.7, security: 0.1, reliability: 0.1, compatibility: 0.1, testGap: 0.95 } },
+      { path: "d", cells: { correctness: 0.1, security: 0.1, reliability: 0.25, compatibility: 0.1, testGap: 0.95 } },
+    ];
+    const picked = signalsOf(matrix, { floor: 0.2, perConcern: 2 });
+    expect(picked.map((one) => `${one.path}/${one.dimension}`)).toEqual([
+      "a/correctness",
+      "b/correctness",
+      "a/reliability",
+      "d/reliability",
+    ]);
+  });
+});
+
+describe("twinsOf", () => {
+  test("finds the same file under a sibling folder with the folder's tokens swapped in the name", () => {
+    const tree: Tree = {
+      files: [
+        "lib/attachment-uploads/persistence/list-attachment-uploads.ts",
+        "lib/media-uploads/persistence/list-media-uploads.ts",
+        "lib/media-uploads/persistence/other.ts",
+        "lib/shared/persistence/list-attachment-uploads.ts",
+      ],
+      read: () => "",
+    };
+    expect(twinsOf(tree, "lib/attachment-uploads/persistence/list-attachment-uploads.ts")).toEqual([
+      "lib/media-uploads/persistence/list-media-uploads.ts",
+    ]);
+  });
+});
+
 describe("comment", () => {
   const report: Report = {
     files: 2,
     tests: 1,
     context: 3,
-    signal: 0.7,
+    floor: 0.2,
+    perConcern: 3,
     matrix: [
       {
         path: "src/a.ts",
         cut: false,
+        tier: "deep",
         cells: { correctness: 0.12, security: 0.83, reliability: 0.2, compatibility: 0.31, testGap: 0.44 },
       },
       {
         path: "src/b.ts",
         cut: true,
-        cells: { correctness: 0.9, security: 0.1, reliability: 0.1, compatibility: 0.1, testGap: 0.1 },
+        tier: "skim",
+        cells: { correctness: 0.9, security: 0.1, reliability: 0.1, compatibility: 0.1, testGap: 0.8 },
       },
     ],
     profiles: [{ path: "src/a.ts", category: "behavior", priority: 2.2 }],
+    inspected: [
+      { path: "src/a.ts", dimension: "security", probability: 0.83 },
+      { path: "src/b.ts", dimension: "correctness", probability: 0.9 },
+    ],
+    connections: [
+      {
+        path: "src/a.ts",
+        tier: "deep",
+        excerpts: [{ path: "src/lib/helper.ts", role: "imported", text: "// line 6\nexport function helper() {}" }],
+      },
+      { path: "src/b.ts", tier: "skim", excerpts: [] },
+    ],
     findings: [
       {
         path: "src/a.ts",
@@ -232,26 +422,129 @@ describe("comment", () => {
         mechanism: "injection",
         severity: 2.4,
         owner: "security",
-        action: "request changes",
+      },
+      {
+        path: "src/a.ts",
+        line: 42,
+        dimension: "correctness",
+        probability: 0.12,
+        mechanism: "dataFlow",
+        severity: 1.1,
+        owner: null,
       },
     ],
-    funnel: { cells: 10, signals: 2, inspected: 2, located: 1, routed: 1 },
+    funnel: { cells: 10, inspected: 2, located: 2, routed: 1 },
   };
 
-  test("writes the numbers, the profiles, the matrix, and the findings as tables", () => {
+  test("writes the counts and names the files to read closely, and no screening numbers", () => {
     const said = comment(report, "`abc1234`");
     expect(said).toContain("## Jev pass on `abc1234`");
-    expect(said).toContain("| 2 | 1 | 2 | 1 | 1 |");
-    expect(said).toContain("10 cells screened, 2 at or above 0.70, 2 inspected, 1 located, 1 routed");
-    expect(said).toContain("| `src/a.ts` | Behavior | 2.2 / 3 |");
-    expect(said.indexOf("`src/b.ts` (patch cut)")).toBeLessThan(said.indexOf("| `src/a.ts` | 0.12"));
-    expect(said).toContain("**0.83**");
-    expect(said).toContain("| `src/a.ts:42` | Security | Injection | 2.4 / 3 | Security | request changes |");
-    expect(said).toContain("3 related files as context");
+    expect(said).toContain("| 2 | 1 | 2 | 2 |");
+    expect(said).toContain("### Read closely\n\n- `src/a.ts`");
+    expect(said).toContain("10 cells across 2 files with 3 related files as context");
+    expect(said).not.toContain("0.83");
+    expect(said).not.toContain("Matrix");
+  });
+
+  test("puts every concern that landed on one line in one row, under the most severe", () => {
+    const said = comment(report, "`abc1234`");
+    expect(said).toContain(
+      "| `src/a.ts:42` | Security: injection; Correctness: data flow | 2.4 / 3 | Security |",
+    );
+    expect(said.match(/`src\/a\.ts:42`/g)).toHaveLength(1);
+  });
+
+  test("names a file a signal pointed at where no hunk carried the evidence", () => {
+    const said = comment(report, "`abc1234`");
+    expect(said).toContain("### Suspected, not located");
+    expect(said).toContain("- `src/b.ts`");
   });
 
   test("says when no finding held up", () => {
     const said = comment({ ...report, findings: [] }, "the working tree");
     expect(said).toContain("No signal held up to the evidence in its hunks.");
+  });
+
+  test("briefs the reader on where to look without claiming a defect", () => {
+    const said = briefing(report);
+    expect(said).toContain("this is where to look, not what is wrong");
+    expect(said).toContain("- `src/a.ts:42` — Security: injection; Correctness: data flow");
+    expect(said).toContain("## Suspected, no hunk carried it\n\n- `src/b.ts`");
+    expect(said).toContain("## Rated as needing careful review\n\n- `src/a.ts`");
+  });
+});
+
+describe("connections and tiers", () => {
+  const report: Report = {
+    files: 3,
+    tests: 0,
+    context: 2,
+    floor: 0.2,
+    perConcern: 3,
+    matrix: [
+      { path: "src/deep.ts", cut: false, tier: "deep", cells: CELLS },
+      { path: "src/skim.ts", cut: false, tier: "skim", cells: CELLS },
+      { path: "src/gen.ts", cut: false, tier: "ignore", cells: CELLS },
+    ],
+    profiles: [],
+    inspected: [],
+    connections: [
+      { path: "src/skim.ts", tier: "skim", excerpts: [{ path: "src/x.ts", role: "importer", text: "// line 4\nskim()" }] },
+      { path: "src/deep.ts", tier: "deep", excerpts: [{ path: "src/y.ts", role: "imported", text: "// line 9\nexport function y() {}" }] },
+      { path: "src/gen.ts", tier: "ignore", excerpts: [{ path: "src/z.ts", role: "importer", text: "gen()" }] },
+    ],
+    findings: [],
+    funnel: { cells: 15, inspected: 0, located: 0, routed: 0 },
+  };
+
+  test("carries the deep files first, names each excerpt's relation, and leaves the ignored out", () => {
+    const said = connections(report);
+    expect(said.indexOf("## src/deep.ts (deep)")).toBeLessThan(said.indexOf("## src/skim.ts (skim)"));
+    expect(said).toContain("### src/y.ts — it calls this");
+    expect(said).toContain("### src/x.ts — this calls it");
+    expect(said).not.toContain("src/gen.ts");
+    expect(said).toContain("Do not grep or re-read these");
+  });
+
+  test("nothing to carry renders nothing", () => {
+    expect(connections({ ...report, connections: [] })).toBe("");
+  });
+
+  test("lists every changed file under its tier", () => {
+    const said = tiers(report);
+    expect(said).toContain("## Ignore\n\n- `src/gen.ts`");
+    expect(said).toContain("## Deep\n\n- `src/deep.ts`");
+    expect(said).toContain("## Skim\n\n- `src/skim.ts`");
+  });
+});
+
+describe("codeAt", () => {
+  const tree: Tree = {
+    files: ["src/a.ts"],
+    read: (file) => (file === "src/a.ts" ? Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join("\n") : undefined),
+  };
+
+  const big: Tree = {
+    files: ["src/big.ts"],
+    read: () => Array.from({ length: 4000 }, (_, index) => `line ${index + 1} ${"x".repeat(40)}`).join("\n"),
+  };
+
+  test("sends a small file whole, so a claim about ordering or scope can be seen", () => {
+    const said = codeAt(tree, "src/a.ts:30") ?? "";
+    expect(said).toContain("// src/a.ts, whole, from line 1");
+    expect(said).toContain("\nline 1\n");
+    expect(said).toContain("line 60");
+  });
+
+  test("centres a wide window on the claim's line when the file is too big to send whole", () => {
+    const said = codeAt(big, "src/big.ts:2000", 10) ?? "";
+    expect(said).toContain("// src/big.ts, from line 1995 of 4000");
+    expect(said).toContain("line 2000 ");
+    expect(said.split("\n")).toHaveLength(11);
+  });
+
+  test("starts at the top when the claim names no line, and gives up on a file the tree lacks", () => {
+    expect(codeAt(big, "src/big.ts", 4)).toContain("from line 1 of 4000");
+    expect(codeAt(tree, "src/gone.ts:3")).toBeUndefined();
   });
 });
