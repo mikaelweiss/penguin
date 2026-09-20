@@ -1,135 +1,92 @@
-# Penguin v2: the goal
+# The goal
 
-Not a restatement of the request. This is my read of what is underneath it,
-what to measure, and what v2 is not.
+## What you actually want
 
-## The root of it
+You want to own something that produces value without your continuous
+presence. That is the difference between an asset and a job. A business
+that needs you every day is a job. A business that runs on your judgment
+but not on your hours is an asset.
 
-You want leverage: a system that runs the recurring work of a business, on
-its own, well enough that you can own that business on the attention you
-have left after a day job.
+Penguin v2 is the mechanism for turning your judgment into an asset:
+something that keeps operating, in your taste, at your quality bar, on the
+attention you actually have.
 
-The scarce resource is not compute, and it is not even time in the raw. It
-is attention, and specifically the cost of switching into a task you did not
-start, loading its context, and making a decision. Every existing tool
-optimizes for output per hour of an engaged operator. You need output per
-minute of a distracted one.
+## The measure
 
-So the north star is one ratio:
+Not output per hour. Output per unit of your attention, where attention is
+counted in interruptions and context switches, not minutes. One weekly
+review of twenty minutes costs less attention than five two-minute
+questions across a week, even though it is more time.
 
-    business output / minutes of your attention
+So the product is judged on two numbers: how much gets done, and how rarely
+and how well it needs you. Everything in v2 moves one of those two.
 
-Everything in v2 either raises the numerator (more runs, more done, more
-autonomy) or lowers the denominator (fewer interruptions, better-shaped
-ones, defaults, digests). A feature that does neither does not belong.
+## The operating model
 
-## Why the existing things do not get there
+The system works the way a small, trusted team works:
 
-Three families of tools, three failure modes:
+- **Responsibilities, not tasks.** Each agent holds a standing
+  responsibility: keep the app free of regressions, grow the audience,
+  keep the pull request queue moving, think about where the business goes
+  next. A responsibility has a goal, a scope, a boundary, and a rhythm. It
+  never finishes. Tasks are what the agent does inside it.
+- **Rigid where it must be, free where it can be.** Inside a
+  responsibility, some sequences are non-negotiable: the checklist that
+  runs before every release, the steps of a review, the order of a
+  migration. Those are procedures, they are small, and they run exactly as
+  written every time. Everything around them is the agent's judgment in
+  service of the goal.
+- **Act, then report.** Within its boundary an agent acts, records what it
+  did and why, and leaves a window to reverse. It asks only when the
+  boundary is reached or the cost of being wrong is high and irreversible.
+- **Accumulation.** Each agent keeps memory across its work: what it
+  learned, what you said, what went wrong. It gets better over months. The
+  business itself has a shared context that every agent reads: what the
+  products are, who the customers are, what quality means here.
+- **Review as the ritual.** Your involvement is a scheduled review. You
+  read what happened, what was decided for you, and the few things that
+  genuinely need you, each with a default already chosen. You sample the
+  work, you adjust trust, you add to the shared context. That is the whole
+  job.
+- **Trust that grows.** Each agent has a track record per kind of action.
+  You widen its boundary as the record earns it. Autonomy is widest where
+  mistakes are cheap to reverse.
+- **Self-sufficient.** Agents have their own machines, credentials, tools,
+  and access to information. They do not borrow yours. They can operate
+  penguin itself, so the system can extend and repair itself.
 
-1. **Chat-shaped agents** (a coding harness, a bot you message). Great
-   judgment, no process, no state, no schedule. They are needy by
-   construction, because the conversation is the state and you are the
-   scheduler.
-2. **Workflow builders** (Zapier, n8n, Make). Deterministic, event-driven,
-   good state. No judgment, and the configuration is the product, so a
-   complicated process is a complicated diagram you maintain by hand.
-3. **Agent frameworks and v1 penguin**. Code, so anything is possible. But
-   the author writes at the systems level, every process is bespoke, and
-   the engineer is you.
+## Why the existing tools do not do this
 
-None of them holds all three things at once: durable process state, real
-judgment where it is needed, and an attention model for the owner. v2 is
-the tool that holds all three, and the third one is the one nobody else
-builds.
+Chat agents are brilliant and stateless. Every conversation is a new hire.
+They ask because they own nothing.
 
-## What "runs my business" means, concretely
+Workflow tools own state and schedules but have no judgment, so every
+edge case is a diagram you maintain. The configuration is the job.
 
-A business is a set of recurring processes. Each has a trigger (a schedule,
-an event in the world, a person), steps that are mechanical, steps that
-need judgment, and a small number of decisions that are genuinely the
-owner's. That is true of a software team, a marketing function, a support
-queue, and finance. The domain changes the tools and the vocabulary; it
-does not change the shape.
+Agent frameworks let you build anything, which means you build everything.
+The engineer is you, and v1 is proof of what that costs.
 
-v2 succeeds when you can:
+None of them hold a goal, accumulate, calibrate trust, or design for a
+person who shows up once a week. That is the whole gap, and it is not a
+technical gap. It is an operating model that nobody has built into a tool.
 
-- Describe a process in prose, once, and have it run on its schedule or its
-  events without you touching it again unless it is wrong.
-- Trust that the mechanical parts are mechanical: the same input produces
-  the same step, in the same order, every time, and the AI never gets to
-  skip a step it found boring.
-- Trust that the judgment parts are held to a shape: a typed result, a
-  bounded budget, a declared authority, an artifact you can audit later.
-- Open one place, at a time you choose, and see what happened, what was
-  decided for you, and the few things that actually need you, each with a
-  default already chosen and a deadline after which the default happens.
-- Give an agent a machine that is not yours, so the work that needs a
-  browser, a build, or a long night runs while your laptop is closed.
-- Do all of the above from a shell, so an agent can operate penguin the way
-  you would, and so nothing is trapped behind a screen.
+## Why this is worth building, and why now
 
-## Agents or workflows: which is the unit
+The models are good enough to hold a responsibility if the system around
+them holds the goal, the memory, the boundary, and the feedback. The
+missing piece is that system. v1 built the mechanical layer it needs and
+proved it works. The side business is the honest test: it must run on the
+attention you have after work, or it is not leverage.
 
-Neither alone. Three things, each the unit of one concern:
-
-| Concern         | Unit         | What it is                                                      |
-| --------------- | ------------ | --------------------------------------------------------------- |
-| Definition      | **Process**  | What should happen, triggered by what, in what order, with what checks. |
-| Accountability  | **Role**     | A named agent: instructions, memory, tools, authority, budget, machine. |
-| State           | **Instance** | One live occurrence of a process, with its current step and history.   |
-
-You talk in roles ("my QA person found a regression"). The system runs
-processes. The engine holds instances. A role can serve many processes; a
-process can hand steps to several roles. This is how a company already
-works, and it is the reason "employees" felt right in the blurb and
-"workflows" felt wrong: v1 had processes and instances fused into one
-function, and no roles at all.
-
-## The automation and judgment boundary, as a rule
-
-Deterministic, always: fetching, transforming, routing, scheduling,
-deduplicating, retrying, recording, enforcing budgets and authority,
-deciding whether a step ran. If a step can be a function, it is a function,
-and a model never gets to do it.
-
-Judgment, only: classifying something ambiguous, writing for a human,
-investigating an open question, choosing between options when the criteria
-are soft, noticing what was not asked. That is what a role does, and it does
-it inside a step with a typed output and a declared authority.
-
-The person: the decisions with real consequences that no default covers, and
-the sampling of everything else. Every question that reaches you carries
-what will happen if you say nothing.
-
-This rule is the thing that keeps attention low. Every tool that mixes the
-two produces noise, because a model doing a mechanical step makes mechanical
-mistakes you have to catch, and a script doing a judgment step asks you the
-question it cannot answer.
-
-## Why build it, and why you
-
-The engine half is already proven by v1: adapters as bridges, faults as
-gates, typed agent turns, replayable traces. That was the hard, unglamorous
-half and it works. What is missing is the operator half: durable state,
-events, roles, an inbox, and a runtime that is not your laptop. Nobody
-else's tool has an operator half designed around a person with twenty
-minutes a day, because nobody else's tool is built by that person.
-
-The side business is the forcing function. If v2 can run it on the attention
-you actually have, it can run a team's processes at work with attention to
-spare. The reverse is not true, and that is why the personal case is the
-right one to design for.
+If it can run a one-person business on twenty minutes a week, it can run a
+team's processes at work with attention to spare. The reverse is not true.
 
 ## What v2 is not
 
-- Not a workflow language for developers. TypeScript stays for adapters,
-  tools, and custom scripts. It stops being how a process is authored.
-- Not a coding agent harness. It will run coding processes, and it will not
-  be judged on how nice the diff viewer is.
-- Not a general agent framework. It is opinionated about what a step may
-  be, what a role may do, and how a person is asked. Those opinions are the
-  product.
-- Not "any business process" on day one. It is a small fixed vocabulary
-  that can express a QA loop, a PR review, and a weekly research report,
-  proven on those three, then widened.
+- Not a workflow language. You will not write procedures in code unless
+  you want to, and the ones you write will be short.
+- Not a coding harness. Software work is one responsibility among many.
+- Not a chat with an agent. Conversations happen in the review, on your
+  schedule, with context already loaded.
+- Not general on day one. It should run one real responsibility for the
+  side business end to end, with the review ritual, before it runs two.
