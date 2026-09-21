@@ -23,6 +23,28 @@ export default workflow({
       .min(1)
       .default(3)
       .describe("how many times the reviewer sends a change back before the run gives up"),
+    branch: z
+      .string()
+      .default("")
+      .describe("the branch to carry on with, empty to let triage name a new one")
+      .meta({ internal: true }),
+    tasks: z
+      .array(z.string())
+      .default([])
+      .describe("the split to work, empty to let triage make one")
+      .meta({ internal: true }),
+    done: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe("how many of the tasks are built already")
+      .meta({ internal: true }),
+    acceptance: z
+      .string()
+      .default("")
+      .describe("what the tasks already built accept on, so the pull request states all of it")
+      .meta({ internal: true }),
   }),
 
   async run(ctx) {
@@ -31,6 +53,10 @@ export default workflow({
       ticket: ctx.params.ticket,
       base: ctx.params.base,
       rounds: ctx.params.rounds,
+      branch: ctx.params.branch,
+      tasks: ctx.params.tasks,
+      done: ctx.params.done,
+      acceptance: ctx.params.acceptance,
     });
     if (!worked.done) return nowhere;
 

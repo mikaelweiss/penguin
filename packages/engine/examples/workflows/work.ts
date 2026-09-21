@@ -7,7 +7,7 @@ import { openWorktree } from "../helpers/worktree.ts";
 import commit from "./commit.ts";
 import implement from "./implement.ts";
 import plan from "./plan.ts";
-import triage from "./triage.ts";
+import triage, { type Triaged } from "./triage.ts";
 import walkthrough from "./walkthrough.ts";
 
 const Ack = z.enum(["ok"]);
@@ -43,6 +43,12 @@ async function settleGates(ctx: Ctx<unknown>): Promise<void> {
   await ctx.gates.write(answer === "approve" ? proposed : answer);
 }
 
+/** The split an earlier run settled, so continuing its branch costs no triage turn. */
+function carried(branch: string, tasks: string[]): Triaged | undefined {
+  if (branch === "" || tasks.length === 0) return undefined;
+  return { actionable: true, reason: "", branch, tasks };
+}
+
 export default workflow({
   description: "triage a ticket, then plan and implement each task in a worktree",
   params: z.object({
@@ -60,6 +66,28 @@ export default workflow({
       .min(1)
       .default(3)
       .describe("how many times the reviewer sends a change back before the run gives up"),
+    branch: z
+      .string()
+      .default("")
+      .describe("the branch to carry on with, empty to let triage name a new one")
+      .meta({ internal: true }),
+    tasks: z
+      .array(z.string())
+      .default([])
+      .describe("the split to work, empty to let triage make one")
+      .meta({ internal: true }),
+    done: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe("how many of the tasks are built already")
+      .meta({ internal: true }),
+    acceptance: z
+      .string()
+      .default("")
+      .describe("what the tasks already built accept on, so the pull request states all of it")
+      .meta({ internal: true }),
   }),
 
   async run(ctx) {
@@ -81,7 +109,7 @@ export default workflow({
 
     // Fetched once, so every stage after this reads the same ticket and none refetches it.
     const ticket = await resolveTicket(ctx, params.ticket);
-    const triaged = await call(ctx, triage, { ticket });
+    const triaged = carried(params.branch, params.tasks) ?? (await call(ctx, triage, { ticket }));
     if (!triaged.actionable) {
       await view.ask(`Not actionable: ${triaged.reason}`, Ack);
       return nothing;
@@ -97,9 +125,9 @@ export default workflow({
     const before = await ctx.gates.run({ cwd: dir });
     await view.show(before.green ? "baseline: green" : "baseline: already red");
 
-    const checks: string[] = [];
+    const checks: string[] = params.acceptance === "" ? [] : [params.acceptance];
     let tasks = triaged.tasks;
-    for (let index = 0; index < tasks.length; index++) {
+    for (let index = params.done; index < tasks.length; index++) {
       await view.show(`task ${index + 1} of ${tasks.length}`);
       // Where this task starts, so its walkthrough reads this change and not the whole branch.
       const start = await vcs.head({ cwd: dir });
