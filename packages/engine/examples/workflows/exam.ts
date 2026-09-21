@@ -122,7 +122,11 @@ function proposal(assessed: Assessment): string {
 }
 
 /** What a turn put to the person instead of the answer the key holds. */
-function askedInstead(out: z.infer<typeof PlanOut>): string {
+function askedInstead(out: {
+  decide?: { question: string };
+  resplit?: { reason: string };
+  blocked?: { questions: string[] };
+}): string {
   if (out.decide !== undefined) return out.decide.question;
   if (out.resplit !== undefined) return out.resplit.reason;
   return (out.blocked?.questions ?? []).join("; ");
@@ -264,7 +268,11 @@ async function tryPlan(ctx: Ctx<Given>, picked: Picked): Promise<Graded> {
       return out;
     };
     if (held.skill === "triage") {
-      const candidate = split((await replayed(TriageOut)).tasks);
+      const out = await replayed(TriageOut);
+      if (out.result === undefined) {
+        return graded(failed(`the turn asked instead of answering: ${askedInstead(out)}`), "");
+      }
+      const candidate = split(out.result.tasks);
       return graded(await judgePlan(ctx, held, candidate), candidate);
     }
     const out = await replayed(PlanOut);

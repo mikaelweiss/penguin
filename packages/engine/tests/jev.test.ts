@@ -137,7 +137,7 @@ test("a ticket that is not clear says what it leaves open", async () => {
 
   const said = await bench.jev.triage.ticket({ ticket: "make it better" });
 
-  expect(said).toEqual({ actionable: false, reason: "it says no outcome" });
+  expect(said).toEqual({ actionable: false, reason: "it says no outcome", missing: "goal" });
 });
 
 test("feedback that directs the author asks, and the strongest fact says how", async () => {

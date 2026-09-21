@@ -1105,14 +1105,18 @@ export default adapter({
       triage: {
         /**
          * Whether a ticket is ready to work on: its goal is clear enough that a planner could
-         * start from it. `reason` is what it leaves open when it is not.
+         * start from it. `reason` is what it leaves open when it is not, and `missing` names the
+         * kind, so a caller can tell a vague ticket from one pointing where Jev cannot read.
          */
-        async ticket(options: { ticket: string }): Promise<{ actionable: boolean; reason: string }> {
+        async ticket(options: {
+          ticket: string;
+        }): Promise<{ actionable: boolean; reason: string; missing?: Missing }> {
           const spent = fresh();
           const answers = await ask(spent, { ticket: options.ticket }, TICKET);
           noted(spent);
           if (answers.clear.noul >= CLEAR) return { actionable: true, reason: "the goal is clear enough to build" };
-          return { actionable: false, reason: MISSING_REASONS[answers.missing.choice as Missing] };
+          const missing = answers.missing.choice as Missing;
+          return { actionable: false, reason: MISSING_REASONS[missing], missing };
         },
 
         /**
