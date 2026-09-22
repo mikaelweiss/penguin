@@ -116,7 +116,8 @@ function start(
   piped: boolean,
 ): { child: ChildProcess; exited: Promise<CommandResult> } {
   const stdio: ("ignore" | "pipe")[] = [piped ? "pipe" : "ignore", "pipe", "pipe"];
-  const env = options?.env === undefined ? process.env : { ...process.env, ...options.env };
+  // A child that trusts the inherited PWD over its own cwd lands in the launcher's folder.
+  const env = { ...process.env, ...options?.env, PWD: cwd };
   const child: ChildProcess =
     args === undefined
       ? spawn(cmd, { shell: true, cwd, stdio, env })

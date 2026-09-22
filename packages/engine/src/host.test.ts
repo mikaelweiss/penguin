@@ -183,6 +183,21 @@ test("env reaches the child on top of the run's own environment", async () => {
   expect(done.stdout).toBe(`set:${process.env["HOME"] ?? ""}`);
 });
 
+test("PWD names the folder the child runs in, not the launcher's", async () => {
+  const dir = tempDir();
+  const held = process.env["PWD"];
+  process.env["PWD"] = "/the/launcher/was/here";
+  try {
+    const host = hostFor(dir);
+    const done = await host.exec(["/usr/bin/env"]);
+    const said = done.stdout.split("\n").find((line) => line.startsWith("PWD="));
+    expect(said).toBe(`PWD=${dir}`);
+  } finally {
+    if (held === undefined) delete process.env["PWD"];
+    else process.env["PWD"] = held;
+  }
+});
+
 test("spawn keeps stdin open across writes and settles when it ends", async () => {
   const host = hostFor(tempDir());
   let streamed = "";
