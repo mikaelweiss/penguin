@@ -409,6 +409,15 @@ test("a push mid-round starts over on a fresh reviewer and the same worktree", a
   expect(bench.trees()).toBe(1);
 });
 
+test("a round a push overtakes posts nothing, so the next round's comment carries the overview", async () => {
+  const bench = pullRequest({ overtaken: true });
+
+  await bench.run();
+
+  expect(bench.comments).toEqual([{ body: expect.stringContaining("<!-- penguin:overview -->") }]);
+  expect((bench.comments[0] as { body: string }).body).toContain("### What changes");
+});
+
 test("a push after the post opens a second round on a fresh reviewer", async () => {
   const bench = pullRequest({ rounds: 2 });
 

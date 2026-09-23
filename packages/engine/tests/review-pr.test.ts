@@ -5,6 +5,7 @@ import reviewPr from "../examples/workflows/review-pr.ts";
 type Change = { kind: string; state?: string };
 type Tree = { path: string; name: string };
 type Removed = { path: string; force: boolean };
+type Note = { author: string; at: string; body: string };
 
 type Options = {
   /** The pull requests the run can read, by number. The reviewed one defaults to open. */
@@ -19,6 +20,8 @@ type Options = {
   blind?: boolean;
   /** What the reviewer returns each round, so a round can block instead of approving. */
   blockers?: { claim: string; where: string }[][];
+  /** The comments the PR holds when the review starts. */
+  notes?: Note[];
 };
 
 const REVIEWED = "1200";
@@ -30,6 +33,7 @@ function harness(options: Options) {
   const reviewers: string[] = [];
   const posts: string[] = [];
   const prompts: string[] = [];
+  const asked: string[] = [];
   /** Which worktrees were alive each time the run parked to wait. */
   const parked: string[][] = [];
 
@@ -100,7 +104,7 @@ function harness(options: Options) {
   const github = {
     pr: {
       get: (pr: string) => Promise.resolve(prOf(pr)),
-      comments: () => Promise.resolve([]),
+      comments: () => Promise.resolve([...(options.notes ?? [])]),
       diff: () => Promise.resolve("+++ b/src/one.ts\n+ added"),
       comment: (_pr: string, body: { body: string }) => {
         posts.push(body.body);
@@ -127,7 +131,10 @@ function harness(options: Options) {
       shown.push(text);
       return Promise.resolve();
     },
-    ask: () => Promise.resolve("send"),
+    ask: (text: string) => {
+      asked.push(text);
+      return Promise.resolve("send");
+    },
     status: (_text: string, opts?: { idle?: boolean }) => {
       if (opts?.idle !== true) return Promise.resolve();
       parked.push(held.map((tree) => tree.name));
@@ -145,6 +152,7 @@ function harness(options: Options) {
     reviewers,
     posts,
     prompts,
+    asked,
     parked,
     held: () => held.map((tree) => tree.name),
     run: () =>
@@ -186,6 +194,52 @@ test("the comment carries what changes, how to test it, and the findings", async
   expect(run.posts[0]).toContain("### How to test");
   expect(run.posts[0]).toContain("### Blockers\n\nnone");
   expect(run.posts[0]).toContain("### Non-blockers\n\nnone");
+});
+
+test("the first comment carries the overview under its marker", async () => {
+  const run = harness({});
+
+  await run.run();
+
+  expect(run.posts[0]).toStartWith("<!-- penguin:overview -->");
+});
+
+test("a later round's comment carries the findings without the overview", async () => {
+  const run = harness({ changes: [{ kind: "commits" }] });
+
+  await run.run();
+
+  expect(run.posts).toHaveLength(2);
+  expect(run.posts[1]).toBe("### Blockers\n\nnone\n\n### Non-blockers\n\nnone");
+});
+
+test("a PR that already holds the overview gets none on its first comment", async () => {
+  const run = harness({
+    notes: [{ author: "pip", at: "2026-09-01", body: "<!-- penguin:overview -->\n\n### What changes\n\nnone" }],
+  });
+
+  await run.run();
+
+  expect(run.posts).toEqual(["### Blockers\n\nnone\n\n### Non-blockers\n\nnone"]);
+});
+
+test("the send gate shows the comment as it posts, less the marker", async () => {
+  const run = harness({
+    changes: [{ kind: "commits" }],
+    blockers: [
+      [{ claim: "the null check is missing", where: "src/one.ts:3" }],
+      [{ claim: "the null check is missing", where: "src/one.ts:3" }],
+    ],
+  });
+
+  await run.run();
+
+  expect(run.asked).toEqual([
+    `${run.posts[0]?.replace("<!-- penguin:overview -->\n\n", "")}\n\nPost this without approving?`,
+    `${run.posts[1]}\n\nPost this without approving?`,
+  ]);
+  expect(run.asked[0]).toContain("### What changes");
+  expect(run.asked[1]).not.toContain("### What changes");
 });
 
 test("the teardown forces, so a tree with a stray edit in it still goes", async () => {

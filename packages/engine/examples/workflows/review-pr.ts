@@ -9,6 +9,9 @@ import { openWorktree } from "../helpers/worktree.ts";
 /** What every review worktree is named under, and what the sweep reads a PR number back out of. */
 const PREFIX = "review-pr-";
 
+/** What the comment carrying the overview holds, so a run that starts over reads it off the PR. */
+const OVERVIEW_MARK = "<!-- penguin:overview -->";
+
 /**
  * How sure the evidence check must be before its answer counts. Below it the claim stands as
  * the reviewer wrote it, because an unsure check is no evidence either way.
@@ -75,14 +78,25 @@ function flows(found: Findings["flows"]): string {
     .join("\n\n");
 }
 
-/** The findings as the comment the author reads. */
-export function report(findings: Findings): string {
+/** What the change does and how to try it. The PR hears it once, on the first comment posted. */
+function overview(findings: Findings): string {
   return [
     `### What changes\n\n${behaviors(findings.behaviors)}`,
     `### How to test\n\n${flows(findings.flows)}`,
+  ].join("\n\n");
+}
+
+/** What the author must and may change. Every comment carries it. */
+function verdict(findings: Findings): string {
+  return [
     `### Blockers\n\n${claimed(findings.blockers)}`,
     `### Non-blockers\n\n${claimed(findings.nonBlockers)}`,
   ].join("\n\n");
+}
+
+/** The findings in full, as the first comment on a PR carries them. */
+export function report(findings: Findings): string {
+  return `${overview(findings)}\n\n${verdict(findings)}`;
 }
 
 function noted(notes: Note[]): string {
@@ -225,6 +239,7 @@ export default workflow({
     let owed = true;
     let rounds = 0;
     let posted = 0;
+    let introduced = false;
     let head = "";
     let dir = "";
     let reviewer = "";
@@ -372,8 +387,18 @@ export default workflow({
       return { ...findings, blockers, nonBlockers: [...nonBlockers, ...demoted] };
     };
 
+    // The watch may never report our own comment, so a post marks the overview sent here too.
+    const overviewed = (): boolean =>
+      introduced || notes.some((note) => note.body.includes(OVERVIEW_MARK));
+
+    /** The comment as the author reads it: the overview on the first one only. */
+    const drafted = (findings: Findings): string =>
+      overviewed() ? verdict(findings) : report(findings);
+
     const post = async (findings: Findings): Promise<void> => {
-      await github.pr.comment(params.pr, { body: report(findings) });
+      const body = overviewed() ? verdict(findings) : `${OVERVIEW_MARK}\n\n${report(findings)}`;
+      await github.pr.comment(params.pr, { body });
+      introduced = true;
       posted += 1;
     };
 
@@ -448,7 +473,7 @@ export default workflow({
       previous = findings;
       while (findings.blockers.length > 0) {
         const answer = await view.ask(
-          `${report(findings)}\n\nPost this without approving?`,
+          `${drafted(findings)}\n\nPost this without approving?`,
           z.union([z.enum(["send"]), z.string()]),
         );
         if (answer === "send") {
