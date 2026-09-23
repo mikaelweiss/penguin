@@ -17,6 +17,17 @@ const OPENED_FIELDS = "number,baseRefName,url";
 const REQUESTED_FIELDS = "number,title,url";
 const REQUESTED_LIMIT = 100;
 const POLL_MS = 30_000;
+/** gh posts under your own login, so the text itself says a teammate wrote it. */
+export const BYLINE = "**Pip** · AI teammate, via Penguin";
+
+export function signed(body: string): string {
+  return body.startsWith(BYLINE) ? body : `${BYLINE}\n\n${body}`;
+}
+
+/** A signed approval with nothing else to say still reads as bare. */
+function unsigned(body: string): string {
+  return body.startsWith(BYLINE) ? body.slice(BYLINE.length).trim() : body;
+}
 
 type Issue = {
   number: number;
@@ -166,17 +177,17 @@ export function changedBetween(last: Watched, snap: Watched, me: string): Change
   if (snap.state !== last.state && snap.state !== "OPEN") {
     found.push({ kind: "closed", state: snap.state });
   }
-  const signed = (snap.reviews ?? []).slice((last.reviews ?? []).length);
-  if (signed.some((one) => one.state === "APPROVED" && one.author?.login === me)) {
+  const judged = (snap.reviews ?? []).slice((last.reviews ?? []).length);
+  if (judged.some((one) => one.state === "APPROVED" && one.author?.login === me)) {
     found.push({ kind: "approved" });
   }
-  for (const one of signed) {
+  for (const one of judged) {
     if (one.author?.login === me) continue;
     found.push({
       kind: "reviewed",
       author: one.author?.login ?? "",
       state: one.state ?? "",
-      body: (one.body ?? "").trim(),
+      body: unsigned((one.body ?? "").trim()),
     });
   }
   if (snap.isDraft && !last.isDraft) found.push({ kind: "draft" });
@@ -457,7 +468,7 @@ export default adapter({
               "--body-file",
               "-",
             ],
-            { cwd: options.cwd, stdin: options.body },
+            { cwd: options.cwd, stdin: signed(options.body) },
           );
           if (made.code === 0) {
             return { landed: false, pr: await prOf(made.stdout.trim()), created: true };
@@ -478,10 +489,8 @@ export default adapter({
           return done.stdout;
         },
         async comment(pr: string, options: { body: string } | { bodyFile: string }): Promise<void> {
-          const done =
-            "body" in options
-              ? await gh(["pr", "comment", pr, "--body-file", "-"], { stdin: options.body })
-              : await gh(["pr", "comment", pr, "--body-file", options.bodyFile]);
+          const body = "body" in options ? options.body : fs.readFileSync(options.bodyFile, "utf8");
+          const done = await gh(["pr", "comment", pr, "--body-file", "-"], { stdin: signed(body) });
           if (done.code !== 0) throw new Fault(reasonOf(done));
         },
         /** Answers one review thread. Resolving it stays with whoever opened it. */
@@ -494,12 +503,12 @@ export default adapter({
             "-f",
             `thread=${thread}`,
             "-f",
-            `body=${body}`,
+            `body=${signed(body)}`,
           ]);
           if (done.code !== 0) throw new Fault(reasonOf(done));
         },
         async approve(pr: string): Promise<void> {
-          const done = await gh(["pr", "review", pr, "--approve"]);
+          const done = await gh(["pr", "review", pr, "--approve", "--body", BYLINE]);
           if (done.code !== 0) throw new Fault(reasonOf(done));
         },
         /** A handle, not a snapshot, so the trace never replays a poll. A failed poll retries quietly. */

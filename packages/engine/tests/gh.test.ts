@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { CommandResult, Host } from "../src/core/adapter.ts";
-import definition, { changedBetween, movesOf } from "../examples/adapters/gh.ts";
+import definition, { BYLINE, changedBetween, movesOf, signed } from "../examples/adapters/gh.ts";
 
 const ME = "mikael";
 
@@ -41,6 +44,16 @@ test("your own approval ends a review and is not fed back as feedback", () => {
   const before = snapshot();
   const after = snapshot({ reviews: [{ author: { login: ME }, state: "APPROVED", body: "" }] });
   expect(changedBetween(before, after, ME)).toEqual([{ kind: "approved" }]);
+});
+
+test("a teammate's signed approval with nothing else to say still reads as bare", () => {
+  const before = snapshot();
+  const after = snapshot({
+    reviews: [{ author: { login: "reviewer" }, state: "APPROVED", body: BYLINE }],
+  });
+  expect(changedBetween(before, after, ME)).toEqual([
+    { kind: "reviewed", author: "reviewer", state: "APPROVED", body: "" },
+  ]);
 });
 
 test("reviews already seen do not arrive twice", () => {
@@ -139,10 +152,12 @@ test("a poll the branch cannot be read on reports nothing and keeps watching", a
 function fakeGh(replies: CommandResult | CommandResult[]): {
   gh: ReturnType<typeof definition.build>;
   args: string[][];
+  stdins: (string | undefined)[];
   opened: string[];
 } {
   const canned = Array.isArray(replies) ? replies : [replies];
   const args: string[][] = [];
+  const stdins: (string | undefined)[] = [];
   const opened: string[] = [];
   const host: Host = {
     cwd: "/",
@@ -160,12 +175,13 @@ function fakeGh(replies: CommandResult | CommandResult[]): {
       throw new Error("no spawn in this test");
     },
     shell: async () => ({ code: 0, stdout: "", stderr: "" }),
-    exec: async (argv) => {
+    exec: async (argv, options) => {
       args.push(argv);
+      stdins.push(options?.stdin);
       return canned[Math.min(args.length, canned.length) - 1] ?? { code: 0, stdout: "", stderr: "" };
     },
   };
-  return { gh: definition.build(host), args, opened };
+  return { gh: definition.build(host), args, stdins, opened };
 }
 
 const PR_URL = "https://github.com/o/r/pull/9";
@@ -313,10 +329,53 @@ test("a reply carries the thread and the body to the mutation", async () => {
   const { gh, args } = fakeGh({ code: 0, stdout: "{}", stderr: "" });
   await gh.pr.reply("T_one", "the code already covers this");
   expect(args[0]).toContain("thread=T_one");
-  expect(args[0]).toContain("body=the code already covers this");
+  expect(args[0]).toContain(`body=${BYLINE}\n\nthe code already covers this`);
 });
 
 test("a graphql call that fails is a fault, not an empty list", async () => {
   const { gh } = fakeGh({ code: 1, stdout: "", stderr: "gh: not found" });
   expect(gh.pr.threads(PR_URL)).rejects.toThrow("gh: not found");
+});
+
+test("signing puts the byline and a blank line over the text", () => {
+  expect(signed("looks good")).toBe("**Pip** · AI teammate, via Penguin\n\nlooks good");
+});
+
+test("text already signed is not signed twice", () => {
+  expect(signed(signed("looks good"))).toBe(signed("looks good"));
+});
+
+test("a comment goes up signed", async () => {
+  const { gh, args, stdins } = fakeGh({ code: 0, stdout: "", stderr: "" });
+  await gh.pr.comment(PR_URL, { body: "one finding" });
+  expect(args[0]).toEqual(["gh", "pr", "comment", PR_URL, "--body-file", "-"]);
+  expect(stdins[0]).toBe(`${BYLINE}\n\none finding`);
+});
+
+test("a comment from a file goes up signed, read from the file", async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "penguin-gh-")), "report.md");
+  fs.writeFileSync(file, "one finding");
+  const { gh, args, stdins } = fakeGh({ code: 0, stdout: "", stderr: "" });
+  await gh.pr.comment(PR_URL, { bodyFile: file });
+  expect(args[0]).toEqual(["gh", "pr", "comment", PR_URL, "--body-file", "-"]);
+  expect(stdins[0]).toBe(`${BYLINE}\n\none finding`);
+});
+
+test("a pull request ensure opens goes up with its body signed", async () => {
+  const { gh, args, stdins } = fakeGh([
+    NONE,
+    NONE,
+    { code: 0, stdout: `${PR_URL}\n`, stderr: "" },
+    prJson(),
+    NO_QUEUE,
+  ]);
+  await gh.pr.ensure({ head: "feature", base: "main", title: "t", body: "why this change" });
+  expect(args[2]).toContain("create");
+  expect(stdins[2]).toBe(`${BYLINE}\n\nwhy this change`);
+});
+
+test("an approval carries the byline as its body", async () => {
+  const { gh, args } = fakeGh({ code: 0, stdout: "", stderr: "" });
+  await gh.pr.approve(PR_URL);
+  expect(args[0]).toEqual(["gh", "pr", "review", PR_URL, "--approve", "--body", BYLINE]);
 });
